@@ -10,12 +10,15 @@ from tasks.extractor import extractor
 from tasks.transformer import transformer
 from tasks.loader import loader
 
-# Добавим путь к коду проекта в переменную окружения, чтобы он был доступен python-процессу
+# Add the path to the project code to the environment variable
+# so that it is accessible to the python process.
 path = '/opt/airflow/'
 os.environ['PROJECT_PATH'] = path
-# Добавим путь к коду проекта в $PATH, чтобы импортировать функции
+
+# Add the path to the project code in $PATH to import the functions.
 sys.path.insert(0, path)
 
+# DAG configuration 
 args = {
     'owner': 'airflow',
     'start_date': dt.datetime(2021, 12, 31),
@@ -23,13 +26,14 @@ args = {
     'max_active_runs': 1
 }
 
+# Tsks configuration
 with DAG(
     dag_id='excel_processing_dag',
     schedule_interval=None,
     default_args=args,
 ) as dag:
 
-    # Извлечение данных
+    # Data extraction task
     extractor_task = PythonOperator(
         task_id='extract_data',
         python_callable=extractor,
@@ -38,7 +42,7 @@ with DAG(
         dag=dag,
     )
 
-    # Трансформация данных
+    # Data transformation task
     transformer_task = PythonOperator(
         task_id='transform_data',
         python_callable=transformer,
@@ -47,7 +51,7 @@ with DAG(
         dag=dag,
     )
 
-    # Загрузка данных в базу
+    # Uploading data to the database task
     loader_task = PythonOperator(
         task_id='load_data_into_db',
         python_callable=loader,
@@ -56,13 +60,17 @@ with DAG(
         dag=dag,
     )
 
-    # Удаление временного файла
+    # Deleting a temporary file
     def cleanup_temp_file(**context):
+        '''
+        Func deletes a temporary file
+        '''
         file_path = context['dag_run'].conf.get('file_path')
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
             print(f"Удалён временный файл: {file_path}")
 
+    # Deleting a temporary file task
     cleanup_task = PythonOperator(
         task_id='cleanup_temp_file',
         python_callable=cleanup_temp_file,
@@ -70,6 +78,5 @@ with DAG(
         dag=dag,
     )
 
-    # Порядок выполнения задач
+    # Task execution order
     extractor_task >> transformer_task >> loader_task >> cleanup_task
-

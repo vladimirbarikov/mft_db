@@ -131,4 +131,3 @@ def extractor(**context):
 
     # Push in XCom
     context['ti'].xcom_push(key='df_dict', value=df_dict)
-
