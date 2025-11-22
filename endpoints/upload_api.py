@@ -13,7 +13,7 @@ load_dotenv(dotenv_path=env_path)
 # Creatу a Flask application
 app = Flask(__name__)
 
-# Setting the secret key from the environment variable
+# Set the secret key from the environment variable
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
 
 @app.route('/upload-excel', methods=['POST'])
@@ -63,3 +63,4 @@ def upload_excel():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
