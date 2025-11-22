@@ -21,7 +21,7 @@ CREATE TYPE workshop_names AS ENUM ('Assembly', 'Component', 'Painting', 'Weldin
 
 -- Table supplier_data
 CREATE TABLE IF NOT EXISTS supplier_data (
-    SUPPLIER_ID VARCHAR(10) NOT NULL PRIMARY KEY,
+    SUPPLIER_ID VARCHAR(12) NOT NULL PRIMARY KEY,
     SUPPLIER_NAME VARCHAR(200),
     LOCATION VARCHAR(50),
     CITY VARCHAR(50),
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS supplier_data (
 
 -- Table part_data
 CREATE TABLE IF NOT EXISTS part_data (
-    PART_ID VARCHAR(10) NOT NULL PRIMARY KEY,
+    PART_ID VARCHAR(12) NOT NULL PRIMARY KEY,
     PART_NUMBER VARCHAR(50),
     PART_NAME VARCHAR(100),
     PART_WEIGHT_KG DECIMAL(5, 2),
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS part_data (
 
 -- Table box_data
 CREATE TABLE IF NOT EXISTS box_data (
-    BOX_ID VARCHAR(10) NOT NULL PRIMARY KEY,
+    BOX_ID VARCHAR(12) NOT NULL PRIMARY KEY,
     BOX_NUMBER VARCHAR(50),
     BOX_TYPE packaging_type,
     BOX_WEIGHT_KG DECIMAL(5, 2),
@@ -57,8 +57,8 @@ CREATE TABLE IF NOT EXISTS box_data (
 
 -- Link table part_to_box
 CREATE TABLE IF NOT EXISTS part_to_box (
-    PART_ID VARCHAR(10) NOT NULL,
-    BOX_ID VARCHAR(10) NOT NULL,
+    PART_ID VARCHAR(12) NOT NULL,
+    BOX_ID VARCHAR(12) NOT NULL,
     PART_PER_BOX INT,
     PRIMARY KEY (PART_ID, BOX_ID),
     FOREIGN KEY (PART_ID) REFERENCES part_data (PART_ID),
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS part_to_box (
 
 -- Table pallet_data
 CREATE TABLE IF NOT EXISTS pallet_data (
-    PALLET_ID VARCHAR(10) NOT NULL PRIMARY KEY,
+    PALLET_ID VARCHAR(12) NOT NULL PRIMARY KEY,
     PALLET_NUMBER VARCHAR(50),
     PALLET_TYPE packaging_type,
     PALLET_WEIGHT_KG DECIMAL(5, 2),
@@ -82,8 +82,8 @@ CREATE TABLE IF NOT EXISTS pallet_data (
 
 -- Link table box_to_pallet
 CREATE TABLE IF NOT EXISTS box_to_pallet (
-    BOX_ID VARCHAR(10) NOT NULL,
-    PALLET_ID VARCHAR(10) NOT NULL,
+    BOX_ID VARCHAR(12) NOT NULL,
+    PALLET_ID VARCHAR(12) NOT NULL,
     BOX_PER_PALLET SMALLINT,
     PRIMARY KEY (BOX_ID, PALLET_ID),
     FOREIGN KEY (BOX_ID) REFERENCES box_data (BOX_ID),
@@ -92,15 +92,15 @@ CREATE TABLE IF NOT EXISTS box_to_pallet (
 
 -- Table model_data
 CREATE TABLE IF NOT EXISTS model_data (
-    MODEL_ID VARCHAR(10) NOT NULL PRIMARY KEY,
+    MODEL_ID VARCHAR(12) NOT NULL PRIMARY KEY,
     MODEL_CODE model_codes,
     MODEL_NAME model_names
 );
 
 -- Link table part_to_model
 CREATE TABLE IF NOT EXISTS part_to_model (
-    PART_ID VARCHAR(10) NOT NULL,
-    MODEL_ID VARCHAR(10) NOT NULL,
+    PART_ID VARCHAR(12) NOT NULL,
+    MODEL_ID VARCHAR(12) NOT NULL,
     CONFIGURATION VARCHAR(20),
     PART_PER_VEHICLE SMALLINT,
     PRIMARY KEY (PART_ID, MODEL_ID),
@@ -110,14 +110,14 @@ CREATE TABLE IF NOT EXISTS part_to_model (
 
 -- Table workshop_data
 CREATE TABLE IF NOT EXISTS workshop_data (
-    WORKSHOP_ID VARCHAR(10) NOT NULL PRIMARY KEY,
+    WORKSHOP_ID VARCHAR(12) NOT NULL PRIMARY KEY,
     WORKSHOP_CODE workshop_codes,
     WORKSHOP_NAME workshop_names
 );
 
 -- Table line_data
 CREATE TABLE IF NOT EXISTS line_data (
-    LINE_ID VARCHAR(10) NOT NULL PRIMARY KEY,
+    LINE_ID VARCHAR(12) NOT NULL PRIMARY KEY,
     LINE_CODE VARCHAR(10),
     LINE_NAME VARCHAR(50),
     WORKSHOP_ID VARCHAR(10),
@@ -126,8 +126,8 @@ CREATE TABLE IF NOT EXISTS line_data (
 
 -- Link table part_to_line
 CREATE TABLE IF NOT EXISTS part_to_line (
-    PART_ID VARCHAR(10) NOT NULL,
-    LINE_ID VARCHAR(10) NOT NULL,
+    PART_ID VARCHAR(12) NOT NULL,
+    LINE_ID VARCHAR(12) NOT NULL,
     PRIMARY KEY (PART_ID, LINE_ID),
     FOREIGN KEY (PART_ID) REFERENCES part_data (PART_ID),
     FOREIGN KEY (LINE_ID) REFERENCES line_data (LINE_ID)
@@ -135,16 +135,16 @@ CREATE TABLE IF NOT EXISTS part_to_line (
 
 -- Table breakpoint_history
 CREATE TABLE IF NOT EXISTS breakpoint_history (
-    BREAKPOINT_ID VARCHAR(10) NOT NULL PRIMARY KEY,
+    BREAKPOINT_ID VARCHAR(12) NOT NULL PRIMARY KEY,
     INPUT_DATE TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    BREAKPOINT_NUMBER VARCHAR(50),
+    BREAKPOINT_NUMBER VARCHAR(10),
     BREAKPOINT_DATE TIMESTAMP WITH TIME ZONE,
-    OLD_PART_ID VARCHAR(10), -- link to the part before change
-    NEW_PART_ID VARCHAR(10), -- link to the part after change
-    OLD_LINE_ID VARCHAR(10), -- link to the line before change
-    NEW_LINE_ID VARCHAR(10), -- link to the line after change
-    OLD_SUPPLIER_ID VARCHAR(10), -- link to the supplier before change
-    NEW_SUPPLIER_ID VARCHAR(10), -- link to the supplier after change
+    OLD_PART_ID VARCHAR(12), -- link to the part before change
+    NEW_PART_ID VARCHAR(12), -- link to the part after change
+    OLD_LINE_ID VARCHAR(12), -- link to the line before change
+    NEW_LINE_ID VARCHAR(12), -- link to the line after change
+    OLD_SUPPLIER_ID VARCHAR(12), -- link to the supplier before change
+    NEW_SUPPLIER_ID VARCHAR(12), -- link to the supplier after change
     LOCALIZATION localization,
     FOREIGN KEY (OLD_PART_ID) REFERENCES part_data (PART_ID),
     FOREIGN KEY (NEW_PART_ID) REFERENCES part_data (PART_ID),
