@@ -10,7 +10,7 @@ current_directory = Path(__file__).resolve().parent.parent.parent
 env_path = current_directory / '.env'
 load_dotenv(dotenv_path=env_path)
 
-# Creatу a Flask application
+# Create a Flask application
 app = Flask(__name__)
 
 # Set the secret key from the environment variable
@@ -63,4 +63,5 @@ def upload_excel():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
