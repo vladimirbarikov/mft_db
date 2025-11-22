@@ -1,16 +1,16 @@
+import os
 import logging
 import pandas as pd
+from airflow.decorators import task
+
 
 # Logger setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def create_main_dataframe():
-    main_df = pd.read_excel()
-
 def create_supplier_dataframe(main_df):
     '''
-    Creation dataframe with data about supplier from main dataframe
+    Func creates dataframe with data about supplier from main dataframe
     '''
     supplier_df = main_df[
         [
@@ -26,7 +26,7 @@ def create_supplier_dataframe(main_df):
 
 def create_part_dataframe(main_df):
     '''
-    Creation dataframe with data about car parts from main dataframe
+    Func creates dataframe with data about car parts from main dataframe
     '''
     part_df = main_df[
         [
@@ -39,7 +39,7 @@ def create_part_dataframe(main_df):
 
 def create_box_dataframe(main_df):
     '''
-    Creation dataframe with data about boxes from main dataframe
+    Func creates dataframe with data about boxes from main dataframe
     '''
     box_df = main_df[
         [
@@ -58,7 +58,7 @@ def create_box_dataframe(main_df):
 
 def create_pallet_dataframe(main_df):
     '''
-    Creation dataframe with data about pallets from main dataframe
+    Func creates dataframe with data about pallets from main dataframe
     '''
     pallet_df = main_df[
         [
@@ -77,7 +77,7 @@ def create_pallet_dataframe(main_df):
 
 def create_model_dataframe(main_df):
     '''
-    Creation dataframe with data about car models from main dataframe
+    Func creates dataframe with data about car models from main dataframe
     '''
     model_df = main_df[
         [
@@ -89,7 +89,7 @@ def create_model_dataframe(main_df):
 
 def create_workshop_dataframe(main_df):
     '''
-    Creation dataframe with data about production workshops from main dataframe
+    Func creates dataframe with data about production workshops from main dataframe
     '''
     workshop_df = main_df[
         [
@@ -99,16 +99,25 @@ def create_workshop_dataframe(main_df):
     ].copy()
     return workshop_df
 
-def extractor(ti):
+@task(task_id="extractor_task")
+def extractor(**context):
     '''
-    The main function that transfers to the next step 
-    for data cleaning and transformation df_dict 
-    with dataframes with data of suppliers, parts, 
+    The main function that moves on to the next step
+    for data cleaning and transformation df_dict
+    with dataframes with data of suppliers, parts,
     boxes, part quantity per one box, pallets,
-    quantity boxes per one pallets, models, 
+    quantity boxes per one pallets, models,
     production workshops and lines.
     '''
-    main_df = create_main_dataframe()
+    # Получаем путь к файлу из конфигурации задачи
+    file_path = context["dag_run"].conf.get("file_path")
+
+    # Проверяем наличие файла
+    if not file_path or not os.path.exists(file_path):
+        raise ValueError("Файл не найден или отсутствует путь к файлу.")
+
+    # Обрабатываем файл Excel
+    main_df = pd.read_excel(file_path)
 
     df_dict = {
         'main_df': main_df,
@@ -120,4 +129,5 @@ def extractor(ti):
         'workshop_df': create_workshop_dataframe(main_df)
     }
 
-    ti.xcom_push(key='df_dict', value=df_dict)
+    # Push in XCom
+    context['ti'].xcom_push(key='df_dict', value=df_dict)
