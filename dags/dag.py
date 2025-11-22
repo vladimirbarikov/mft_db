@@ -25,7 +25,7 @@ args = {
 
 with DAG(
     dag_id='excel_processing_dag',
-    schedule_interval=None,  # Никаких регулярных запусков, только ручное исполнение
+    schedule_interval=None,
     default_args=args,
 ) as dag:
 
@@ -72,3 +72,4 @@ with DAG(
 
     # Порядок выполнения задач
     extractor_task >> transformer_task >> loader_task >> cleanup_task
+
