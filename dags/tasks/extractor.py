@@ -109,14 +109,14 @@ def extractor(**context):
     quantity boxes per one pallets, models,
     production workshops and lines.
     '''
-    # Получаем путь к файлу из конфигурации задачи
+    # Get the file path from the task configuration
     file_path = context["dag_run"].conf.get("file_path")
 
-    # Проверяем наличие файла
+    # Check the file availability
     if not file_path or not os.path.exists(file_path):
         raise ValueError("Файл не найден или отсутствует путь к файлу.")
 
-    # Обрабатываем файл Excel
+    # Read the excel file and create the main dataframe
     main_df = pd.read_excel(file_path)
 
     df_dict = {
@@ -131,3 +131,4 @@ def extractor(**context):
 
     # Push in XCom
     context['ti'].xcom_push(key='df_dict', value=df_dict)
+
