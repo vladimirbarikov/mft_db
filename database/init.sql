@@ -135,21 +135,19 @@ CREATE TABLE IF NOT EXISTS part_to_line (
 
 -- Table breakpoint_history
 CREATE TABLE IF NOT EXISTS breakpoint_history (
-    BREAKPOINT_ID VARCHAR(12) NOT NULL PRIMARY KEY,
+    BREAKPOINT_ID VARCHAR(12) PRIMARY KEY,
     INPUT_DATE TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     BREAKPOINT_NUMBER VARCHAR(10),
     BREAKPOINT_DATE TIMESTAMP WITH TIME ZONE,
-    OLD_PART_ID VARCHAR(12), -- link to the part before change
-    NEW_PART_ID VARCHAR(12), -- link to the part after change
-    OLD_LINE_ID VARCHAR(12), -- link to the line before change
-    NEW_LINE_ID VARCHAR(12), -- link to the line after change
-    OLD_SUPPLIER_ID VARCHAR(12), -- link to the supplier before change
-    NEW_SUPPLIER_ID VARCHAR(12), -- link to the supplier after change
+    OLD_PART_NUMBER VARCHAR(50), -- Old part number
+    NEW_PART_ID VARCHAR(12), -- Reference to new part
+    OLD_SUPPLIER_NAME VARCHAR(200), -- Old supplier name
+    NEW_SUPPLIER_ID VARCHAR(12), -- Reference to new supplier
+    OLD_LINE_CODE VARCHAR(10), -- Old line code
+    OLD_LINE_NAME VARCHAR(50), -- Old line name
+    NEW_LINE_ID VARCHAR(12), -- Reference to new line
     LOCALIZATION localization,
-    FOREIGN KEY (OLD_PART_ID) REFERENCES part_data (PART_ID),
     FOREIGN KEY (NEW_PART_ID) REFERENCES part_data (PART_ID),
-    FOREIGN KEY (OLD_LINE_ID) REFERENCES line_data (LINE_ID),
-    FOREIGN KEY (NEW_LINE_ID) REFERENCES line_data (LINE_ID),
-    FOREIGN KEY (OLD_SUPPLIER_ID) REFERENCES supplier_data (SUPPLIER_ID),
-    FOREIGN KEY (NEW_SUPPLIER_ID) REFERENCES supplier_data (SUPPLIER_ID)
+    FOREIGN KEY (NEW_SUPPLIER_ID) REFERENCES supplier_data (SUPPLIER_ID),
+    FOREIGN KEY (NEW_LINE_ID) REFERENCES line_data (LINE_ID)
 );
