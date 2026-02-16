@@ -196,7 +196,7 @@ services:
     networks:
       - mft_airflow_network
   
-  postgres_exporter_airflow:
+  postgres-exporter-airflow:
     image: prometheuscommunity/postgres-exporter:v0.16.0
     container_name: postgres_exporter_airflow
     restart: unless-stopped
@@ -223,7 +223,7 @@ services:
     networks:
       - mft_airflow_network
   
-  postgres_exporter_mft:
+  postgres-exporter-mft:
     image: prometheuscommunity/postgres-exporter:v0.16.0
     container_name: postgres_exporter_mft
     restart: unless-stopped
@@ -249,6 +249,27 @@ services:
       start_period: 30s
     networks:
       - mft_airflow_network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.68.0
+    container_name: redis_exporter
+    restart: unless-stopped
+    environment:
+      - REDIS_ADDR=redis:6379
+      # - REDIS_PASSWORD=${REDIS_PASSWORD}  # uncomment if the password would be added in .env
+    ports:
+      - "9121:9121"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - mft_airflow_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9121/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   airflow-webserver:
     <<: *airflow-common
