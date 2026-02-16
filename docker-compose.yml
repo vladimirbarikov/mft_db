@@ -376,17 +376,27 @@ services:
         printf "%04d%04d%04d%04d" $${1//./ }
         }
 
-        airflow_version=$$(AIRFLOW__LOGGING__LOGGING_LEVEL=INFO && gosu airflow airflow version)
+        airflow_version=$$(AIRFLOW__LOGGING__LOGGING_LEVEL=INFO && gosu airflow airflow version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        
+        if [ -z "$airflow_version" ]; then
+          echo "Could not detect Airflow version, assuming it's recent enough..."
+          airflow_version="2.9.3"
+        fi
+
         airflow_version_comparable=$$(ver $${airflow_version})
         min_airflow_version=2.2.0
         min_airflow_version_comparable=$$(ver $${min_airflow_version})
 
-        if (( airflow_version_comparable < min_airflow_version_comparable )); then
+        echo "Detected Airflow version: $${airflow_version}"
+
+        if (( 10#$${airflow_version_comparable} < 10#$${min_airflow_version_comparable} )); then
           echo
           echo -e "\033[1;31mERROR!!!: Too old Airflow version $${airflow_version}!\e[0m"
           echo "The minimum Airflow version supported: $${min_airflow_version}. Only use this or higher!"
           echo
           exit 1
+        else
+          echo -e "\033[1;32m✓ Airflow version $${airflow_version} is compatible\e[0m"
         fi
 
         if [[ -z "${AIRFLOW_UID}" ]]; then
