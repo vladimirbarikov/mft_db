@@ -189,7 +189,7 @@ class TimeBasedFilter(logging.Filter):
         moscow_time = datetime.now(self.moscow_tz)
         current_hour = moscow_time.hour
 
-        # DAG starts at 3:00 p.m., we give you a interval of 2 hours to complete
+        # DAG starts at 3:00 a.m., we give you a interval of 2 hours to complete
         dag_start_hour = 3
         log_end_hour = dag_start_hour + self.log_window_hours
 
