@@ -120,11 +120,13 @@ services:
     volumes:
       - mft_db_volume:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready", "-U", "${DB_USER:-mft_user}"]
+      test: ["CMD", "pg_isready", "-U", "${DB_USER:-mft_user}"]
       interval: 30s
       retries: 10
       start_period: 60s
     restart: always
+    networks:
+      - mft_airflow_network
 
   airflow-webserver:
     <<: *airflow-common
