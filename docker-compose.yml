@@ -29,6 +29,9 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__EMIT_POOL_STARVATION_METRICS: 'true'
     AIRFLOW__METRICS__DAG_FILE_PROCESSING_TIMES: 'true'
     AIRFLOW__CELERY__WORKER_HEARTBEAT_INTERVAL: 10
+    # Time zone settings (Moscow Time)
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: 'Europe/Moscow'
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: 'Europe/Moscow'
     # Connecting to mft_db database
     MFT_DB_HOST: ${DB_HOST:-db}
     MFT_DB_PORT: ${DB_PORT:-5432}
