@@ -51,7 +51,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
-    # - ./endpoints:/opt/airflow/endpoints - will be mounted after all endpoints are written
+    # - ${AIRFLOW_PROJ_DIR:-.}/endpoints:/opt/airflow/endpoints will be mounted after all endpoints are written
   user: "${AIRFLOW_UID:-1000}:${AIRFLOW_GID:-0}"
   depends_on:
     &airflow-common-depends-on
@@ -70,13 +70,16 @@ services:
       POSTGRES_USER: ${AIRFLOW_USER:-airflow}
       POSTGRES_PASSWORD: ${AIRFLOW_PASSWORD:-airflow}
       POSTGRES_DB: ${AIRFLOW_DB:-airflow}
+      TZ: 'Europe/Moscow'
     volumes:
       - airflow_db_volume:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
+      test: ["CMD", "pg_isready", "-U", "${AIRFLOW_USER:-airflow}"]
       interval: 10s
       retries: 5
       start_period: 5s
+    networks:
+      - mft_airflow_network
 
   redis:
     image: redis:latest
