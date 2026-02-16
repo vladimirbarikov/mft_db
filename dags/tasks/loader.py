@@ -80,8 +80,8 @@ def disable_foreign_keys(engine: Engine) -> None:
 
     except SQLAlchemyError as e:
         logger.warning("Could not disable foreign keys due to SQLAlchemy error: %s", e)
-    except Exception as e:
-        logger.warning("Unexpected error while disabling foreign keys: %s", e)
+    except Exception as unexpected_error:
+        logger.warning("Unexpected error while disabling foreign keys: %s", unexpected_error)
 
 
 def enable_foreign_keys(engine: Engine) -> None:
@@ -217,8 +217,8 @@ def _bulk_insert_dataframe(
                     return len(records)
             except (IntegrityError, DataError, ProgrammingError) as e2:
                 logger.error("Regular insert failed for %s: %s", table_name, e2)
-            except Exception as e2:
-                logger.error("Unexpected error during regular insert for %s: %s", table_name, e2)
+            except Exception as unexpected_error:
+                logger.error("Unexpected error during regular insert for %s: %s", table_name, unexpected_error)
 
         return 0
 
@@ -226,8 +226,8 @@ def _bulk_insert_dataframe(
         logger.error("SQLAlchemy error loading %s: %s", table_name, e)
         return 0
 
-    except Exception as e:
-        logger.error("Unexpected error loading %s: %s", table_name, e)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error loading %s: %s", table_name, unexpected_error)
         logger.debug(traceback.format_exc())
         return 0
 
@@ -333,8 +333,8 @@ def _process_dependent_entity_with_mapper(
         logger.error("SQLAlchemy error for %s: %s", table_name, e)
         logger.debug(traceback.format_exc())
         return 0
-    except Exception as e:
-        logger.error("Unexpected error processing %s with mapper: %s", table_name, e)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error processing %s with mapper: %s", table_name, unexpected_error)
         logger.debug(traceback.format_exc())
         return 0
 
@@ -464,8 +464,8 @@ def load_core_entity_tables(
                 logger.error("Database error creating mapper: %s", e)
                 logger.warning("Skipping dependent tables due to mapper creation failure!")
                 return results
-            except Exception as e:
-                logger.error("Unexpected error creating mapper: %s", e)
+            except Exception as unexpected_error:
+                logger.error("Unexpected error creating mapper: %s", unexpected_error)
                 logger.warning("Skipping dependent tables due to mapper creation failure!")
                 return results
 
@@ -519,8 +519,8 @@ def load_core_entity_tables(
             enable_foreign_keys(engine)
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
-        except Exception as fk_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
         return {}
 
@@ -534,13 +534,13 @@ def load_core_entity_tables(
             enable_foreign_keys(engine)
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
-        except Exception as fk_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
         return {}
 
-    except Exception as e:
-        logger.error("Unexpected error loading entity tables: %s", e)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error loading entity tables: %s", unexpected_error)
         logger.debug(traceback.format_exc())
 
         # Always re-enable foreign keys on error
@@ -549,8 +549,8 @@ def load_core_entity_tables(
             enable_foreign_keys(engine)
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
-        except Exception as fk_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
         return {}
 
@@ -676,8 +676,8 @@ def _prepare_junction_dataframes(
             logger.error("Data processing error mapping junction records for %s: %s", df_key, e)
             logger.debug(traceback.format_exc())
             continue
-        except Exception as e:
-            logger.error("Unexpected error mapping junction records for %s: %s", df_key, e)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error mapping junction records for %s: %s", df_key, unexpected_error)
             logger.debug(traceback.format_exc())
             continue
 
@@ -734,9 +734,9 @@ def load_junction_tables(
                 except (SQLAlchemyError, ProgrammingError) as e:
                     missing_tables.append(table_name)
                     logger.debug("Error checking table %s: %s", table_name, e)
-                except Exception as e:
+                except Exception as unexpected_error:
                     missing_tables.append(table_name)
-                    logger.debug("Unexpected error checking table %s: %s", table_name, e)
+                    logger.debug("Unexpected error checking table %s: %s", table_name, unexpected_error)
 
             if missing_tables:
                 logger.error(
@@ -749,8 +749,8 @@ def load_junction_tables(
     except (SQLAlchemyError, ProgrammingError) as check_error:
         logger.error("Database error checking entity table status: %s", check_error)
         return {}
-    except Exception as check_error:
-        logger.error("Unexpected error checking entity table status: %s", check_error)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error checking entity table status: %s", unexpected_error)
         return {}
 
     # Create mapper
@@ -762,8 +762,8 @@ def load_junction_tables(
     except (SQLAlchemyError, ProgrammingError) as e:
         logger.error("Database error creating mapper: %s", e)
         return {}
-    except Exception as e:
-        logger.error("Unexpected error creating mapper: %s", e)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error creating mapper: %s", unexpected_error)
         return {}
 
     # Pre-load all mappings for performance
@@ -792,8 +792,8 @@ def load_junction_tables(
             except (SQLAlchemyError, ProgrammingError) as e:
                 logger.error("Database error loading mapping for %s: %s", name, e)
                 empty_mappings.append(name)
-            except Exception as e:
-                logger.error("Unexpected error loading mapping for %s: %s", name, e)
+            except Exception as unexpected_error:
+                logger.error("Unexpected error loading mapping for %s: %s", name, unexpected_error)
                 empty_mappings.append(name)
 
         if empty_mappings:
@@ -804,8 +804,8 @@ def load_junction_tables(
 
         mapper.log_mapping_statistics()
 
-    except Exception as e:
-        logger.error("Failed to load mappings: %s", e)
+    except Exception as unexpected_error:
+        logger.error("Failed to load mappings: %s", unexpected_error)
         if mapper:
             mapper.clear_cache()
         return {}
@@ -856,8 +856,8 @@ def load_junction_tables(
             enable_foreign_keys(engine)
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
-        except Exception as fk_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
         return {}
 
@@ -871,13 +871,13 @@ def load_junction_tables(
             enable_foreign_keys(engine)
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
-        except Exception as fk_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
         return {}
 
-    except Exception as e:
-        logger.error("Unexpected error loading junction tables: %s", e)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error loading junction tables: %s", unexpected_error)
         logger.debug(traceback.format_exc())
 
         # Always try to re-enable foreign keys
@@ -886,8 +886,8 @@ def load_junction_tables(
             enable_foreign_keys(engine)
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
-        except Exception as fk_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
         return {}
 

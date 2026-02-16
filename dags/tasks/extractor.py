@@ -143,8 +143,8 @@ def create_main_df(f_path: str | Path) -> pl.DataFrame:
         logger.error("Error processing data: %s", e)
         raise
 
-    except Exception as e:
-        logger.error("Unexpected error reading file: %s", e)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error reading file: %s", unexpected_error)
         raise
 
     logger.info("=" * 60)
@@ -224,7 +224,7 @@ def create_specialized_df(
         # Expected errors have already been logged
         raise
 
-    except Exception as e:
+    except Exception as unexpected_error:
         # Catch unexpected errors
-        logger.error("Unexpected error creating supplier dataframe: %s", e)
+        logger.error("Unexpected error creating supplier dataframe: %s", unexpected_error)
         raise

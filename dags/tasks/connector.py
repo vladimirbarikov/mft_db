@@ -166,10 +166,10 @@ except (PermissionError, ValueError, UnicodeDecodeError) as e:
     logger.critical("Corrupted .env file: %s", e)
     raise RuntimeError("Invalid .env file") from e
 
-except Exception as e:
+except Exception as unexpected_error:
     # Unexpected error
-    logger.critical("Unexpected error: %s", e, exc_info=True)
-    raise RuntimeError("Environment setup failed") from e
+    logger.critical("Unexpected error: %s", unexpected_error, exc_info=True)
+    raise RuntimeError("Environment setup failed") from unexpected_error
 
 def make_models_checker()-> Tuple[
     Callable[[], bool],
@@ -230,8 +230,8 @@ def make_models_checker()-> Tuple[
             logger.warning("Database models incomplete: %s", e)
             _base = None
             return False
-        except Exception as e:
-            logger.error("Unexpected error importing database models: %s", e)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error importing database models: %s", unexpected_error)
             return False
 
     def get_base()-> Optional[Type[Any]]:
@@ -468,10 +468,10 @@ def ensure_database_exists():
         logger.error("Permission denied: %s", e)
         raise PermissionError(f"Insufficient permissions to create database: {e}") from e
 
-    except Exception as e:
+    except Exception as unexpected_error:
         # Catch-all for unexpected errors
-        logger.critical("Unexpected error ensuring database exists: %s", e, exc_info=True)
-        raise RuntimeError(f"Unexpected error during database setup: {e}") from e
+        logger.critical("Unexpected error ensuring database exists: %s", unexpected_error, exc_info=True)
+        raise RuntimeError(f"Unexpected error during database setup: {unexpected_error}") from unexpected_error
 
 def create_database_tables(
         engine: Engine
@@ -540,9 +540,9 @@ def create_database_tables(
     except SQLAlchemyError as e:
         logger.error("SQLAlchemy error creating tables: %s", e, exc_info=True)
         raise RuntimeError(f"SQLAlchemy error during table creation: {e}") from e
-    except Exception as e:
-        logger.error("Unexpected error during table verification: %s", e, exc_info=True)
-        raise RuntimeError(f"Failed to verify database tables: {e}") from e
+    except Exception as unexpected_error:
+        logger.error("Unexpected error during table verification: %s", unexpected_error, exc_info=True)
+        raise RuntimeError(f"Failed to verify database tables: {unexpected_error}") from unexpected_error
 
 def check_database_health(
         engine: Engine
@@ -706,8 +706,8 @@ def connect_to_database(
                 time.sleep(retry_delay)
             else:
                 raise
-        except Exception as e:
-            logger.error("Unexpected error: %s", e)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error: %s", unexpected_error)
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
             else:
@@ -843,8 +843,8 @@ def initialize_database(
         return engine
 
     except ConnectionError as e:
-        logger.error("CRITICAL CONNECTION ERROR: %s", e)
+        logger.error("Critical connection error: %s", e)
         return None
-    except Exception as e:
-        logger.error("UNEXPECTED ERROR: %s", e, exc_info=True)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error: %s", unexpected_error, exc_info=True)
         return None
