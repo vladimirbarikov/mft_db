@@ -4,6 +4,8 @@ x-airflow-common:
   build:
     context: ./dockerfiles
     dockerfile: Dockerfile
+  networks:
+    - mft_airflow_network
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
