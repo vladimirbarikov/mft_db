@@ -39,7 +39,7 @@ Log directories created:
         - api_logs/         : API endpoint logs (INFO+)
         - database_logs/    : Database-related operations (INFO+)
         - json_logs/        : JSON-formatted logs for analysis (INFO+)
-        - error_logs/       : ALL ERROR-ONLY logs (ERROR and above from ALL sources)
+        - error_logs/       : Centralized error logs - ALL ERROR and CRITICAL messages from ALL sources
 
 Configuration features:
     - Console output: INFO+ to stdout, WARNING+ to stderr
