@@ -450,7 +450,46 @@ services:
 
         mkdir -p /sources/logs /sources/dags /sources/plugins
         chown -R "${AIRFLOW_UID:-1000}:0" /sources/{logs,dags,plugins}
-        exec /entrypoint airflow version
+
+        echo "Running Airflow initialization..."
+        /entrypoint airflow version
+
+        echo "Waiting for database to be ready..."
+
+        for i in {1..30}; do
+          if airflow db check 2>/dev/null; then
+            echo "Database is ready!"
+            break
+          fi
+          echo "Waiting for database... ($$i/30)"
+          sleep 5
+        done
+
+        if ! airflow db check 2>/dev/null; then
+          echo "ERROR: Database is still not ready after 150 seconds!"
+          exit 1
+        fi
+
+        echo "Initializing database..."
+        airflow db migrate
+
+        echo "Creating admin user..."
+        airflow users create \
+          --username admin \
+          --firstname admin \
+          --lastname admin \
+          --role Admin \
+          --email admin@example.com \
+          --password airflow 2>/dev/null || true
+
+        echo "Enabling mft_etl_pipeline DAG..."
+        airflow dags unpause mft_etl_pipeline 2>/dev/null || true
+
+        echo "Enabling ALL DAGs as fallback..."
+        airflow dags unpause --all 2>/dev/null || true
+
+        echo -e "\033[1;32m✓ Airflow initialization completed successfully!\e[0m"
+
     environment:
       <<: *airflow-common-env
       _AIRFLOW_DB_MIGRATE: 'true'
