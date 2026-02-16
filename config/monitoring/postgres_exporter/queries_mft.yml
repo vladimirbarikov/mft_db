@@ -1,0 +1,1244 @@
+# PostgreSQL Exporter queries for Material Flow Database
+# Based on database.py schema - Automotive production parts tracking
+# Version: 1.1.0
+# Date: 2026-02-14
+
+# ============================================
+# MASTER DATA ENTITY COUNTERS
+# ============================================
+
+mft_suppliers_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM supplier_data
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total number of registered suppliers"
+
+mft_parts_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM part_data
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total number of unique part numbers"
+
+mft_active_parts_total:
+  query: |
+    SELECT COUNT(DISTINCT part_id) AS count
+    FROM part_to_breakpoint
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of parts with active engineering change history"
+
+mft_boxes_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM box_data
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total number of registered box numbers"
+
+mft_pallets_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pallet_data
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total number of registered pallet numbers"
+
+mft_models_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM model_data
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total number of vehicle models"
+
+mft_workshops_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM workshop_data
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total number of production workshops"
+
+mft_lines_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM line_data
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total number of production lines"
+
+mft_breakpoints_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM breakpoint_data
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total number of engineering breakpoints"
+
+# ============================================
+# RELATIONSHIP INTEGRITY METRICS
+# ============================================
+
+mft_parts_without_box:
+  query: |
+    SELECT COUNT(DISTINCT p.part_id) AS count
+    FROM part_data p
+    LEFT JOIN part_to_box pb ON p.part_id = pb.part_id
+    WHERE pb.box_id IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Parts not assigned to any packaging box"
+
+mft_parts_without_model:
+  query: |
+    SELECT COUNT(DISTINCT p.part_id) AS count
+    FROM part_data p
+    LEFT JOIN part_to_model pm ON p.part_id = pm.part_id
+    WHERE pm.model_id IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Parts not assigned to any vehicle model"
+
+mft_parts_without_line:
+  query: |
+    SELECT COUNT(DISTINCT p.part_id) AS count
+    FROM part_data p
+    LEFT JOIN part_to_line pl ON p.part_id = pl.part_id
+    WHERE pl.line_id IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Parts not assigned to any production line"
+
+mft_boxes_without_pallet:
+  query: |
+    SELECT COUNT(DISTINCT b.box_id) AS count
+    FROM box_data b
+    LEFT JOIN box_to_pallet bp ON b.box_id = bp.box_id
+    WHERE bp.pallet_id IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Boxes not assigned to any pallet"
+
+mft_boxes_without_parts:
+  query: |
+    SELECT COUNT(DISTINCT b.box_id) AS count
+    FROM box_data b
+    LEFT JOIN part_to_box pb ON b.box_id = pb.box_id
+    WHERE pb.part_id IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Boxes not used by any part"
+
+mft_models_without_parts:
+  query: |
+    SELECT COUNT(DISTINCT m.model_id) AS count
+    FROM model_data m
+    LEFT JOIN part_to_model pm ON m.model_id = pm.model_id
+    WHERE pm.part_id IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Vehicle models with no assigned parts"
+
+mft_lines_without_parts:
+  query: |
+    SELECT COUNT(DISTINCT l.line_id) AS count
+    FROM line_data l
+    LEFT JOIN part_to_line pl ON l.line_id = pl.line_id
+    WHERE pl.part_id IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Production lines with no assigned parts"
+
+mft_suppliers_without_parts:
+  query: |
+    SELECT COUNT(DISTINCT s.supplier_id) AS count
+    FROM supplier_data s
+    LEFT JOIN part_data p ON s.supplier_id = p.supplier_id
+    WHERE p.part_id IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Suppliers with no parts registered"
+
+mft_parts_per_box_avg:
+  query: |
+    SELECT COALESCE(AVG(part_per_box), 0) AS avg
+    FROM part_to_box
+  master: true
+  metrics:
+    - avg:
+        usage: "GAUGE"
+        description: "Average number of parts per box"
+
+mft_boxes_per_pallet_avg:
+  query: |
+    SELECT COALESCE(AVG(box_per_pallet), 0) AS avg
+    FROM box_to_pallet
+  master: true
+  metrics:
+    - avg:
+        usage: "GAUGE"
+        description: "Average number of boxes per pallet"
+
+mft_parts_per_vehicle_avg:
+  query: |
+    SELECT COALESCE(AVG(part_per_vehicle), 0) AS avg
+    FROM part_to_model
+  master: true
+  metrics:
+    - avg:
+        usage: "GAUGE"
+        description: "Average number of parts per vehicle model"
+
+mft_parts_per_box_max:
+  query: |
+    SELECT COALESCE(MAX(part_per_box), 0) AS max
+    FROM part_to_box
+  master: true
+  metrics:
+    - max:
+        usage: "GAUGE"
+        description: "Maximum parts per single box configuration"
+
+mft_parts_per_box_min:
+  query: |
+    SELECT COALESCE(MIN(part_per_box), 0) AS min
+    FROM part_to_box
+    WHERE part_per_box > 0
+  master: true
+  metrics:
+    - min:
+        usage: "GAUGE"
+        description: "Minimum parts per single box configuration (positive values only)"
+
+# ============================================
+# DIRECT SUPPLIER LOCALIZATION METRICS
+# ============================================
+
+mft_suppliers_local_yes:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM supplier_data
+    WHERE localization = 'yes'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of local suppliers"
+
+mft_suppliers_local_no:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM supplier_data
+    WHERE localization = 'no'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of foreign suppliers"
+
+# ============================================
+# DIRECT BOX TYPE METRICS
+# ============================================
+
+mft_boxes_returnable:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM box_data
+    WHERE box_type = 'returnable'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of returnable boxes"
+
+mft_boxes_non_returnable:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM box_data
+    WHERE box_type = 'non-returnable'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of non-returnable boxes"
+
+# ============================================
+# DIRECT PALLET TYPE METRICS
+# ============================================
+
+mft_pallets_returnable:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pallet_data
+    WHERE pallet_type = 'returnable'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of returnable pallets"
+
+mft_pallets_non_returnable:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pallet_data
+    WHERE pallet_type = 'non-returnable'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of non-returnable pallets"
+
+# ============================================
+# DETAILED PARTS PER BOX METRICS
+# ============================================
+
+mft_parts_per_box_detail:
+  query: |
+    SELECT 
+      box_id,
+      part_id,
+      part_per_box
+    FROM part_to_box
+    WHERE part_per_box IS NOT NULL
+  master: true
+  metrics:
+    - box_id:
+        usage: "LABEL"
+        description: "Box identifier"
+    - part_id:
+        usage: "LABEL"
+        description: "Part identifier"
+    - part_per_box:
+        usage: "GAUGE"
+        description: "Number of parts per box"
+
+# ============================================
+# DISTRIBUTION BY ENUM TYPES (MULTI-ROW)
+# ============================================
+
+mft_suppliers_by_localization:
+  query: |
+    SELECT 
+      localization::text AS localization,
+      COUNT(*) AS count
+    FROM supplier_data 
+    WHERE localization IS NOT NULL
+    GROUP BY localization
+    ORDER BY localization
+  master: true
+  metrics:
+    - localization:
+        usage: "LABEL"
+        description: "Supplier localization (yes=local, no=foreign)"
+    - count:
+        usage: "GAUGE"
+        description: "Number of suppliers by localization"
+
+mft_boxes_by_type:
+  query: |
+    SELECT 
+      box_type::text AS box_type,
+      COUNT(*) AS count
+    FROM box_data 
+    WHERE box_type IS NOT NULL
+    GROUP BY box_type
+    ORDER BY box_type
+  master: true
+  metrics:
+    - box_type:
+        usage: "LABEL"
+        description: "Box type (returnable, non-returnable)"
+    - count:
+        usage: "GAUGE"
+        description: "Number of boxes by type"
+
+mft_pallets_by_type:
+  query: |
+    SELECT 
+      pallet_type::text AS pallet_type,
+      COUNT(*) AS count
+    FROM pallet_data 
+    WHERE pallet_type IS NOT NULL
+    GROUP BY pallet_type
+    ORDER BY pallet_type
+  master: true
+  metrics:
+    - pallet_type:
+        usage: "LABEL"
+        description: "Pallet type (returnable, non-returnable)"
+    - count:
+        usage: "GAUGE"
+        description: "Number of pallets by type"
+
+mft_models_by_code:
+  query: |
+    SELECT 
+      model_code::text AS model_code,
+      COUNT(*) AS count
+    FROM model_data 
+    WHERE model_code IS NOT NULL
+    GROUP BY model_code
+    ORDER BY model_code
+  master: true
+  metrics:
+    - model_code:
+        usage: "LABEL"
+        description: "Vehicle model code"
+    - count:
+        usage: "GAUGE"
+        description: "Number of models by platform code"
+
+mft_workshops_by_code:
+  query: |
+    SELECT 
+      workshop_code::text AS workshop_code,
+      COUNT(*) AS count
+    FROM workshop_data 
+    WHERE workshop_code IS NOT NULL
+    GROUP BY workshop_code
+    ORDER BY workshop_code
+  master: true
+  metrics:
+    - workshop_code:
+        usage: "LABEL"
+        description: "Workshop code"
+    - count:
+        usage: "GAUGE"
+        description: "Number of workshops by code"
+
+mft_parts_by_workshop:
+  query: |
+    SELECT 
+      w.workshop_code::text AS workshop_code,
+      COUNT(DISTINCT pl.part_id) AS count
+    FROM workshop_data w
+    LEFT JOIN line_data l ON w.workshop_id = l.workshop_id
+    LEFT JOIN part_to_line pl ON l.line_id = pl.line_id
+    WHERE w.workshop_code IS NOT NULL
+    GROUP BY w.workshop_code
+    ORDER BY w.workshop_code
+  master: true
+  metrics:
+    - workshop_code:
+        usage: "LABEL"
+        description: "Workshop code"
+    - count:
+        usage: "GAUGE"
+        description: "Number of unique parts assigned to workshop"
+
+mft_parts_by_model:
+  query: |
+    SELECT 
+      m.model_code::text AS model_code,
+      COUNT(DISTINCT pm.part_id) AS count
+    FROM model_data m
+    LEFT JOIN part_to_model pm ON m.model_id = pm.model_id
+    WHERE m.model_code IS NOT NULL
+    GROUP BY m.model_code
+    ORDER BY m.model_code
+  master: true
+  metrics:
+    - model_code:
+        usage: "LABEL"
+        description: "Vehicle model code"
+    - count:
+        usage: "GAUGE"
+        description: "Number of unique parts used in model"
+
+mft_parts_by_supplier_localization:
+  query: |
+    SELECT 
+      s.localization::text AS localization,
+      COUNT(p.part_id) AS count
+    FROM part_data p
+    LEFT JOIN supplier_data s ON p.supplier_id = s.supplier_id
+    WHERE s.localization IS NOT NULL
+    GROUP BY s.localization
+    ORDER BY s.localization
+  master: true
+  metrics:
+    - localization:
+        usage: "LABEL"
+        description: "Supplier localization (yes=local, no=foreign)"
+    - count:
+        usage: "GAUGE"
+        description: "Number of parts by supplier localization"
+
+mft_parts_by_box_type:
+  query: |
+    SELECT 
+      b.box_type::text AS box_type,
+      COUNT(pb.part_id) AS count
+    FROM box_data b
+    LEFT JOIN part_to_box pb ON b.box_id = pb.box_id
+    WHERE b.box_type IS NOT NULL
+    GROUP BY b.box_type
+    ORDER BY b.box_type
+  master: true
+  metrics:
+    - box_type:
+        usage: "LABEL"
+        description: "Box type (returnable, non-returnable)"
+    - count:
+        usage: "GAUGE"
+        description: "Number of parts using each box type"
+
+mft_lines_by_workshop:
+  query: |
+    SELECT 
+      w.workshop_code::text AS workshop_code,
+      COUNT(l.line_id) AS count
+    FROM workshop_data w
+    LEFT JOIN line_data l ON w.workshop_id = l.workshop_id
+    WHERE w.workshop_code IS NOT NULL
+    GROUP BY w.workshop_code
+    ORDER BY w.workshop_code
+  master: true
+  metrics:
+    - workshop_code:
+        usage: "LABEL"
+        description: "Workshop code"
+    - count:
+        usage: "GAUGE"
+        description: "Number of production lines per workshop"
+
+# ============================================
+# PHYSICAL CHARACTERISTICS STATISTICS
+# ============================================
+
+mft_part_weight_min:
+  query: |
+    SELECT MIN(part_weight_kg) AS min
+    FROM part_data
+    WHERE part_weight_kg IS NOT NULL AND part_weight_kg > 0
+  master: true
+  metrics:
+    - min:
+        usage: "GAUGE"
+        description: "Minimum part weight (kg)"
+
+mft_part_weight_max:
+  query: |
+    SELECT MAX(part_weight_kg) AS max
+    FROM part_data
+    WHERE part_weight_kg IS NOT NULL AND part_weight_kg > 0
+  master: true
+  metrics:
+    - max:
+        usage: "GAUGE"
+        description: "Maximum part weight (kg)"
+
+mft_part_weight_avg:
+  query: |
+    SELECT AVG(part_weight_kg) AS avg
+    FROM part_data
+    WHERE part_weight_kg IS NOT NULL AND part_weight_kg > 0
+  master: true
+  metrics:
+    - avg:
+        usage: "GAUGE"
+        description: "Average part weight (kg)"
+
+mft_part_weight_stddev:
+  query: |
+    SELECT STDDEV(part_weight_kg) AS stddev
+    FROM part_data
+    WHERE part_weight_kg IS NOT NULL AND part_weight_kg > 0
+  master: true
+  metrics:
+    - stddev:
+        usage: "GAUGE"
+        description: "Standard deviation of part weights"
+
+mft_parts_with_weight_total:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM part_data
+    WHERE part_weight_kg IS NOT NULL AND part_weight_kg > 0
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of parts with valid weight"
+
+mft_box_dimensions_avg:
+  query: |
+    SELECT 
+      'length' AS dimension,
+      AVG(box_length_mm) AS value
+    FROM box_data
+    WHERE box_length_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'width' AS dimension,
+      AVG(box_width_mm) AS value
+    FROM box_data
+    WHERE box_width_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'height' AS dimension,
+      AVG(box_height_mm) AS value
+    FROM box_data
+    WHERE box_height_mm IS NOT NULL
+  master: true
+  metrics:
+    - dimension:
+        usage: "LABEL"
+        description: "Box dimension type (length, width, height)"
+    - value:
+        usage: "GAUGE"
+        description: "Average box dimension (mm)"
+
+mft_box_dimensions_minmax:
+  query: |
+    SELECT 
+      'length_min' AS stat,
+      MIN(box_length_mm) AS value
+    FROM box_data
+    WHERE box_length_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'length_max' AS stat,
+      MAX(box_length_mm) AS value
+    FROM box_data
+    WHERE box_length_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'width_min' AS stat,
+      MIN(box_width_mm) AS value
+    FROM box_data
+    WHERE box_width_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'width_max' AS stat,
+      MAX(box_width_mm) AS value
+    FROM box_data
+    WHERE box_width_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'height_min' AS stat,
+      MIN(box_height_mm) AS value
+    FROM box_data
+    WHERE box_height_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'height_max' AS stat,
+      MAX(box_height_mm) AS value
+    FROM box_data
+    WHERE box_height_mm IS NOT NULL
+  master: true
+  metrics:
+    - stat:
+        usage: "LABEL"
+        description: "Statistics type"
+    - value:
+        usage: "GAUGE"
+        description: "Box dimension min/max (mm)"
+
+mft_pallet_dimensions_avg:
+  query: |
+    SELECT 
+      'length' AS dimension,
+      AVG(pallet_length_mm) AS value
+    FROM pallet_data
+    WHERE pallet_length_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'width' AS dimension,
+      AVG(pallet_width_mm) AS value
+    FROM pallet_data
+    WHERE pallet_width_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'height' AS dimension,
+      AVG(pallet_height_mm) AS value
+    FROM pallet_data
+    WHERE pallet_height_mm IS NOT NULL
+  master: true
+  metrics:
+    - dimension:
+        usage: "LABEL"
+        description: "Pallet dimension type (length, width, height)"
+    - value:
+        usage: "GAUGE"
+        description: "Average pallet dimension (mm)"
+
+mft_pallet_dimensions_minmax:
+  query: |
+    SELECT 
+      'length_min' AS stat,
+      MIN(pallet_length_mm) AS value
+    FROM pallet_data
+    WHERE pallet_length_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'length_max' AS stat,
+      MAX(pallet_length_mm) AS value
+    FROM pallet_data
+    WHERE pallet_length_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'width_min' AS stat,
+      MIN(pallet_width_mm) AS value
+    FROM pallet_data
+    WHERE pallet_width_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'width_max' AS stat,
+      MAX(pallet_width_mm) AS value
+    FROM pallet_data
+    WHERE pallet_width_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'height_min' AS stat,
+      MIN(pallet_height_mm) AS value
+    FROM pallet_data
+    WHERE pallet_height_mm IS NOT NULL
+    UNION ALL
+    SELECT 
+      'height_max' AS stat,
+      MAX(pallet_height_mm) AS value
+    FROM pallet_data
+    WHERE pallet_height_mm IS NOT NULL
+  master: true
+  metrics:
+    - stat:
+        usage: "LABEL"
+        description: "Statistics type"
+    - value:
+        usage: "GAUGE"
+        description: "Pallet dimension min/max (mm)"
+
+mft_box_volume_stats:
+  query: |
+    SELECT 
+      'min' AS stat,
+      MIN(box_vol_m3) AS value
+    FROM box_data
+    WHERE box_vol_m3 IS NOT NULL
+    UNION ALL
+    SELECT 
+      'max' AS stat,
+      MAX(box_vol_m3) AS value
+    FROM box_data
+    WHERE box_vol_m3 IS NOT NULL
+    UNION ALL
+    SELECT 
+      'avg' AS stat,
+      AVG(box_vol_m3) AS value
+    FROM box_data
+    WHERE box_vol_m3 IS NOT NULL
+  master: true
+  metrics:
+    - stat:
+        usage: "LABEL"
+        description: "Statistics type (min, max, avg)"
+    - value:
+        usage: "GAUGE"
+        description: "Box volume statistics (m³)"
+
+mft_box_stacking_stats:
+  query: |
+    SELECT 
+      'min' AS stat,
+      MIN(box_stacking) AS value
+    FROM box_data
+    WHERE box_stacking IS NOT NULL
+    UNION ALL
+    SELECT 
+      'max' AS stat,
+      MAX(box_stacking) AS value
+    FROM box_data
+    WHERE box_stacking IS NOT NULL
+    UNION ALL
+    SELECT 
+      'avg' AS stat,
+      AVG(box_stacking) AS value
+    FROM box_data
+    WHERE box_stacking IS NOT NULL
+  master: true
+  metrics:
+    - stat:
+        usage: "LABEL"
+        description: "Statistics type (min, max, avg)"
+    - value:
+        usage: "GAUGE"
+        description: "Box stacking height statistics"
+
+mft_pallet_stacking_stats:
+  query: |
+    SELECT 
+      'min' AS stat,
+      MIN(pallet_stacking) AS value
+    FROM pallet_data
+    WHERE pallet_stacking IS NOT NULL
+    UNION ALL
+    SELECT 
+      'max' AS stat,
+      MAX(pallet_stacking) AS value
+    FROM pallet_data
+    WHERE pallet_stacking IS NOT NULL
+    UNION ALL
+    SELECT 
+      'avg' AS stat,
+      AVG(pallet_stacking) AS value
+    FROM pallet_data
+    WHERE pallet_stacking IS NOT NULL
+  master: true
+  metrics:
+    - stat:
+        usage: "LABEL"
+        description: "Statistics type (min, max, avg)"
+    - value:
+        usage: "GAUGE"
+        description: "Pallet stacking height statistics"
+
+# ============================================
+# BREAKPOINT & TEMPORAL METRICS
+# ============================================
+
+mft_breakpoints_last_7_days:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM breakpoint_data
+    WHERE breakpoint_date >= NOW() - INTERVAL '7 days'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Engineering breakpoints created in last 7 days"
+
+mft_breakpoints_last_30_days:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM breakpoint_data
+    WHERE breakpoint_date >= NOW() - INTERVAL '30 days'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Engineering breakpoints created in last 30 days"
+
+mft_breakpoints_last_90_days:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM breakpoint_data
+    WHERE breakpoint_date >= NOW() - INTERVAL '90 days'
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Engineering breakpoints created in last 90 days"
+
+mft_breakpoints_by_month:
+  query: |
+    SELECT 
+      TO_CHAR(breakpoint_date, 'YYYY-MM') AS month,
+      COUNT(*) AS count
+    FROM breakpoint_data
+    WHERE breakpoint_date IS NOT NULL
+    GROUP BY month
+    ORDER BY month DESC
+    LIMIT 24
+  master: true
+  metrics:
+    - month:
+        usage: "LABEL"
+        description: "Year-Month"
+    - count:
+        usage: "GAUGE"
+        description: "Breakpoints per month"
+
+mft_parts_per_breakpoint_avg:
+  query: |
+    SELECT COALESCE(AVG(part_count), 0) AS avg
+    FROM (
+      SELECT breakpoint_id, COUNT(part_id) AS part_count
+      FROM part_to_breakpoint
+      GROUP BY breakpoint_id
+    ) AS breakpoint_stats
+  master: true
+  metrics:
+    - avg:
+        usage: "GAUGE"
+        description: "Average number of parts changed per breakpoint"
+
+mft_parts_per_breakpoint_max:
+  query: |
+    SELECT COALESCE(MAX(part_count), 0) AS max
+    FROM (
+      SELECT breakpoint_id, COUNT(part_id) AS part_count
+      FROM part_to_breakpoint
+      GROUP BY breakpoint_id
+    ) AS breakpoint_stats
+  master: true
+  metrics:
+    - max:
+        usage: "GAUGE"
+        description: "Maximum parts changed in single breakpoint"
+
+mft_parts_per_breakpoint_min:
+  query: |
+    SELECT COALESCE(MIN(part_count), 0) AS min
+    FROM (
+      SELECT breakpoint_id, COUNT(part_id) AS part_count
+      FROM part_to_breakpoint
+      GROUP BY breakpoint_id
+    ) AS breakpoint_stats
+  master: true
+  metrics:
+    - min:
+        usage: "GAUGE"
+        description: "Minimum parts changed in single breakpoint (zero if none)"
+
+mft_breakpoint_lag_avg_days:
+  query: |
+    SELECT COALESCE(
+      AVG(EXTRACT(EPOCH FROM (breakpoint_date - input_date)) / 86400), 
+      0
+    ) AS avg
+    FROM breakpoint_data
+    WHERE breakpoint_date IS NOT NULL AND input_date IS NOT NULL
+  master: true
+  metrics:
+    - avg:
+        usage: "GAUGE"
+        description: "Average days between input and breakpoint effective date"
+
+mft_breakpoint_lag_max_days:
+  query: |
+    SELECT COALESCE(
+      MAX(EXTRACT(EPOCH FROM (breakpoint_date - input_date)) / 86400), 
+      0
+    ) AS max
+    FROM breakpoint_data
+    WHERE breakpoint_date IS NOT NULL AND input_date IS NOT NULL
+  master: true
+  metrics:
+    - max:
+        usage: "GAUGE"
+        description: "Maximum days between input and breakpoint effective date"
+
+mft_oldest_breakpoints:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM breakpoint_data
+    WHERE breakpoint_date < NOW() - INTERVAL '1 year'
+      AND breakpoint_date IS NOT NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Breakpoints older than 1 year"
+
+mft_future_breakpoints:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM breakpoint_data
+    WHERE breakpoint_date > NOW()
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Scheduled breakpoints with future effective date"
+
+# ============================================
+# DATA QUALITY & INTEGRITY METRICS
+# ============================================
+
+mft_missing_supplier_city:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM supplier_data
+    WHERE city IS NULL OR TRIM(city) = ''
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Suppliers missing city (mandatory for logistics)"
+
+mft_missing_part_weight:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM part_data
+    WHERE part_weight_kg IS NULL OR part_weight_kg <= 0
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Parts with missing or zero weight"
+
+mft_missing_box_dimensions:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM box_data
+    WHERE box_length_mm IS NULL 
+      OR box_width_mm IS NULL 
+      OR box_height_mm IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Boxes with incomplete dimensions"
+
+mft_missing_pallet_dimensions:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pallet_data
+    WHERE pallet_length_mm IS NULL 
+      OR pallet_width_mm IS NULL 
+      OR pallet_height_mm IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Pallets with incomplete dimensions"
+
+mft_missing_box_type:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM box_data
+    WHERE box_type IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Boxes without specified type"
+
+mft_missing_pallet_type:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pallet_data
+    WHERE pallet_type IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Pallets without specified type"
+
+mft_zero_part_per_box:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM part_to_box
+    WHERE part_per_box = 0 OR part_per_box IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Box-part assignments with zero quantity"
+
+mft_zero_box_per_pallet:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM box_to_pallet
+    WHERE box_per_pallet = 0 OR box_per_pallet IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Pallet-box assignments with zero quantity"
+
+mft_zero_part_per_vehicle:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM part_to_model
+    WHERE part_per_vehicle = 0 OR part_per_vehicle IS NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Model-part assignments with zero quantity"
+
+mft_duplicate_part_numbers:
+  query: |
+    SELECT COUNT(*) - COUNT(DISTINCT part_number) AS count
+    FROM part_data
+    WHERE part_number IS NOT NULL
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Duplicate part numbers (critical data issue)"
+
+mft_data_completeness_score:
+  query: |
+    WITH completeness AS (
+      SELECT 
+        (SELECT COUNT(*) FROM supplier_data WHERE city IS NOT NULL)::float / 
+          NULLIF((SELECT COUNT(*) FROM supplier_data), 0) * 100 AS supplier_score,
+        (SELECT COUNT(*) FROM part_data WHERE part_weight_kg > 0)::float / 
+          NULLIF((SELECT COUNT(*) FROM part_data), 0) * 100 AS part_score,
+        (SELECT COUNT(*) FROM box_data WHERE box_length_mm IS NOT NULL)::float / 
+          NULLIF((SELECT COUNT(*) FROM box_data), 0) * 100 AS box_score,
+        (SELECT COUNT(*) FROM pallet_data WHERE pallet_length_mm IS NOT NULL)::float / 
+          NULLIF((SELECT COUNT(*) FROM pallet_data), 0) * 100 AS pallet_score
+    )
+    SELECT (supplier_score + part_score + box_score + pallet_score) / 4 AS avg
+    FROM completeness
+  master: true
+  metrics:
+    - avg:
+        usage: "GAUGE"
+        description: "Overall data completeness score (%)"
+
+# ============================================
+# INDEX & PERFORMANCE METRICS
+# ============================================
+
+mft_missing_foreign_key_indexes:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM (
+      SELECT 
+        conname AS constraint_name
+      FROM pg_constraint c
+      WHERE c.contype = 'f'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_index i
+          WHERE i.indrelid = c.conrelid
+            AND i.indkey[0] = ANY(c.conkey)
+            AND i.indisunique = false
+        )
+    ) AS missing_fk_idx
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Number of foreign keys without supporting indexes"
+
+mft_unused_indexes:
+  query: |
+    SELECT COUNT(*) AS count
+    FROM pg_stat_user_indexes i
+    JOIN pg_index idx ON i.indexrelid = idx.indexrelid
+    WHERE i.idx_scan = 0 
+      AND NOT idx.indisunique
+      AND NOT idx.indisprimary
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Indexes never scanned (potentially unused)"
+
+mft_cache_hit_ratio:
+  query: |
+    SELECT COALESCE(
+      ROUND(
+        100 * SUM(heap_blks_hit) / 
+        NULLIF(SUM(heap_blks_hit) + SUM(heap_blks_read), 0), 2
+      ), 0
+    ) AS ratio
+    FROM pg_statio_user_tables
+  master: true
+  metrics:
+    - ratio:
+        usage: "GAUGE"
+        description: "Cache hit ratio (should be >99%)"
+
+mft_index_maintenance_days_since_vacuum:
+  query: |
+    SELECT COALESCE(
+      ROUND(
+        AVG(EXTRACT(EPOCH FROM NOW() - last_vacuum) / 86400)
+      ), 0
+    ) AS days
+    FROM pg_stat_user_tables
+    WHERE last_vacuum IS NOT NULL
+  master: true
+  metrics:
+    - days:
+        usage: "GAUGE"
+        description: "Average days since last VACUUM"
+
+mft_index_maintenance_days_since_analyze:
+  query: |
+    SELECT COALESCE(
+      ROUND(
+        AVG(EXTRACT(EPOCH FROM NOW() - last_analyze) / 86400)
+      ), 0
+    ) AS days
+    FROM pg_stat_user_tables
+    WHERE last_analyze IS NOT NULL
+  master: true
+  metrics:
+    - days:
+        usage: "GAUGE"
+        description: "Average days since last ANALYZE"
+
+mft_table_bloat_estimate:
+  query: |
+    SELECT 
+      schemaname || '.' || tablename AS table_name,
+      ROUND(100 * (GREATEST(avg_chain_len, 1) - 1) / GREATEST(avg_chain_len, 1), 2) AS bloat_percent
+    FROM pg_stat_user_tables
+    WHERE schemaname = 'public'
+      AND avg_chain_len IS NOT NULL
+    ORDER BY bloat_percent DESC
+    LIMIT 20
+  master: true
+  metrics:
+    - table_name:
+        usage: "LABEL"
+        description: "Schema qualified table name"
+    - bloat_percent:
+        usage: "GAUGE"
+        description: "Estimated table bloat percentage (high values indicate need for VACUUM)"
+
+# ============================================
+# QUERY PERFORMANCE METRICS
+# ============================================
+
+mft_query_duration_seconds:
+  query: |
+    SELECT EXTRACT(EPOCH FROM (NOW() - query_start)) AS seconds
+    FROM pg_stat_activity
+    WHERE state = 'active'
+      AND query NOT LIKE '%pg_stat_activity%'
+      AND datname = current_database()
+      AND query_start IS NOT NULL
+    ORDER BY query_start ASC
+    LIMIT 10
+  master: true
+  metrics:
+    - seconds:
+        usage: "GAUGE"
+        description: "Current query duration in seconds"

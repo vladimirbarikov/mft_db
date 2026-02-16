@@ -1,0 +1,174 @@
+# Recording rules for Material Flow Database Monitoring
+# Version: 1.0.0
+# Date: 2026-02-14
+
+groups:
+  # ============================================
+  # BUSINESS KPI RECORDING RULES
+  # ============================================
+  - name: material_flow_business_kpis
+    interval: 5m
+    rules:
+      # Parts coverage metrics
+      - record: kpi:parts_coverage:ratio
+        expr: |
+          (
+            mft_parts_total - mft_parts_without_box
+          ) / clamp_min(mft_parts_total, 1) * 100
+        labels:
+          kpi: packaging_coverage
+      
+      - record: kpi:parts_model_coverage:ratio
+        expr: |
+          (
+            mft_parts_total - mft_parts_without_model
+          ) / clamp_min(mft_parts_total, 1) * 100
+        labels:
+          kpi: model_coverage
+      
+      - record: kpi:parts_line_coverage:ratio
+        expr: |
+          (
+            mft_parts_total - mft_parts_without_line
+          ) / clamp_min(mft_parts_total, 1) * 100
+        labels:
+          kpi: line_coverage
+      
+      # Overall completeness score (0-100)
+      - record: kpi:data_quality:score
+        expr: |
+          (
+            (1 - (mft_missing_supplier_city / clamp_min(mft_suppliers_total, 1))) * 25 +
+            (1 - (mft_missing_part_weight / clamp_min(mft_parts_total, 1))) * 25 +
+            (1 - (mft_missing_box_dimensions / clamp_min(mft_boxes_total, 1))) * 25 +
+            (1 - (mft_missing_pallet_dimensions / clamp_min(mft_pallets_total, 1))) * 25
+          )
+        labels:
+          kpi: completeness
+      
+      # Breakpoint activity rate
+      - record: kpi:breakpoint:activity_rate
+        expr: |
+          mft_breakpoints_last_30_days / clamp_min(mft_breakpoints_total, 1) * 100
+        labels:
+          kpi: change_activity
+      
+      # Supplier localization ratio
+      - record: kpi:supplier:localization_ratio
+        expr: |
+          mft_suppliers_local_yes / clamp_min(mft_suppliers_total, 1) * 100
+        labels:
+          kpi: local_suppliers
+      
+      # Returnable packaging ratio
+      - record: kpi:packaging:returnable_ratio
+        expr: |
+          mft_boxes_returnable / clamp_min(mft_boxes_total, 1) * 100
+        labels:
+          kpi: returnable_packaging
+
+  # ============================================
+  # PERFORMANCE RECORDING RULES
+  # ============================================
+  - name: material_flow_performance
+    interval: 5m
+    rules:
+      # Cache efficiency
+      - record: performance:cache:hit_ratio_1h
+        expr: |
+          avg_over_time(mft_cache_hit_ratio[1h])
+        labels:
+          window: 1h
+      
+      - record: performance:cache:hit_ratio_24h
+        expr: |
+          avg_over_time(mft_cache_hit_ratio[24h])
+        labels:
+          window: 24h
+      
+      # Index health score (0-100)
+      - record: performance:index:health_score
+        expr: |
+          clamp_max((
+            (1 - clamp_min(mft_missing_foreign_key_indexes / 10, 0)) * 50 +
+            (1 - (mft_unused_indexes / clamp_min(mft_unused_indexes + 1, 1) * 0.5)) * 50
+          ), 100)
+        labels:
+          metric: index_health
+      
+      # Bloat score (0-100, lower is better)
+      - record: performance:bloat:score
+        expr: |
+          clamp_max(100 - avg(mft_table_bloat_estimate) by (), 100)
+        labels:
+          metric: bloat_health
+      
+      # Query performance
+      - record: performance:query:avg_duration_1h
+        expr: |
+          avg_over_time(mft_query_duration_seconds[1h])
+        labels:
+          window: 1h
+
+  # ============================================
+  # SUPPLIER CHAIN RECORDING RULES
+  # ============================================
+  - name: material_flow_supply_chain
+    interval: 10m
+    rules:
+      # Local vs foreign ratio
+      - record: supply:localization:ratio
+        expr: |
+          mft_suppliers_by_localization{localization="yes"} / 
+          clamp_min(mft_suppliers_by_localization{localization="yes"} + 
+                   mft_suppliers_by_localization{localization="no"}, 1) * 100
+        labels:
+          metric: localization_ratio
+      
+      # Returnable packaging ratio
+      - record: packaging:returnable:ratio
+        expr: |
+          mft_boxes_by_type{box_type="returnable"} / 
+          clamp_min(mft_boxes_by_type{box_type="returnable"} + 
+                   mft_boxes_by_type{box_type="non-returnable"}, 1) * 100
+        labels:
+          metric: returnable_ratio
+      
+      # Packaging efficiency (parts per box)
+      - record: supply:packaging:efficiency
+        expr: |
+          avg(mft_parts_per_box) by ()
+        labels:
+          metric: avg_parts_per_box
+
+  # ============================================
+  # DAILY AGGREGATES (for SLO reporting)
+  # ============================================
+  - name: material_flow_daily_aggregates
+    interval: 24h
+    rules:
+      # Daily growth rates
+      - record: daily:parts:growth_rate
+        expr: |
+          (mft_parts_total - mft_parts_total offset 24h) / 
+          clamp_min(mft_parts_total offset 24h, 1) * 100
+      
+      - record: daily:breakpoints:growth_rate
+        expr: |
+          (mft_breakpoints_total - mft_breakpoints_total offset 24h) / 
+          clamp_min(mft_breakpoints_total offset 24h, 1) * 100
+      
+      - record: daily:suppliers:growth_rate
+        expr: |
+          (mft_suppliers_total - mft_suppliers_total offset 24h) / 
+          clamp_min(mft_suppliers_total offset 24h, 1) * 100
+      
+      - record: daily:boxes:growth_rate
+        expr: |
+          (mft_boxes_total - mft_boxes_total offset 24h) / 
+          clamp_min(mft_boxes_total offset 24h, 1) * 100
+      
+      # Daily data quality trend (using completeness score)
+      - record: daily:data_quality:trend
+        expr: |
+          kpi:data_quality:score - kpi:data_quality:score offset 24h

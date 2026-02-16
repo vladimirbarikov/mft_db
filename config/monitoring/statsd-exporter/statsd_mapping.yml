@@ -1,0 +1,466 @@
+# StatsD Exporter Mapping Configuration for Airflow Metrics
+# Converts Airflow StatsD metrics to Prometheus format
+# Version: 1.0.1
+# Date: 2026-02-12
+
+# Defaults for all mappings
+defaults:
+  # Default timer type (histogram, summary, or both)
+  timer_type: histogram
+  # Default buckets for histograms
+  buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600]
+  # Default quantiles for summaries
+  objectives:
+    0.5: 0.01
+    0.9: 0.01
+    0.99: 0.001
+    0.999: 0.0001
+  # Maximum age of observations before being discarded (summary only)
+  max_age: 5m
+  # Number of buckets in the quantile streaming summary
+  age_buckets: 5
+  # Buffer size for incoming observations
+  buf_cap: 1000
+
+# Metric mappings
+mappings:
+  # ============================================
+  # DAG DURATION METRICS
+  # ============================================
+  
+  # DAG run duration (how long entire DAG took to execute)
+  - match: "airflow.dagrun.duration.success.*.*"
+    name: "airflow_dagrun_duration_seconds"
+    match_metric_type: timer
+    labels:
+      dag_id: "$1"
+      dagrun_id: "$2"
+      status: "success"
+    timer_type: histogram
+    help: "DAG run duration in seconds (successful runs)"
+
+  - match: "airflow.dagrun.duration.failed.*.*"
+    name: "airflow_dagrun_duration_seconds"
+    match_metric_type: timer
+    labels:
+      dag_id: "$1"
+      dagrun_id: "$2"
+      status: "failed"
+    timer_type: histogram
+    help: "DAG run duration in seconds (failed runs)"
+
+  - match: "airflow.dagrun.duration.*.*.*"
+    name: "airflow_dagrun_duration_seconds"
+    match_metric_type: timer
+    labels:
+      status: "$1"
+      dag_id: "$2"
+      dagrun_id: "$3"
+    timer_type: histogram
+    help: "DAG run duration in seconds"
+
+  # ============================================
+  # TASK DURATION METRICS
+  # ============================================
+  
+  # Task execution duration
+  - match: "airflow.task.duration.*.*.*"
+    name: "airflow_task_duration_seconds"
+    match_metric_type: timer
+    labels:
+      dag_id: "$1"
+      task_id: "$2"
+      dagrun_id: "$3"
+    timer_type: histogram
+    help: "Task execution duration in seconds"
+
+  # ============================================
+  # DAG COUNT METRICS
+  # ============================================
+  
+  # DAG processing total
+  - match: "airflow.dag_processing.total_parse_time"
+    name: "airflow_dag_processing_total_parse_time_seconds"
+    match_metric_type: timer
+    timer_type: histogram
+    help: "Total DAG parse time in seconds"
+
+  # DAG processing per file
+  - match: "airflow.dag_processing.last_duration.*"
+    name: "airflow_dag_processing_last_duration_seconds"
+    match_metric_type: gauge
+    labels:
+      dag_file: "$1"
+    help: "Last DAG parse duration in seconds"
+
+  - match: "airflow.dag_processing.last_run.seconds_ago.*"
+    name: "airflow_dag_processing_last_run_seconds_ago"
+    match_metric_type: gauge
+    labels:
+      dag_file: "$1"
+    help: "Seconds since last DAG parse"
+
+  - match: "airflow.dag_processing.processor_timeout"
+    name: "airflow_dag_processing_processor_timeout_total"
+    match_metric_type: counter
+    help: "Total number of DAG processor timeouts"
+
+  # ============================================
+  # SCHEDULER METRICS
+  # ============================================
+  
+  # Scheduler heartbeat
+  - match: "scheduler_heartbeat"
+    name: "airflow_scheduler_heartbeat_total"
+    match_metric_type: counter
+    help: "Total number of scheduler heartbeats"
+
+  # Scheduler loop duration
+  - match: "airflow.scheduler_loop.duration"
+    name: "airflow_scheduler_loop_duration_seconds"
+    match_metric_type: timer
+    timer_type: histogram
+    help: "Scheduler loop duration in seconds"
+
+  # Scheduler critical section duration
+  - match: "airflow.scheduler.critical_section_duration"
+    name: "airflow_scheduler_critical_section_duration_seconds"
+    match_metric_type: timer
+    timer_type: histogram
+    help: "Scheduler critical section duration in seconds"
+
+  # Tasks killed by timeout
+  - match: "scheduler.tasks.killed_externally"
+    name: "airflow_scheduler_tasks_killed_externally_total"
+    match_metric_type: counter
+    help: "Total number of tasks killed externally"
+
+  # Orphaned tasks
+  - match: "scheduler.orphaned_tasks.cleared"
+    name: "airflow_scheduler_orphaned_tasks_cleared_total"
+    match_metric_type: counter
+    help: "Total number of orphaned tasks cleared"
+
+  # Zombie tasks killed
+  - match: "scheduler.zombies_killed"
+    name: "airflow_scheduler_zombies_killed_total"
+    match_metric_type: counter
+    help: "Total number of zombie tasks killed"
+
+  # ============================================
+  # TASK METRICS
+  # ============================================
+  
+  # Task instances created
+  - match: "airflow.task_instances_created"
+    name: "airflow_task_instances_created_total"
+    match_metric_type: counter
+    help: "Total number of task instances created"
+
+  # Task instances by state
+  - match: "airflow.ti.start.*.*.*"
+    name: "airflow_task_instance_started_total"
+    match_metric_type: counter
+    labels:
+      dag_id: "$1"
+      task_id: "$2"
+      dagrun_id: "$3"
+    help: "Total number of task instances started"
+
+  - match: "airflow.ti.finish.*.*.*.success"
+    name: "airflow_task_instance_finished_total"
+    match_metric_type: counter
+    labels:
+      dag_id: "$1"
+      task_id: "$2"
+      dagrun_id: "$3"
+      status: "success"
+    help: "Total number of task instances finished successfully"
+
+  - match: "airflow.ti.finish.*.*.*.failed"
+    name: "airflow_task_instance_finished_total"
+    match_metric_type: counter
+    labels:
+      dag_id: "$1"
+      task_id: "$2"
+      dagrun_id: "$3"
+      status: "failed"
+    help: "Total number of task instances failed"
+
+  # Task failures by type
+  - match: "task_failures"
+    name: "airflow_task_failures_total"
+    match_metric_type: counter
+    help: "Total number of task failures"
+
+  # Task success rate
+  - match: "airflow.task.success_rate.*"
+    name: "airflow_task_success_rate"
+    match_metric_type: gauge
+    labels:
+      dag_id: "$1"
+    help: "Task success rate for DAG"
+
+  # ============================================
+  # POOL METRICS
+  # ============================================
+  
+  # Pool open slots
+  - match: "pool.open_slots.*"
+    name: "airflow_pool_open_slots"
+    match_metric_type: gauge
+    labels:
+      pool_name: "$1"
+    help: "Number of open slots in pool"
+
+  # Pool used slots
+  - match: "pool.used_slots.*"
+    name: "airflow_pool_used_slots"
+    match_metric_type: gauge
+    labels:
+      pool_name: "$1"
+    help: "Number of used slots in pool"
+
+  # Pool queued slots
+  - match: "pool.queued_slots.*"
+    name: "airflow_pool_queued_slots"
+    match_metric_type: gauge
+    labels:
+      pool_name: "$1"
+    help: "Number of queued slots in pool"
+
+  # Pool starvation
+  - match: "pool.starving_tasks.*"
+    name: "airflow_pool_starving_tasks"
+    match_metric_type: gauge
+    labels:
+      pool_name: "$1"
+    help: "Number of starving tasks in pool"
+
+  # ============================================
+  # EXECUTOR METRICS
+  # ============================================
+  
+  # Celery task timeout
+  - match: "celery.task_timeout_error"
+    name: "airflow_celery_task_timeout_error_total"
+    match_metric_type: counter
+    help: "Total number of Celery task timeout errors"
+
+  # Celery task unknown error
+  - match: "celery.task_unknown_error"
+    name: "airflow_celery_task_unknown_error_total"
+    match_metric_type: counter
+    help: "Total number of Celery task unknown errors"
+
+  # Executor open slots
+  - match: "executor.open_slots"
+    name: "airflow_executor_open_slots"
+    match_metric_type: gauge
+    help: "Number of open slots in executor"
+
+  # Executor queued tasks
+  - match: "executor.queued_tasks"
+    name: "airflow_executor_queued_tasks"
+    match_metric_type: gauge
+    help: "Number of queued tasks in executor"
+
+  # Executor running tasks
+  - match: "executor.running_tasks"
+    name: "airflow_executor_running_tasks"
+    match_metric_type: gauge
+    help: "Number of running tasks in executor"
+
+  # ============================================
+  # JOB METRICS
+  # ============================================
+  
+  # Job heartbeat failures
+  - match: "job.heartbeat_failure"
+    name: "airflow_job_heartbeat_failure_total"
+    match_metric_type: counter
+    help: "Total number of job heartbeat failures"
+
+  # Job heartbeats
+  - match: "job.heartbeat"
+    name: "airflow_job_heartbeat_total"
+    match_metric_type: counter
+    help: "Total number of job heartbeats"
+
+  # ============================================
+  # DATABASE METRICS
+  # ============================================
+  
+  # Database pool connections
+  - match: "sqlalchemy.pool.size"
+    name: "airflow_sqlalchemy_pool_size"
+    match_metric_type: gauge
+    help: "SQLAlchemy pool size"
+
+  - match: "sqlalchemy.pool.overflow"
+    name: "airflow_sqlalchemy_pool_overflow"
+    match_metric_type: gauge
+    help: "SQLAlchemy pool overflow"
+
+  - match: "sqlalchemy.pool.timeout"
+    name: "airflow_sqlalchemy_pool_timeout_total"
+    match_metric_type: counter
+    help: "Total number of SQLAlchemy pool timeouts"
+
+  # Database query count
+  - match: "sqlalchemy.connections"
+    name: "airflow_sqlalchemy_connections_total"
+    match_metric_type: counter
+    help: "Total number of SQLAlchemy connections"
+
+  # ============================================
+  # XCOM METRICS
+  # ============================================
+  
+  # XCom push count
+  - match: "xcom.push"
+    name: "airflow_xcom_push_total"
+    match_metric_type: counter
+    help: "Total number of XCom pushes"
+
+  # XCom pull count
+  - match: "xcom.pull"
+    name: "airflow_xcom_pull_total"
+    match_metric_type: counter
+    help: "Total number of XCom pulls"
+
+  # ============================================
+  # COLLECTED DAG METRICS
+  # ============================================
+  
+  # DAG bag size
+  - match: "dagbag_size"
+    name: "airflow_dagbag_size"
+    match_metric_type: gauge
+    help: "Number of DAGs in DAG bag"
+
+  # DAG import errors
+  - match: "dag_import_errors"
+    name: "airflow_dag_import_errors_total"
+    match_metric_type: gauge
+    help: "Number of DAG import errors"
+
+  # DAG file count
+  - match: "collect_dags"
+    name: "airflow_collect_dags_total"
+    match_metric_type: counter
+    help: "Total number of DAG collections"
+
+  # ============================================
+  # OPERATOR METRICS
+  # ============================================
+  
+  # Operator failures
+  - match: "operator_failures.*"
+    name: "airflow_operator_failures_total"
+    match_metric_type: counter
+    labels:
+      operator: "$1"
+    help: "Total number of operator failures"
+
+  # Operator successes
+  - match: "operator_successes.*"
+    name: "airflow_operator_successes_total"
+    match_metric_type: counter
+    labels:
+      operator: "$1"
+    help: "Total number of operator successes"
+
+  # ============================================
+  # DAG RUN SCHEDULING
+  # ============================================
+  
+  # DAG run scheduling delay
+  - match: "dagrun.schedule_delay.*"
+    name: "airflow_dagrun_schedule_delay_seconds"
+    match_metric_type: timer
+    labels:
+      dag_id: "$1"
+    timer_type: histogram
+    help: "DAG run scheduling delay in seconds"
+
+  # DAG run first task scheduling delay
+  - match: "dagrun.*.first_task_scheduling_delay"
+    name: "airflow_dagrun_first_task_scheduling_delay_seconds"
+    match_metric_type: timer
+    labels:
+      dag_id: "$1"
+    timer_type: histogram
+    help: "First task scheduling delay in seconds"
+
+  # ============================================
+  # TASK SCHEDULING
+  # ============================================
+  
+  # Task scheduling delay
+  - match: "scheduler.tasks.pending_delay"
+    name: "airflow_scheduler_tasks_pending_delay_seconds"
+    match_metric_type: timer
+    timer_type: histogram
+    help: "Task pending delay in seconds"
+
+  # Task scheduling attempts
+  - match: "scheduler.tasks.attempt"
+    name: "airflow_scheduler_tasks_attempt_total"
+    match_metric_type: counter
+    help: "Total number of task scheduling attempts"
+
+  # Task schedule timeout
+  - match: "scheduler.tasks.timeout"
+    name: "airflow_scheduler_tasks_timeout_total"
+    match_metric_type: counter
+    help: "Total number of task schedule timeouts"
+
+  # ============================================
+  # HEALTH CHECK
+  # ============================================
+  
+  # Airflow health status
+  - match: "airflow.health.*"
+    name: "airflow_health_status"
+    match_metric_type: gauge
+    labels:
+      component: "$1"
+    help: "Airflow component health status (1=healthy, 0=unhealthy)"
+
+  # ============================================
+  # CATCH-ALL FOR UNMATCHED METRICS
+  # ============================================
+  
+  # Generic counter for unmatched airflow metrics
+  - match: "airflow.*"
+    name: "airflow_metrics_total"
+    match_metric_type: counter
+    labels:
+      metric_name: "$0"
+    help: "Total count of unmatched Airflow metrics"
+
+# ============================================
+# GLOBAL CONFIGURATION
+# ============================================
+
+# Global labels added to every metric
+global_labels:
+  collector: statsd-exporter
+  service: airflow
+  environment: production
+
+# Cache size for StatsD UDP packets
+cache_size: 5000
+
+# Event queue capacity
+event_queue_capacity: 10000
+
+# Flush duration for metrics
+flush_duration: 100ms
+
+# Maximum transmission unit for UDP
+max_tcp_connections: 10
+
+# StatsD mapping configuration version
+statsd_mapping_version: "1.0"

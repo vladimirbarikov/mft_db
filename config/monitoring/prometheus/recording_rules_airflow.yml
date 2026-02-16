@@ -1,0 +1,280 @@
+# Recording rules for Airflow Monitoring
+# Version: 1.0.0
+# Date: 2026-02-14
+
+groups:
+  # ============================================
+  # AIRFLOW DAG PERFORMANCE RECORDING RULES
+  # ============================================
+  - name: airflow_dag_performance
+    interval: 5m
+    rules:
+      # DAG success rate (percentage)
+      - record: airflow:dag_success:rate
+        expr: |
+          (sum(rate(airflow_dag_run_success_total[1h])) by (dag_id) / 
+           clamp_min(
+             sum(rate(airflow_dag_run_failed_total[1h])) by (dag_id) + 
+             sum(rate(airflow_dag_run_success_total[1h])) by (dag_id), 
+           1)) * 100
+        labels:
+          metric: dag_success_rate
+      
+      # DAG failure rate (percentage)
+      - record: airflow:dag_failure:rate
+        expr: |
+          (sum(rate(airflow_dag_run_failed_total[1h])) by (dag_id) / 
+           clamp_min(
+             sum(rate(airflow_dag_run_failed_total[1h])) by (dag_id) + 
+             sum(rate(airflow_dag_run_success_total[1h])) by (dag_id), 
+           1)) * 100
+        labels:
+          metric: dag_failure_rate
+      
+      # Average DAG duration (seconds)
+      - record: airflow:dag_duration:avg_1h
+        expr: |
+          avg_over_time(airflow_dag_run_duration_seconds[1h])
+        labels:
+          window: 1h
+      
+      # Maximum DAG duration (seconds)
+      - record: airflow:dag_duration:max_1h
+        expr: |
+          max_over_time(airflow_dag_run_duration_seconds[1h])
+        labels:
+          window: 1h
+      
+      # DAG run count per hour
+      - record: airflow:dag_runs:rate_1h
+        expr: |
+          sum(rate(airflow_dag_run_success_total[1h]) + 
+              rate(airflow_dag_run_failed_total[1h])) by (dag_id)
+        labels:
+          window: 1h
+
+  # ============================================
+  # AIRFLOW TASK METRICS
+  # ============================================
+  - name: airflow_task_metrics
+    interval: 5m
+    rules:
+      # Task failure rate (percentage)
+      - record: airflow:task_failure:rate_1h
+        expr: |
+          (sum(rate(airflow_task_failures_total[1h])) by (dag_id, task_id) /
+           clamp_min(
+             sum(rate(airflow_task_failures_total[1h])) by (dag_id, task_id) + 
+             sum(rate(airflow_task_success_total[1h])) by (dag_id, task_id), 
+           1)) * 100
+        labels:
+          metric: task_failure_rate
+      
+      # Task success rate (percentage)
+      - record: airflow:task_success:rate_1h
+        expr: |
+          (sum(rate(airflow_task_success_total[1h])) by (dag_id, task_id) /
+           clamp_min(
+             sum(rate(airflow_task_failures_total[1h])) by (dag_id, task_id) + 
+             sum(rate(airflow_task_success_total[1h])) by (dag_id, task_id), 
+           1)) * 100
+        labels:
+          metric: task_success_rate
+      
+      # Average task duration by task type
+      - record: airflow:task_duration:avg_1h
+        expr: |
+          avg_over_time(airflow_task_duration_seconds[1h])
+        labels:
+          window: 1h
+      
+      # Task retry rate
+      - record: airflow:task_retries:rate_1h
+        expr: |
+          sum(rate(airflow_task_retry_total[1h])) by (dag_id, task_id)
+        labels:
+          window: 1h
+      
+      # Currently queued tasks
+      - record: airflow:tasks:queued
+        expr: |
+          sum(airflow_task_instance_status{status="queued"}) by (dag_id, task_id)
+        labels:
+          state: queued
+
+  # ============================================
+  # AIRFLOW RESOURCE USAGE
+  # ============================================
+  - name: airflow_resource_usage
+    interval: 5m
+    rules:
+      # Active DAG runs
+      - record: airflow:dags:active
+        expr: |
+          sum(airflow_dag_run_status{status="running"}) by (dag_id)
+        labels:
+          state: running
+      
+      # Paused DAGs
+      - record: airflow:dags:paused
+        expr: |
+          sum(airflow_dag_status{status="paused"}) by (dag_id)
+        labels:
+          state: paused
+      
+      # Pool usage percentage
+      - record: airflow:pool:usage_percent
+        expr: |
+          (airflow_pool_slots_used / clamp_min(airflow_pool_slots_total, 1)) * 100
+        labels:
+          metric: pool_utilization
+      
+      # Pool slots available
+      - record: airflow:pool:slots_available
+        expr: |
+          clamp_min(airflow_pool_slots_total - airflow_pool_slots_used, 0)
+        labels:
+          metric: pool_slots_available
+      
+      # Scheduler heartbeat health (returns 1 if heartbeat exists, 0 otherwise)
+      - record: airflow:scheduler:heartbeat_health
+        expr: |
+          (rate(airflow_scheduler_heartbeat_count[5m]) > 0) or vector(0)
+        labels:
+          metric: scheduler_healthy
+      
+      # Scheduler loop duration
+      - record: airflow:scheduler:loop_duration_avg_1h
+        expr: |
+          avg_over_time(airflow_scheduler_loop_duration_seconds[1h])
+        labels:
+          window: 1h
+
+  # ============================================
+  # AIRFLOW CELERY WORKERS
+  # ============================================
+  - name: airflow_celery_workers
+    interval: 5m
+    rules:
+      # Active workers count
+      - record: airflow:workers:active
+        expr: |
+          count(airflow_worker_status == 1) by (queue)
+      
+      # Worker task processing rate
+      - record: airflow:workers:task_rate
+        expr: |
+          sum(rate(airflow_worker_tasks_processed_total[5m])) by (worker_name, queue)
+      
+      # Worker task success rate
+      - record: airflow:workers:task_success_rate
+        expr: |
+          sum(rate(airflow_worker_tasks_success_total[5m])) by (worker_name, queue)
+      
+      # Worker task failure rate
+      - record: airflow:workers:task_failure_rate
+        expr: |
+          sum(rate(airflow_worker_tasks_failed_total[5m])) by (worker_name, queue)
+      
+      # Worker memory usage
+      - record: airflow:workers:memory_usage_bytes
+        expr: |
+          airflow_worker_memory_rss_bytes
+        labels:
+          metric: worker_memory_rss
+
+  # ============================================
+  # AIRFLOW DATABASE HEALTH
+  # ============================================
+  - name: airflow_db_health
+    interval: 5m
+    rules:
+      # Database connection pool usage
+      - record: airflow:db:connection_usage
+        expr: |
+          (airflow_db_connections_active / clamp_min(airflow_db_connections_total, 1)) * 100
+        labels:
+          metric: connection_pool_usage
+      
+      # Database connection idle count
+      - record: airflow:db:connections_idle
+        expr: |
+          clamp_min(airflow_db_connections_total - airflow_db_connections_active, 0)
+        labels:
+          state: idle
+      
+      # XCom growth rate
+      - record: airflow:xcom:growth_rate
+        expr: |
+          rate(airflow_xcom_total[24h])
+        labels:
+          window: 24h
+      
+      # XCom total count
+      - record: airflow:xcom:total
+        expr: |
+          airflow_xcom_total
+        labels:
+          metric: xcom_count
+
+  # ============================================
+  # AIRFLOW DAILY AGGREGATES
+  # ============================================
+  - name: airflow_daily_aggregates
+    interval: 24h
+    rules:
+      # Daily DAG run count
+      - record: daily:airflow:dag_runs_total
+        expr: |
+          (sum(increase(airflow_dag_run_success_total[24h])) by (dag_id) +
+           sum(increase(airflow_dag_run_failed_total[24h])) by (dag_id))
+        labels:
+          window: 24h
+      
+      # Daily task failure rate
+      - record: daily:airflow:task_failure_rate
+        expr: |
+          (sum(increase(airflow_task_failures_total[24h])) by (dag_id, task_id) / 
+           clamp_min(
+             sum(increase(airflow_task_failures_total[24h])) by (dag_id, task_id) + 
+             sum(increase(airflow_task_success_total[24h])) by (dag_id, task_id), 
+           1)) * 100
+        labels:
+          window: 24h
+      
+      # Daily active DAG count
+      - record: daily:airflow:dags_active
+        expr: |
+          count(sum(increase(airflow_dag_run_success_total[24h])) by (dag_id) > 0)
+        labels:
+          window: 24h
+      
+      # Daily average DAG duration
+      - record: daily:airflow:dag_duration_avg
+        expr: |
+          avg_over_time(airflow_dag_run_duration_seconds[24h])
+        labels:
+          window: 24h
+
+  # ============================================
+  # AIRFLOW SLA METRICS
+  # ============================================
+  - name: airflow_sla_metrics
+    interval: 5m
+    rules:
+      # SLA miss count
+      - record: airflow:sla:miss_total
+        expr: |
+          sum(rate(airflow_sla_miss_total[1h])) by (dag_id, task_id)
+        labels:
+          window: 1h
+      
+      # SLA miss percentage
+      - record: airflow:sla:miss_percent
+        expr: |
+          (sum(rate(airflow_sla_miss_total[1h])) by (dag_id, task_id) /
+           clamp_min(
+             sum(rate(airflow_task_success_total[1h])) by (dag_id, task_id),
+           1)) * 100
+        labels:
+          metric: sla_miss_percent

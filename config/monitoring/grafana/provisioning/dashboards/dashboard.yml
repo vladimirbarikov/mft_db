@@ -1,0 +1,20 @@
+# Grafana Dashboard Provisioning Configuration for Material Flow Database Monitoring
+# Version: 1.0.0
+# Date: 2026-02-13
+
+apiVersion: 1
+
+# ============================================
+# DASHBOARD PROVIDERS
+# ============================================
+providers:
+  - name: 'MFT Dashboards'  # Единый провайдер для всех дашбордов
+    orgId: 1
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: true  # Автоматически создавать папки из названий файлов

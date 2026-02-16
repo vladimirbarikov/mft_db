@@ -1,0 +1,369 @@
+# Prometheus Configuration for MFT + Airflow Monitoring
+# Version: 2.0.0
+# Date: 2026-02-14
+
+global:
+  # How frequently to scrape targets by default
+  scrape_interval: 15s
+  
+  # How frequently to evaluate rules
+  evaluation_interval: 15s
+  
+  # External labels added to all time series
+  external_labels:
+    environment: production
+    system: material_flow_airflow
+    domain: automotive
+    region: ru-central
+    datacenter: pld-ec
+
+# Rule files to load
+rule_files:
+  - 'recording_rules_airflow.yml'
+  - 'recording_rules_mft.yml'
+
+# Scrape configurations
+scrape_configs:
+  # ============================================
+  # PROMETHEUS SELF-MONITORING
+  # ============================================
+  - job_name: 'prometheus'
+    
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          job: prometheus
+          service: prometheus_self
+          tier: monitoring
+
+  # ============================================
+  # AIRFLOW METADATA DATABASE (PostgreSQL)
+  # ============================================
+  - job_name: 'airflow_db'
+    
+    scrape_interval: 30s
+    scrape_timeout: 25s
+    
+    metrics_path: /metrics
+    
+    static_configs:
+      - targets: ['postgres_exporter_airflow:9187']
+        labels:
+          job: airflow_db
+          database: airflow_metadata
+          exporter_type: postgres
+          component: airflow_db
+          service: postgresql
+          tier: data
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):9187'
+        replacement: '${1}'
+      - target_label: cluster
+        replacement: 'production'
+      - target_label: team
+        replacement: 'pld-engineering'
+
+  # ============================================
+  # MFT DATABASE (PostgreSQL)
+  # ============================================
+  - job_name: 'mft_db'
+
+    scrape_interval: 30s
+    scrape_timeout: 25s
+
+    metrics_path: /metrics
+
+    static_configs:
+      - targets: ['postgres_exporter_mft:9187']
+        labels:
+          job: mft_db
+          database: material_flow
+          exporter_type: postgres
+          component: mft_db
+          service: postgresql
+          tier: data
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):9187'
+        replacement: '${1}'
+      - target_label: cluster
+        replacement: 'production'
+      - target_label: team
+        replacement: 'pld-engineering'
+
+  # ============================================
+  # AIRFLOW STATSD METRICS (via statsd-exporter)
+  # ============================================
+  - job_name: 'airflow_statsd'
+
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    
+    metrics_path: /metrics
+    
+    static_configs:
+      - targets: ['statsd-exporter:9102']
+        labels:
+          job: airflow_statsd
+          service: airflow
+          metrics_source: statsd
+          component: application_metrics
+          tier: app
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):9102'
+        replacement: '${1}'
+
+  # ============================================
+  # AIRFLOW WEBSERVER METRICS
+  # ============================================
+  - job_name: 'airflow_webserver'
+    
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    
+    metrics_path: /metrics
+    # Fallback to health endpoint if /metrics not available
+    # metrics_path: /health
+    
+    static_configs:
+      - targets: ['airflow-webserver:8080']
+        labels:
+          job: airflow_webserver
+          component: webserver
+          service: airflow
+          tier: app
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):8080'
+        replacement: '${1}'
+
+  # ============================================
+  # AIRFLOW SCHEDULER METRICS
+  # ============================================
+  - job_name: 'airflow_scheduler'
+    
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    
+    metrics_path: /metrics
+    # Alternative: /health for health checks only
+    
+    static_configs:
+      - targets: ['airflow-scheduler:8793']
+        labels:
+          job: airflow_scheduler
+          component: scheduler
+          service: airflow
+          tier: app
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):8793'
+        replacement: '${1}'
+
+  # ============================================
+  # AIRFLOW WORKER METRICS
+  # ============================================
+  - job_name: 'airflow_worker'
+    
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    
+    metrics_path: /metrics
+    
+    static_configs:
+      - targets: ['airflow-worker:8793']
+        labels:
+          job: airflow_worker
+          component: worker
+          service: airflow
+          tier: app
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):8793'
+        replacement: '${1}'
+
+  # ============================================
+  # AIRFLOW TRIGGERER METRICS
+  # ============================================
+  - job_name: 'airflow_triggerer'
+    
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    
+    metrics_path: /metrics
+    
+    static_configs:
+      - targets: ['airflow-triggerer:8793']
+        labels:
+          job: airflow_triggerer
+          component: triggerer
+          service: airflow
+          tier: app
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):8793'
+        replacement: '${1}'
+
+  # # ============================================
+  # # AIRFLOW FLOWER (Celery monitoring)
+  # # Flower doesn't have native Prometheus metrics
+  # # This is for future use if flower-exporter would be added
+  # # ============================================
+  # - job_name: 'airflow_flower'
+    
+  #   scrape_interval: 30s
+  #   scrape_timeout: 20s
+    
+  #   metrics_path: /metrics
+
+  #   static_configs:
+  #     - targets: ['flower:5555']
+  #       labels:
+  #         job: airflow_flower
+  #         component: flower
+  #         service: celery_monitoring
+  #         tier: app
+    
+  #   relabel_configs:
+  #     - source_labels: [__address__]
+  #       target_label: instance
+  #       regex: '(.*):5555'
+  #       replacement: '${1}'
+
+  # ============================================
+  # REDIS METRICS (via redis-exporter)
+  # ============================================
+  - job_name: 'redis'
+    
+    scrape_interval: 30s
+    scrape_timeout: 20s
+    
+    metrics_path: /metrics
+    
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          job: redis
+          service: redis
+          component: celery_broker
+          tier: data
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):9121'
+        replacement: '${1}'
+
+  # # ============================================
+  # # CADVISOR - CONTAINER METRICS
+  # # Uncomment if Linux server (Ubuntu/CentOS/RedHat)
+  # # ============================================
+  # - job_name: 'cadvisor'
+    
+  #   scrape_interval: 30s
+  #   scrape_timeout: 20s
+    
+  #   static_configs:
+  #     - targets: ['cadvisor:8080']
+  #       labels:
+  #         job: cadvisor
+  #         service: container_metrics
+  #         tier: infrastructure
+    
+  #   relabel_configs:
+  #     - source_labels: [__address__]
+  #       target_label: instance
+  #       regex: '(.*):8080'
+  #       replacement: '${1}'
+
+  # # ============================================
+  # # NODE EXPORTER - HOST METRICS
+  # # Uncomment if Linux server (Ubuntu/CentOS/RedHat)
+  # # ============================================
+  # - job_name: 'node_exporter'
+    
+  #   scrape_interval: 30s
+  #   scrape_timeout: 20s
+    
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
+  #       labels:
+  #         job: node_exporter
+  #         service: hardware_metrics
+  #         tier: infrastructure
+  #         component: host
+    
+  #   relabel_configs:
+  #     - source_labels: [__address__]
+  #       target_label: instance
+  #       regex: '(.*):9100'
+  #       replacement: '${1}'
+
+  # ============================================
+  # POSTGRES EXPORTER EXTENDED (low frequency)
+  # ============================================
+  - job_name: 'postgres_exporter_extended'
+    
+    scrape_interval: 1m
+    scrape_timeout: 45s
+    
+    metrics_path: /metrics
+    
+    static_configs:
+      - targets: ['postgres_exporter_mft:9187']
+        labels:
+          job: postgres_exporter_extended
+          database: material_flow
+          exporter_type: postgres_extended
+          scrape_frequency: low
+          tier: data
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):9187'
+        replacement: '${1}'
+
+  # ============================================
+  # POSTGRES EXPORTER AIRFLOW EXTENDED
+  # ============================================
+  - job_name: 'airflow_db_extended'
+    
+    scrape_interval: 1m
+    scrape_timeout: 45s
+    
+    metrics_path: /metrics
+    
+    static_configs:
+      - targets: ['postgres_exporter_airflow:9187']
+        labels:
+          job: airflow_db_extended
+          database: airflow_metadata
+          exporter_type: postgres_extended
+          scrape_frequency: low
+          tier: data
+    
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):9187'
+        replacement: '${1}'
