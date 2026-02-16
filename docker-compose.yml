@@ -41,7 +41,7 @@ x-airflow-common:
     DB_MAX_RETRIES: ${DB_MAX_RETRIES:-5}
     DB_RETRY_DELAY: ${DB_RETRY_DELAY:-2}
     # Show Python where to find modules and packages to import
-    PYTHONPATH: /opt/airflow:${PYTHONPATH}
+    PYTHONPATH: /opt/airflow
   volumes:
     # Mount each directory from root project directory (mft_src)
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
