@@ -82,7 +82,7 @@ services:
       - mft_airflow_network
 
   redis:
-    image: redis:latest
+    image: redis:7.4.2
     container_name: airflow_redis
     expose:
       - 6379
@@ -93,6 +93,8 @@ services:
       retries: 50
       start_period: 30s
     restart: always
+    networks:
+      - mft_airflow_network
 
   adminer:
     image: adminer
