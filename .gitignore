@@ -1,43 +1,23 @@
-# Игнорируем файлы журналов
+# Ignoring the log files
 logs/*
 
-# Игнорируем директорию для временных данных
-tmp/*
+# Ignoring configuration files
+.env
 
-# Игнорируем резервные копии и скрытые файлы
-*.bak
-.*sw*
+# Ignore Python cache
+dags/__pycache__/
+dags/tasks/__pycache__/
+database/__pycache__/
+config/__pycache__/
+endpoints/__pycache__/
 
-# Игнорируем файлы lock
-*.lock
-
-# Игнорируем файлы конфигурации разработчика
-.env*
-.local/
-
-# Исключаем промежуточные артефакты
-*.py[cod]
-__pycache__/
-
-# Большие и необязательные директории
-node_modules/
-
-# Директории с результатами тестов
-test_reports/
-coverage/
-
-# Большая масса данных для загрузки
-data/mft_data.xlsx
-data/breakpoint_data.xlsx
-
-# Некоторые стандартные файлы
+# Ignoring standard files
 .DS_Store
 Thumbs.db
 
-# Средства автоматического тестирования
+# Ignoring testing tools
 *.pid
-*.log
 *.cfg
 
-# Игнорирование зависимостей локальной виртуальной среды
+# Ignoring the dependencies of the local virtual environment
 .mft_db_env/
