@@ -250,6 +250,29 @@ services:
     networks:
       - mft_airflow_network
 
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.28.0
+    container_name: statsd-exporter
+    restart: unless-stopped
+    volumes:
+      - ./config/monitoring/statsd-exporter/statsd_mapping.yml:/etc/statsd-exporter/mapping.yml
+    command:
+      - '--log.level=info'
+      - '--statsd.listen-udp=:9125'
+      - '--web.listen-address=:9102'
+      - '--statsd.mapping-config=/etc/statsd-exporter/mapping.yml'
+    ports:
+      - "9102:9102"  # Prometheus metrics
+      - "9125:9125/udp"  # StatsD UDP
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9102/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - mft_airflow_network
+
   redis-exporter:
     image: oliver006/redis_exporter:v1.68.0
     container_name: redis_exporter
