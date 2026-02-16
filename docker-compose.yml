@@ -25,6 +25,7 @@ x-airflow-common:
     AIRFLOW__METRICS__POOL_METRICS_INTERVAL: 5.0
     AIRFLOW__SCHEDULER__STATS_ON: 'true'
     AIRFLOW__SCHEDULER__PUBLISH_SCHEDULER_STAT: 'true'
+    AIRFLOW__SCHEDULER__EMIT_POOL_METRICS: 'true'
     # Connecting to mft_db database
     MFT_DB_HOST: ${DB_HOST:-db}
     MFT_DB_PORT: ${DB_PORT:-5432}
