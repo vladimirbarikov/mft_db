@@ -22,6 +22,7 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
     # Metrics for Airflow 2.9.3
     AIRFLOW__METRICS__STATSD_DATADOG_METRICS_TAGS: 'true'
+    AIRFLOW__METRICS__POOL_METRICS_INTERVAL: 5.0
     # Connecting to mft_db database
     MFT_DB_HOST: ${DB_HOST:-db}
     MFT_DB_PORT: ${DB_PORT:-5432}
