@@ -19,6 +19,7 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
+    AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
     # Connecting to mft_db database
     MFT_DB_HOST: ${DB_HOST:-db}
     MFT_DB_PORT: ${DB_PORT:-5432}
