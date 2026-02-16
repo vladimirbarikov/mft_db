@@ -21,3 +21,6 @@ Thumbs.db
 
 # Ignoring the dependencies of the local virtual environment
 .mft_db_env/
+
+# Ignoring the data
+data/*
