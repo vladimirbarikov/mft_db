@@ -94,7 +94,7 @@ Version: 1.0.0
 Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
 Maintainer: PLD Engineering Center
 Created: 2025-01-19
-Last Modified: 2025-01-22
+Last Modified: 2025-02-16
 License: MIT
 Status: Production
 """
@@ -106,6 +106,7 @@ from typing import Any, Optional, Union
 # Third-party imports
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import SQLAlchemyError
 
 # The relative path to the root project directory
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -135,53 +136,13 @@ class MFTObjectMapper:
     """
     Main mapper class for converting external identifiers to database primary keys.
     
-    This class provides a unified interface for mapping text values and composite
-    keys to their corresponding database IDs. It includes intelligent caching,
-    composite key processing, and support for junction table record mapping.
-    
-    Key Capabilities:
-        1. Standard text-to-ID mapping for all entity types
-        2. Composite key processing for packaging entities (boxes, pallets)
-        3. Junction table record transformation with automatic dimension handling
-        4. Performance optimization through lazy loading and caching
-        5. Comprehensive logging and statistics
-    
-    Cache Management:
-        - Mappings are loaded on first use (lazy loading)
-        - Cache keys follow format: "ModelName_columnName"
-        - Cache can be cleared manually with clear_cache()
-        - Cache statistics available via log_mapping_statistics()
-    
-    Composite Key Support:
-        - Boxes: (type, length, width, height) → box_id
-        - Pallets: (type, length, width, height) → pallet_id
-        - Type must be 'returnable' or 'non-returnable'
-        - Dimensions must be positive integers
-        - Generates packaging numbers matching database triggers
-    
-    Thread Safety:
-        - Not thread-safe due to shared cache
-        - Create separate mapper instances for concurrent operations
-    
-    Memory Usage:
-        - Cache size grows with number of unique entities
-        - Clear cache after large operations to free memory
-        - Statistics help monitor cache growth
+    Provides unified interface for mapping text values and composite keys to
+    database IDs with intelligent caching.
     
     Examples:
         >>> mapper = create_mapper()
-        >>> # Standard mapping
         >>> supplier_id = mapper.get_id('supplier_name', 'Acme Corp')
-        >>> # Composite mapping
         >>> box_id = mapper.get_id('box_composite', ('returnable', 400, 300, 200))
-        >>> box_id = mapper.get_id('box_composite', {
-        ...     'type': 'non-returnable',
-        ...     'length': 500,
-        ...     'width': 400,
-        ...     'height': 300
-        ... })
-        >>> # Junction mapping
-        >>> records = mapper.map_junction_records(df, 'part_to_box_composite')
     """
     # Configuration with table names
     COLUMN_TO_MODEL = {
@@ -228,27 +189,11 @@ class MFTObjectMapper:
         Initialize mapper with database session.
         
         Args:
-            session: SQLAlchemy Session object for database operations.
-                     Must be connected to the target database.
-        
-        Returns:
-            MFTObjectMapper instance ready for mapping operations.
-        
-        Initialization:
-            - Sets up internal cache dictionary
-            - Configures logging
-            - Validates session connectivity
-            
-        Notes:
-            - The session should be created AFTER entity tables are loaded
-            - Session lifecycle management is caller's responsibility
-            - Consider using create_mapper() factory function for convenience
+            session: SQLAlchemy Session for database operations
         
         Example:
-            >>> from sqlalchemy.orm import sessionmaker
             >>> session_factory = sessionmaker(bind=engine)
-            >>> session = session_factory()
-            >>> mapper = MFTObjectMapper(session)
+            >>> mapper = MFTObjectMapper(session_factory())
         """
         self.session = session
         self._cached_mappings = {}
@@ -262,58 +207,20 @@ class MFTObjectMapper:
         """
         Get database ID for given column value.
         
-        This is the primary mapping method that handles both standard text
-        values and composite keys. It automatically detects the type of lookup
-        needed based on the column name.
+        Handles both standard text values and composite keys.
         
         Args:
-            column_name: Name of the column to look up.
-                Standard columns: 'part_number', 'box_number', 'model_code', etc.
-                Composite columns: 'box_composite', 'pallet_composite'
-            value: Value to look up.
-                For standard columns: Text value (str) or existing ID
-                For composite columns:
-                    - tuple/list: (type, length, width, height)
-                    - dict: {'type': x, 'length': y, 'width': z, 'height': w}
-                Type must be 'returnable' or 'non-returnable' (case-insensitive)
+            column_name: Column to look up ('part_number', 'box_composite', etc.)
+            value: Value to look up (string for standard, tuple/dict for composite)
                 
         Returns:
-            Database ID as string (UUID format) or None if:
-                - Value is None or empty
-                - Column name is unknown
-                - No matching record found in database
-                - Invalid composite key format
-                - Missing composite key components
-            
-        Raises:
-            ValueError: For composite keys with invalid format (wrong number of elements)
-            
-        Process:
-            1. Validate input (None/empty check)
-            2. Route to composite or standard handler
-            3. Check cache for existing mapping
-            4. Load mapping from database if not cached
-            5. Return ID or None
-            
-        Performance:
-            - First call for each entity type queries database
-            - Subsequent calls use in-memory cache
-            - Composite keys involve string generation before lookup
+            Database ID as string or None if not found
             
         Examples:
-            >>> # Standard lookup
-            >>> part_id = mapper.get_id('part_number', 'ABC-123')
-            >>> 
-            >>> # Composite lookup with tuple
-            >>> box_id = mapper.get_id('box_composite', ('returnable', 400, 300, 200))
-            >>> 
-            >>> # Composite lookup with dict
-            >>> pallet_id = mapper.get_id('pallet_composite', {
-            ...     'type': 'non-returnable',
-            ...     'length': 1200,
-            ...     'width': 800,
-            ...     'height': 150
-            ... })
+            >>> mapper.get_id('part_number', 'ABC-123')
+            >>> mapper.get_id('box_composite', ('returnable', 400, 300, 200))
+            >>> mapper.get_id('box_composite', {'type': 'returnable', 'length': 400, 
+            ...                                 'width': 300, 'height': 200})
         """
         if not value:
             return None
@@ -350,51 +257,12 @@ class MFTObjectMapper:
         """
         Get database ID for composite packaging key.
         
-        Internal method that handles the complex logic of converting packaging
-        dimensions into the standardized packaging number format used by the
-        database triggers, then looking up the corresponding ID.
-        
         Args:
-            column_name: Either 'box_composite' or 'pallet_composite'
-            value: Composite key specification in one of these formats:
-                - tuple/list: (type, length, width, height) [4 elements]
-                - dict: {'type': x, 'length': y, 'width': z, 'height': w}
+            column_name: 'box_composite' or 'pallet_composite'
+            value: (type, length, width, height) or dict with keys
                 
         Returns:
-            Database ID (UUID string) or None if:
-                - Invalid input format
-                - Missing required components
-                - No matching packaging entity found
-                
-        Process:
-            1. Parse input format (dict, tuple, or list)
-            2. Extract type and dimensions
-            3. Validate all components are present
-            4. Generate packaging number (e.g., 'R 400-300-200')
-            5. Look up ID using standard box_number/pallet_number mapping
-            6. Return ID or None
-            
-        Packaging Number Generation:
-            - 'returnable' → 'R L-W-H'  (e.g., 'R 400-300-200')
-            - 'non-returnable' → 'N L-W-H'  (e.g., 'N 500-400-300')
-            - Matches exactly what database.py event handlers generate
-            
-        Notes:
-            - Type is case-insensitive ('RETURNABLE', 'Returnable', 'returnable' all work)
-            - Dimensions should be integers or convertible to integers
-            - Generated number must match exactly what's in the database
-            
-        Examples:
-            >>> # Tuple format
-            >>> box_id = mapper._get_composite_id('box_composite', 
-            ...                                   ('returnable', 400, 300, 200))
-            >>> # Dict format  
-            >>> pallet_id = mapper._get_composite_id('pallet_composite', {
-            ...     'type': 'non-returnable',
-            ...     'length': 1200,
-            ...     'width': 800,
-            ...     'height': 150
-            ... })
+            Database ID or None
         """
         try:
             # Parse composite value
@@ -476,7 +344,6 @@ class MFTObjectMapper:
                 if box_id:
                     logger.debug(
                         "Found box_id %s for composite %s", box_id, composite_key)
-
                 else:
                     logger.debug("No box found for composite %s", composite_key)
 
@@ -499,9 +366,11 @@ class MFTObjectMapper:
 
                 return pallet_id
 
-        except Exception as e:
-            logger.error(
-                "Error processing composite key %s: %s", value, e)
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error("Error processing composite key %s: %s", value, e)
+            return None
+        except Exception as unexpected_error:
+            logger.error("Unexpected error processing composite key %s: %s", value, unexpected_error)
             return None
 
     def _load_mapping(
@@ -513,36 +382,11 @@ class MFTObjectMapper:
         """
         Load mapping from database into cache.
         
-        Internal method that queries the database for all records of a specific
-        entity type and caches the lookup_column → id_column mappings.
-        
         Args:
-            model_class: SQLAlchemy ORM model class (e.g., SupplierData, PartData)
-            lookup_column: Column name used for lookups (e.g., 'supplier_name')
-            id_column: Column name containing the ID (e.g., 'supplier_id')
-            cache_key: Key to store the mapping in internal cache
-                Format: "ModelName_columnName"
-                
-        Process:
-            1. Query database for all (lookup_value, id) pairs
-            2. Convert lookup values to strings for consistent access
-            3. Store in internal cache dictionary
-            4. Log statistics and sample data
-            
-        Performance:
-            - Single query per entity type (efficient for bulk operations)
-            - All records loaded at once (consider memory for large tables)
-            - Cached indefinitely until clear_cache() is called
-            
-        Logging:
-            - Info level: Total count loaded
-            - Debug level: Sample of first few mappings
-            - Error level: Database query failures
-            
-        Example:
-            >>> mapper._load_mapping(SupplierData, 'supplier_name', 
-            ...                     'supplier_id', 'SupplierData_supplier_name')
-            # Loads all supplier_name → supplier_id mappings into cache
+            model_class: SQLAlchemy model class
+            lookup_column: Column name for lookups
+            id_column: Column name containing the ID
+            cache_key: Key to store the mapping in cache
         """
         logger.debug(
             "Loading mapping for %s.%s -> %s",
@@ -583,10 +427,22 @@ class MFTObjectMapper:
                     sample_items
                 )
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(
-                "Error loading mapping for %s: %s",
+                "Database error loading mapping for %s: %s",
                 cache_key, e
+            )
+            self._cached_mappings[cache_key] = {}
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error(
+                "Data error loading mapping for %s: %s",
+                cache_key, e
+            )
+            self._cached_mappings[cache_key] = {}
+        except Exception as unexpected_error:
+            logger.error(
+                "Unexpected error loading mapping for %s: %s",
+                cache_key, unexpected_error
             )
             self._cached_mappings[cache_key] = {}
 
@@ -600,6 +456,10 @@ class MFTObjectMapper:
         
         REQUIRED because box_number and pallet_number are computed columns
         in database.py and cannot be queried directly.
+        
+        Args:
+            model_class: BoxData or PalletData
+            cache_key: Key to store the mapping in cache
         """
         logger.debug(
             "Loading composite mapping for %s",
@@ -649,10 +509,22 @@ class MFTObjectMapper:
                 cache_key, total_count
             )
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(
-                "Error loading composite mapping for %s: %s",
+                "Database error loading composite mapping for %s: %s",
                 cache_key, e
+            )
+            self._cached_mappings[cache_key] = {}
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error(
+                "Data error loading composite mapping for %s: %s",
+                cache_key, e
+            )
+            self._cached_mappings[cache_key] = {}
+        except Exception as unexpected_error:
+            logger.error(
+                "Unexpected error loading composite mapping for %s: %s",
+                cache_key, unexpected_error
             )
             self._cached_mappings[cache_key] = {}
 
@@ -660,195 +532,226 @@ class MFTObjectMapper:
 
     def _map_part_to_box_composite(self, record: dict[str, Any]) -> Optional[dict[str, Any]]:
         """
-        Mapping record for part_to_box junction table with composite keys.
+        Map part_to_box junction record with composite keys.
         
-        Expected columns:
-            - part_number: part number
-            - box_type: packaging type ('returnable' or 'non-returnable')
-            - box_length_mm: box length in mm
-            - box_width_mm: box width in mm
-            - box_height_mm: box height in mm
-            - part_per_box: number of parts per box (optional)
+        Args:
+            record: Dict with part_number, box_type, box_length_mm, 
+                   box_width_mm, box_height_mm, part_per_box (optional)
+        
+        Returns:
+            Dict with part_id, box_id, part_per_box or None
         """
-        # Check for all required columns
-        required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_box_composite']
-        for col in required_cols:
-            if col not in record:
-                logger.debug("Missing required column '%s' in part_to_box record", col)
+        try:
+            # Check for all required columns
+            required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_box_composite']
+            for col in required_cols:
+                if col not in record:
+                    logger.debug("Missing required column '%s' in part_to_box record", col)
+                    return None
+
+            # Mapping part_number → part_id
+            part_id = self.get_id('part_number', record['part_number'])
+            if not part_id:
+                logger.warning("No part_id found for part_number: %s", record['part_number'])
                 return None
 
-        # Mapping part_number → part_id
-        part_id = self.get_id('part_number', record['part_number'])
-        if not part_id:
-            logger.warning("No part_id found for part_number: %s", record['part_number'])
+            # Mapping composite box → box_id
+            box_composite = {
+                'type': record['box_type'],
+                'length': record['box_length_mm'],
+                'width': record['box_width_mm'],
+                'height': record['box_height_mm']
+            }
+
+            box_id = self.get_id('box_composite', box_composite)
+            if not box_id:
+                logger.warning("No box_id found for composite: %s", box_composite)
+                return None
+
+            # Create result
+            result = {
+                'part_id': part_id,
+                'box_id': box_id
+            }
+
+            # Add optional fields
+            optional_cols = JUNCTION_OPTIONAL_COLUMNS['part_to_box_composite']
+            for col in optional_cols:
+                if col in record and record[col] is not None:
+                    result[col] = record[col]
+
+            return result
+
+        except (KeyError, ValueError, TypeError) as e:
+            logger.debug("Error mapping part_to_box record: %s", e)
             return None
-
-        # Mapping composite box → box_id
-        box_composite = {
-            'type': record['box_type'],
-            'length': record['box_length_mm'],
-            'width': record['box_width_mm'],
-            'height': record['box_height_mm']
-        }
-
-        box_id = self.get_id('box_composite', box_composite)
-        if not box_id:
-            logger.warning("No box_id found for composite: %s", box_composite)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error mapping part_to_box record: %s", unexpected_error)
             return None
-
-        # Create result
-        result = {
-            'part_id': part_id,
-            'box_id': box_id
-        }
-
-        # Add optional fields
-        optional_cols = JUNCTION_OPTIONAL_COLUMNS['part_to_box_composite']
-        for col in optional_cols:
-            if col in record and record[col] is not None:
-                result[col] = record[col]
-
-        return result
 
     def _map_box_to_pallet_composite(self, record: dict[str, Any]) -> Optional[dict[str, Any]]:
         """
-        Mapping record for box_to_pallet junction table with composite keys.
+        Map box_to_pallet junction record with composite keys.
         
-        Expected columns:
-            - box_type: box type ('returnable' or 'non-returnable')
-            - box_length_mm: box length in mm
-            - box_width_mm: box width in mm
-            - box_height_mm: box height in mm
-            - pallet_type: pallet type ('returnable' or 'non-returnable')
-            - pallet_length_mm: pallet length in mm
-            - pallet_width_mm: pallet width in mm
-            - pallet_height_mm: pallet height in mm
-            - box_per_pallet: number of boxes per pallet (optional)
+        Args:
+            record: Dict with box_type, box_length_mm, box_width_mm, box_height_mm,
+                   pallet_type, pallet_length_mm, pallet_width_mm, pallet_height_mm,
+                   box_per_pallet (optional)
+        
+        Returns:
+            Dict with box_id, pallet_id, box_per_pallet or None
         """
-        # Check for all required columns
-        required_cols = JUNCTION_REQUIRED_COLUMNS['box_to_pallet_composite']
-        for col in required_cols:
-            if col not in record:
-                logger.debug("Missing required column '%s' in box_to_pallet record", col)
+        try:
+            # Check for all required columns
+            required_cols = JUNCTION_REQUIRED_COLUMNS['box_to_pallet_composite']
+            for col in required_cols:
+                if col not in record:
+                    logger.debug("Missing required column '%s' in box_to_pallet record", col)
+                    return None
+
+            # Mapping composite box → box_id
+            box_composite = {
+                'type': record['box_type'],
+                'length': record['box_length_mm'],
+                'width': record['box_width_mm'],
+                'height': record['box_height_mm']
+            }
+
+            box_id = self.get_id('box_composite', box_composite)
+            if not box_id:
+                logger.debug("No box_id found for composite: %s", box_composite)
                 return None
 
-        # Mapping composite box → box_id
-        box_composite = {
-            'type': record['box_type'],
-            'length': record['box_length_mm'],
-            'width': record['box_width_mm'],
-            'height': record['box_height_mm']
-        }
+            # Mapping composite pallet → pallet_id
+            pallet_composite = {
+                'type': record['pallet_type'],
+                'length': record['pallet_length_mm'],
+                'width': record['pallet_width_mm'],
+                'height': record['pallet_height_mm']
+            }
 
-        box_id = self.get_id('box_composite', box_composite)
-        if not box_id:
-            logger.debug("No box_id found for composite: %s", box_composite)
+            pallet_id = self.get_id('pallet_composite', pallet_composite)
+            if not pallet_id:
+                logger.debug("No pallet_id found for composite: %s", pallet_composite)
+                return None
+
+            # Create result
+            result = {
+                'box_id': box_id,
+                'pallet_id': pallet_id
+            }
+
+            # Add optional fields
+            optional_cols = JUNCTION_OPTIONAL_COLUMNS['box_to_pallet_composite']
+            for col in optional_cols:
+                if col in record and record[col] is not None:
+                    result[col] = record[col]
+
+            return result
+
+        except (KeyError, ValueError, TypeError) as e:
+            logger.debug("Error mapping box_to_pallet record: %s", e)
             return None
-
-        # Mapping composite pallet → pallet_id
-        pallet_composite = {
-            'type': record['pallet_type'],
-            'length': record['pallet_length_mm'],
-            'width': record['pallet_width_mm'],
-            'height': record['pallet_height_mm']
-        }
-
-        pallet_id = self.get_id('pallet_composite', pallet_composite)
-        if not pallet_id:
-            logger.debug("No pallet_id found for composite: %s", pallet_composite)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error mapping box_to_pallet record: %s", unexpected_error)
             return None
-
-        # Create result
-        result = {
-            'box_id': box_id,
-            'pallet_id': pallet_id
-        }
-
-        # Add optional fields
-        optional_cols = JUNCTION_OPTIONAL_COLUMNS['box_to_pallet_composite']
-        for col in optional_cols:
-            if col in record and record[col] is not None:
-                result[col] = record[col]
-
-        return result
 
     def _map_part_to_model(self, record: dict[str, Any]) -> Optional[dict[str, Any]]:
         """
-        Mapping record for part_to_model junction table.
+        Map part_to_model junction record.
         
-        Expected columns:
-            - part_number: part number
-            - model_code: model code (A01, B02, etc.)
-            - configuration: configuration (optional)
-            - part_per_vehicle: number of parts per vehicle (optional)
+        Args:
+            record: Dict with part_number, model_code, 
+                   configuration (optional), part_per_vehicle (optional)
+        
+        Returns:
+            Dict with part_id, model_id, configuration, part_per_vehicle or None
         """
-        # Check for all required columns
-        required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_model']
-        for col in required_cols:
-            if col not in record:
-                logger.debug("Missing required column '%s' in part_to_model record", col)
+        try:
+            # Check for all required columns
+            required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_model']
+            for col in required_cols:
+                if col not in record:
+                    logger.debug("Missing required column '%s' in part_to_model record", col)
+                    return None
+
+            # Mapping part_number → part_id
+            part_id = self.get_id('part_number', record['part_number'])
+            if not part_id:
+                logger.debug("No part_id found for part_number: %s", record['part_number'])
                 return None
 
-        # Mapping part_number → part_id
-        part_id = self.get_id('part_number', record['part_number'])
-        if not part_id:
-            logger.debug("No part_id found for part_number: %s", record['part_number'])
+            # Mapping model_code → model_id
+            model_id = self.get_id('model_code', record['model_code'])
+            if not model_id:
+                logger.debug("No model_id found for model_code: %s", record['model_code'])
+                return None
+
+            # Create result
+            result = {
+                'part_id': part_id,
+                'model_id': model_id
+            }
+
+            # Add optional fields
+            optional_cols = JUNCTION_OPTIONAL_COLUMNS['part_to_model']
+            for col in optional_cols:
+                if col in record and record[col] is not None:
+                    result[col] = record[col]
+
+            return result
+
+        except (KeyError, ValueError, TypeError) as e:
+            logger.debug("Error mapping part_to_model record: %s", e)
             return None
-
-        # Mapping model_code → model_id
-        model_id = self.get_id('model_code', record['model_code'])
-        if not model_id:
-            logger.debug("No model_id found for model_code: %s", record['model_code'])
+        except Exception as unexpected_error:
+            logger.error("Unexpected error mapping part_to_model record: %s", unexpected_error)
             return None
-
-        # Create result
-        result = {
-            'part_id': part_id,
-            'model_id': model_id
-        }
-
-        # Add optional fields
-        optional_cols = JUNCTION_OPTIONAL_COLUMNS['part_to_model']
-        for col in optional_cols:
-            if col in record and record[col] is not None:
-                result[col] = record[col]
-
-        return result
 
     def _map_part_to_line(self, record: dict[str, Any]) -> Optional[dict[str, Any]]:
         """
-        Mapping record for part_to_line junction table.
+        Map part_to_line junction record.
         
-        Expected columns:
-            - part_number: part number
-            - line_code: production line code
+        Args:
+            record: Dict with part_number, line_code
+        
+        Returns:
+            Dict with part_id, line_id or None
         """
-        # Check for all required columns
-        required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_line']
-        for col in required_cols:
-            if col not in record:
-                logger.debug("Missing required column '%s' in part_to_line record", col)
+        try:
+            # Check for all required columns
+            required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_line']
+            for col in required_cols:
+                if col not in record:
+                    logger.debug("Missing required column '%s' in part_to_line record", col)
+                    return None
+
+            # Mapping part_number → part_id
+            part_id = self.get_id('part_number', record['part_number'])
+            if not part_id:
+                logger.debug("No part_id found for part_number: %s", record['part_number'])
                 return None
 
-        # Mapping part_number → part_id
-        part_id = self.get_id('part_number', record['part_number'])
-        if not part_id:
-            logger.debug("No part_id found for part_number: %s", record['part_number'])
+            # Mapping line_code → line_id
+            line_id = self.get_id('line_code', record['line_code'])
+            if not line_id:
+                logger.debug("No line_id found for line_code: %s", record['line_code'])
+                return None
+
+            # Create result
+            result = {
+                'part_id': part_id,
+                'line_id': line_id
+            }
+
+            return result
+
+        except (KeyError, ValueError, TypeError) as e:
+            logger.debug("Error mapping part_to_line record: %s", e)
             return None
-
-        # Mapping line_code → line_id
-        line_id = self.get_id('line_code', record['line_code'])
-        if not line_id:
-            logger.debug("No line_id found for line_code: %s", record['line_code'])
+        except Exception as unexpected_error:
+            logger.error("Unexpected error mapping part_to_line record: %s", unexpected_error)
             return None
-
-        # Create result
-        result = {
-            'part_id': part_id,
-            'line_id': line_id
-        }
-
-        return result
 
     # ========== MAIN MAPPING METHODS ==========
 
@@ -910,50 +813,16 @@ class MFTObjectMapper:
         """
         Map junction table records with composite packaging support.
         
-        This method transforms raw junction table data (containing text references
-        and dimension columns) into database-ready records with proper foreign
-        key IDs. It handles the complexity of composite keys for packaging
-        entities automatically.
-        
         Args:
-            junction_df: Polars DataFrame containing junction table data.
-                Must contain appropriate columns for the junction type.
-            junction_type: Type of junction table to map.
-                Supported types:
-                - 'part_to_box_composite' (uses box_composite)
-                - 'box_to_pallet_composite' (uses box_composite, pallet_composite)
-                - 'part_to_model'
-                - 'part_to_line'
+            junction_df: Polars DataFrame with junction table data
+            junction_type: Type of junction table to map
+                (part_to_box_composite, box_to_pallet_composite, part_to_model, part_to_line)
                 
         Returns:
-            List of dictionaries with database IDs ready for SQLAlchemy insertion.
-            Each dictionary contains only foreign key columns and any additional
-            relationship-specific columns (e.g., 'part_per_box', 'configuration').
-            
-        Process:
-            1. Convert DataFrame to list of dictionaries
-            2. For each record, apply mapping rules for the junction type
-            3. Handle composite keys by extracting dimensions from record
-            4. Skip records with unmappable references
-            5. Preserve non-mapping columns in output
-            6. Log statistics about mapping success rate
-            
-        Column Handling:
-            - Mapping columns: Replaced with ID columns (e.g., 'part_number' → 'part_id')
-            - Dimension columns: Dropped when using composite keys
-            - Additional columns: Preserved as-is (e.g., 'part_per_box')
+            List of dicts with database IDs ready for insertion
             
         Examples:
-            >>> # Input DataFrame has columns: part_number, box_type, box_length_mm, ...
             >>> records = mapper.map_junction_records(df, 'part_to_box_composite')
-            >>> # Output records have columns: part_id, box_id, part_per_box, ...
-            >>> print(records[0])
-            {'part_id': 'uuid1', 'box_id': 'uuid2', 'part_per_box': 10}
-            
-        Notes:
-            - Records with missing or unmappable references are skipped (not an error)
-            - Dimension columns are automatically extracted for composite keys
-            - Returns empty list if junction_type is unknown
         """
         logger.info("Mapping junction records for: %s", junction_type)
 
@@ -970,7 +839,16 @@ class MFTObjectMapper:
             return []
 
         handler = handler_map[junction_type]
-        records = junction_df.to_dicts()
+
+        try:
+            records = junction_df.to_dicts()
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error("Error converting DataFrame to dicts: %s", e)
+            return []
+        except Exception as unexpected_error:
+            logger.error("Unexpected error converting DataFrame: %s", unexpected_error)
+            return []
+
         mapped_records = []
         skipped = 0
 
@@ -981,8 +859,8 @@ class MFTObjectMapper:
                     mapped_records.append(mapped_record)
                 else:
                     skipped += 1
-            except Exception as e:
-                logger.debug("Failed to map record: %s", e)
+            except Exception as unexpected_error:
+                logger.error("Unexpected error in handler for record %s: %s", record, unexpected_error)
                 skipped += 1
 
         # Logging statistics
@@ -999,40 +877,12 @@ class MFTObjectMapper:
 
         return mapped_records
 
-    def log_mapping_statistics(self):
+    def log_mapping_statistics(self) -> int:
         """
         Log statistics about all loaded mappings.
         
-        Provides a comprehensive overview of the current cache state,
-        including total entries per entity type and composite key support
-        information. Useful for monitoring cache performance and memory usage.
-        
         Returns:
-            int: Total number of cached mapping entries across all entity types.
-            
-        Output Format:
-            ============================================================
-            MAPPING STATISTICS (with composite key support)
-            ============================================================
-            Composite Key Support:
-              - box_composite: (type, length, width, height) → box_id
-              - pallet_composite: (type, length, width, height) → pallet_id
-            ------------------------------------------------------------
-            SupplierData_supplier_name: 150 entries
-            PartData_part_number: 1250 entries
-            BoxData_box_number: 85 entries
-            ...
-            Total cached mappings: 2500 entries
-            ============================================================
-            
-        Usage:
-            >>> mapper.log_mapping_statistics()
-            >>> # Use in performance monitoring or debugging
-            
-        Notes:
-            - Logged at INFO level for visibility in production
-            - Helps identify which mappings are consuming memory
-            - Shows composite key support for documentation purposes
+            int: Total number of cached mapping entries
         """
         total_entries = 0
 
@@ -1053,36 +903,7 @@ class MFTObjectMapper:
         return total_entries
 
     def clear_cache(self):
-        """
-        Clear cached mappings.
-        
-        Releases memory used by cached ID mappings. Should be called after
-        bulk operations or when the mapper is no longer needed to prevent
-        memory leaks.
-        
-        Process:
-            1. Logs total cache size before clearing
-            2. Clears all internal cache dictionaries
-            3. Logs completion message
-            
-        Usage:
-            >>> mapper.clear_cache()
-            >>> # Or use in finally block to ensure cleanup
-            >>> try:
-            ...     # Mapping operations
-            ... finally:
-            ...     mapper.clear_cache()
-            
-        Memory Management:
-            - Cache can grow large with many entities
-            - Clearing is essential in long-running processes
-            - Automatically called by loader.py after junction table loading
-            
-        Notes:
-            - Does not affect database connections or sessions
-            - Subsequent get_id() calls will reload from database
-            - Safe to call multiple times
-        """
+        """Clear cached mappings to free memory."""
         cache_size = sum(len(mapping) for mapping in self._cached_mappings.values())
         logger.info("Clearing cache with %d total entries.", cache_size)
 
@@ -1094,59 +915,41 @@ def create_mapper(engine=None) -> MFTObjectMapper:
     """
     Factory function to create MFTObjectMapper.
     
-    Creates a properly configured mapper instance with composite key support.
-    This is the recommended way to create mappers as it handles database
-    connection and session management automatically.
-    
     Args:
-        engine: Optional SQLAlchemy database engine.
-                If not provided, a new engine will be initialized using
-                initialize_database(create_tables=False).
+        engine: Optional SQLAlchemy database engine (new one created if None)
                 
     Returns:
-        MFTObjectMapper instance ready for use.
+        MFTObjectMapper instance ready for use
         
     Raises:
-        SQLAlchemyError: If database connection fails.
-        RuntimeError: If mapper cannot be created.
+        SQLAlchemyError: If database connection fails
+        RuntimeError: If mapper cannot be created
         
     Critical Timing:
-        The mapper MUST be created AFTER core entity tables are loaded,
-        as it reads the IDs from the database to build its cache. Creating
-        it before entities are loaded will result in empty caches and
-        failed lookups.
+        Mapper MUST be created AFTER core entity tables are loaded.
         
-    Process:
-        1. Initialize database engine (if not provided)
-        2. Create SQLAlchemy session factory
-        3. Create database session
-        4. Instantiate MFTObjectMapper with the session
-        5. Log creation success
-        
-    Usage:
-        >>> # After loading entity tables
+    Example:
         >>> mapper = create_mapper()
-        >>> # Or with existing engine
-        >>> mapper = create_mapper(engine)
-        
-    Notes:
-        - Session lifecycle is managed internally
-        - Engine is not closed by this function (caller's responsibility)
-        - Consider using connection pooling for production use
-        
-    Integration:
-        - Used by loader.py to create mapper for junction table loading
-        - Should be called once per data loading pipeline
-        - Mapper should be cleared after use with clear_cache()
     """
-    if engine is None:
-        engine = initialize_database(create_tables=False)
+    try:
+        if engine is None:
+            engine = initialize_database(create_tables=False)
 
-    # Create session factory and session
-    session_factory = sessionmaker(bind=engine)
-    session = session_factory()
+        # Create session factory and session
+        session_factory = sessionmaker(bind=engine)
+        session = session_factory()
 
-    mapper = MFTObjectMapper(session)
-    logger.info("MFTObjectMapper created successfully.")
+        mapper = MFTObjectMapper(session)
+        logger.info("MFTObjectMapper created successfully.")
 
-    return mapper
+        return mapper
+
+    except SQLAlchemyError as e:
+        logger.error("Database error creating mapper: %s", e)
+        raise
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.error("Configuration error creating mapper: %s", e)
+        raise RuntimeError(f"Failed to create mapper: {e}") from e
+    except Exception as unexpected_error:
+        logger.error("Unexpected error creating mapper: %s", unexpected_error)
+        raise RuntimeError(f"Unexpected error creating mapper: {unexpected_error}") from unexpected_error
