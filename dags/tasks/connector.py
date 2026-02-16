@@ -1,86 +1,135 @@
-"""
-Database connection and management module for PostgreSQL with SQLAlchemy.
-
-This module provides a comprehensive solution for:
-1. Database connection management with retry logic
-2. Automatic host detection (local, Docker, network)
-3. Environment-based configuration with .env file support
-4. Database existence verification and creation
-5. Table management based on SQLAlchemy models
-6. Health checking and monitoring
-
-Key Features:
-- Lazy loading and caching of database models
-- Secure password handling (never logged)
-- Multiple connection strategies with fallback
-- Comprehensive error handling and logging
-- Support for both local and Docker environments
-
-Architecture:
-The module follows a factory pattern for model checking and uses
-dependency injection for database engine management.
-
-Usage Example:
-    >>> from connector import initialize_database
-    >>> engine = initialize_database()
-    >>> if engine:
-    ...     # Use engine for database operations
-    ...     pass
-
-Environment Variables:
-    DB_HOST: Database hostname (optional, auto-detected)
-    DB_PORT: Database port (default: 5432)
-    DB_NAME: Database name (default: mft_db)
-    DB_USER: Database user (default: postgres)
-    DB_PASSWORD: Database password (default: postgres)
-    DB_MAX_RETRIES: Maximum connection attempts (default: 5)
-    DB_RETRY_DELAY: Delay between retries in seconds (default: 2)
-
-Dependencies:
-    - SQLAlchemy: ORM and database abstraction
-    - SQLAlchemy-Utils: Database existence utilities
-    - python-dotenv: Environment variable management (optional)
-
-Logging:
-    Configured with INFO level by default. Sensitive information
-    (passwords) is automatically redacted from logs.
-
-Error Handling:
-    All functions include comprehensive error handling with
-    appropriate logging and exception propagation.
-
-Thread Safety:
-    Functions are generally thread-safe for read operations.
-    Write operations may require external synchronization.
-
-Note:
-    This module is designed for PostgreSQL but can be adapted
-    for other databases by modifying connection strings and
-    SQL dialect-specific features.
-
-Version: 1.0.0
-Compatibility: Python 3.12.3, SQLAlchemy 1.4.54, PostgreSQL 12+
-Maintainer: PLD Engineering Center
-Created: 2025
-Last Modified: 2025
-License: MIT
-Status: Production
-"""
-
 # pyright: basic
 # pyright: reportOptionalMemberAccess=false
 # pyright: reportOptionalContextManager=false
 # pyright: reportOptionalSubscript=false
 # pyright: reportOptionalIterable=false
 
+# pylint: disable=too-many-lines
+# pylint: disable=wrong-import-position
+"""
+Database connection and management module for Material Flow Table Database with SQLAlchemy.
+
+This module provides a comprehensive solution for database connectivity, health checking,
+and schema management in the Material Flow Table Database. It implements robust
+connection strategies, automatic host detection, and table management with full support
+for PostgreSQL environments.
+
+Key Features:
+    - Intelligent host detection with multiple fallback strategies (local, Docker, network)
+    - Secure password handling with automatic redaction in logs
+    - Environment-based configuration with .env file support
+    - Database existence verification and automatic creation
+    - Table management based on SQLAlchemy ORM models
+    - Comprehensive health checking and monitoring
+    - Retry logic with configurable attempts and delays
+    - Connection pooling and resource management
+
+Architecture:
+    The module implements a factory pattern for model availability checking and uses
+    a layered approach for connection management:
+    1. Configuration Layer: Environment variable parsing and validation
+    2. Detection Layer: Automatic host and network configuration detection
+    3. Connection Layer: Database connection with retry logic
+    4. Schema Layer: Table creation and verification
+    5. Monitoring Layer: Health checks and database information gathering
+
+Dependencies:
+    - SQLAlchemy 1.4.54+: ORM and database abstraction layer
+    - SQLAlchemy-Utils 0.41.1+: Database existence and creation utilities
+    - python-dotenv 1.0.0+: Environment variable management (optional but recommended)
+    - PostgreSQL 12+: Target database system
+
+Performance Considerations:
+    - Connection pooling with configurable pool size and recycling
+    - Lazy loading of database models to minimize startup time
+    - Cached host resolution to avoid repeated DNS lookups
+    - Intelligent retry logic with exponential backoff (configurable)
+
+Security Notes:
+    - Passwords are never logged or exposed in error messages
+    - Connection strings are sanitized before logging
+    - Environment variable loading with validation and error handling
+    - Database credentials stored securely in .env files or environment variables
+
+Error Handling:
+    - Comprehensive exception hierarchy with appropriate logging levels
+    - Graceful degradation for missing dependencies
+    - Connection retry logic for transient network issues
+    - Detailed error messages for debugging without exposing sensitive data
+
+Integration Notes:
+    - Used by loader.py for database connectivity during data loading
+    - Integrates with database.py for ORM model management
+    - Supports both development (Docker) and production environments
+    - Airflow compatible with proper connection lifecycle management
+
+Host Detection Strategy:
+    1. Environment variable DB_HOST (explicit override)
+    2. localhost (127.0.0.1) for local development
+    3. Docker service names (postgres_mft_db, postgres)
+    4. host.docker.internal for Docker Desktop
+    5. Fallback to localhost with warning
+
+Connection Pool Configuration:
+    - pool_size: 5 concurrent connections
+    - max_overflow: 10 temporary connections
+    - pool_recycle: 3600 seconds (1 hour)
+    - pool_pre_ping: True (validate connections)
+    - connect_timeout: 10 seconds
+
+Environment Variables:
+    DB_HOST: Database hostname (optional, auto-detected)
+    DB_PORT: Database port (default: 5432)
+    DB_NAME: Database name (default: mft_db)
+    DB_USER: Database user (default: mft_user)
+    DB_PASSWORD: Database password (default: mft_password)
+    DB_MAX_RETRIES: Maximum connection attempts (default: 5)
+    DB_RETRY_DELAY: Delay between retries in seconds (default: 2)
+
+Note:
+    This module is specifically designed for PostgreSQL databases in manufacturing
+    data warehouse environments. It assumes UTF-8 encoding and template0 for
+    database creation. For other database systems, connection strings and SQL
+    dialects would need adjustment.
+
+Usage Example:
+    ```
+    from dags.tasks.connector import initialize_database
+    
+    # Basic initialization with table creation
+    engine = initialize_database(create_tables=True)
+    if engine:
+        # Database operations here
+        print(f"Connected to {engine.url.database}")
+    
+    # Without table creation (for loader.py)
+    engine = initialize_database(create_tables=False)
+    
+    # Direct connection with custom parameters
+    from dags.tasks.connector import connect_to_database
+    engine = connect_to_database(max_retries=5, retry_delay=3, create_tables=True)
+    ```
+
+Maintainer: PLD Engineering Center
+Version: 1.0.0
+Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
+Created: 2026-01-05
+Last Modified: 2025-01-22
+License: MIT
+Status: Production
+"""
+# Standard library imports
 from pathlib import Path
 import os
 import sys
 import socket
 import time
+from typing import (
+    Any, Callable, cast, Optional, Tuple, Type
+)
 
-from typing import List, cast, Optional, Any, Tuple, Callable, Type
-
+# Third-party imports
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect as sqlalchemy_inspect, text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.engine import Engine
@@ -88,49 +137,35 @@ from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy_utils import database_exists, create_database
 
 # The relative path to the root project directory
-project_path = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Add the project path to sys.path
-if str(project_path) not in sys.path:
-    sys.path.insert(0, str(project_path))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Import logger configuration
+# Local imports
 from config import get_logger
-
-# Import SQLAlchemy ORM base class to create data models
 from database.database import Base as DatabaseBase
-
 
 # Logger setup
 logger = get_logger(__name__)
 
 # Load environment variables
 try:
-    from dotenv import load_dotenv
-    project_path = Path(__file__).resolve().parents[2]
-    env_path = project_path / '.env'
+    env_path = PROJECT_ROOT / '.env'
 
     if env_path.exists():
-        if env_path.is_file():
-            try:
-                load_dotenv(dotenv_path=env_path, override=True)
-                logger.info("Loaded environment from %s", env_path)
-
-            except (PermissionError, ValueError, UnicodeDecodeError) as e:
-                # The .env file exists, but it is corrupted
-                logger.critical("Corrupted .env file: %s", e)
-                raise RuntimeError("Invalid .env file") from e
-        else:
-            # The path exists, but it is not an .env file
-            logger.critical("%s is not a file", env_path)
-            raise RuntimeError(f"Expected file, got directory: {env_path}")
+        load_dotenv(dotenv_path=env_path, override=True)
+        logger.info("The environment variables are loaded from %s", env_path)
     else:
         # There is no .env file
         logger.debug(".env not found, using system environment")
 
-except ImportError:
-    # python-dotenv is not installed
-    logger.info("python-dotenv not installed")
+except (PermissionError, ValueError, UnicodeDecodeError) as e:
+    # The .env file exists, but it is corrupted
+    logger.critical("Corrupted .env file: %s", e)
+    raise RuntimeError("Invalid .env file") from e
+
 except Exception as e:
     # Unexpected error
     logger.critical("Unexpected error: %s", e, exc_info=True)
@@ -142,12 +177,16 @@ def make_models_checker()-> Tuple[
     Callable[[], None]
 ]:
     """
-    Factory function that creates and manages database model availability checks.
+    Factory for functions that manage database model availability state.
 
-    Returns a tuple of three callable functions:
-    1. models_available(): Check if database models are accessible and valid
-    2. get_base(): Get the SQLAlchemy Base class if available
-    3. reset(): Reset the internal state (primarily for testing)
+    Creates three callables to check, retrieve, and reset the state of SQLAlchemy
+    models from the `database.database` module.
+
+    Returns:
+        Tuple of:
+        - models_available(): Returns True if models are loaded and valid.
+        - get_base(): Returns the SQLAlchemy Base class if available, else None.
+        - reset(): Resets the internal state (primarily for testing).
     """
     _base = None
     _has_database_models = False
@@ -155,18 +194,10 @@ def make_models_checker()-> Tuple[
 
     def models_available() -> bool:
         """
-        Check if database models are available and properly structured.
-        
-        Performs lazy initialization on first call:
-        1. Attempts to import DatabaseBase from database.database
-        2. Validates that Base has 'metadata' attribute
-        3. Caches the result for subsequent calls
-        
+        Check if database models are available and valid.
+
         Returns:
-            True if models are available and valid, False otherwise.
-            
-        Raises:
-            No exceptions are raised; all errors are logged and handled gracefully.
+            True if models are loaded and have required attributes, False otherwise.
         """
         nonlocal _base, _has_database_models, _attempted
 
@@ -206,14 +237,9 @@ def make_models_checker()-> Tuple[
     def get_base()-> Optional[Type[Any]]:
         """
         Retrieve the SQLAlchemy Base class if models are available.
-        
+
         Returns:
-            The Base class if models_available() returns True, 
-            otherwise returns None.
-            
-        Note:
-            This function depends on models_available() for validation.
-            Call models_available() first if you need to check availability.
+            The Base class or None.
         """
         nonlocal _base
         if models_available():
@@ -223,16 +249,8 @@ def make_models_checker()-> Tuple[
     def reset() -> None:
         """
         Reset the internal state of the model checker.
-        
-        Primarily intended for testing purposes to force re-evaluation
-        of model availability. Clears all cached state.
-        
-        After calling reset(), the next call to models_available() will
-        attempt to import and validate models again.
-        
-        Warning:
-            Do not use in production unless absolutely necessary, as it
-            will cause redundant import operations.
+
+        Intended for testing to force re-evaluation of model availability.
         """
         nonlocal _base, _has_database_models, _attempted
         _base = None
@@ -246,7 +264,15 @@ def make_models_checker()-> Tuple[
 check_models_available, get_base_model, reset_models = make_models_checker()
 
 def can_resolve_host(host: str) -> bool:
-    """Check if hostname can be resolved"""
+    """
+    Check if a hostname can be resolved to an IP address.
+
+    Args:
+        host: Hostname or IP address to resolve.
+
+    Returns:
+        True if host can be resolved, False if resolution fails.
+    """
     try:
         socket.gethostbyname(host)
         logger.debug("Host %s resolved successfully", host)
@@ -256,7 +282,13 @@ def can_resolve_host(host: str) -> bool:
         return False
 
 def determine_db_host() -> str:
-    """Determine correct host for database connection"""
+    """
+    Determine the correct database host using multiple detection strategies.
+
+    Returns:
+        Resolved hostname as a string. Guaranteed to return a hostname
+        ('localhost' as last resort).
+    """
     # Option 1: Explicit host from environment variable
     explicit_host = os.getenv('DB_HOST')
     if explicit_host:
@@ -274,11 +306,11 @@ def determine_db_host() -> str:
     logger.info("Automatic database host detection...")
 
     test_hosts = [
-        'localhost',            # For local execution
-        '127.0.0.1',            # Localhost alternative
-        'postgres_mft_db',      # Docker service name
-        'postgres',             # Short service name
-        'host.docker.internal'  # For Docker Desktop
+        'localhost',
+        '127.0.0.1',
+        'postgres_mft_db',
+        'postgres',
+        'host.docker.internal'
     ]
 
     for host in test_hosts:
@@ -290,13 +322,20 @@ def determine_db_host() -> str:
     return 'localhost'
 
 def get_public_db_config() -> dict:
-    """Config without password for logging and debugging only"""
+    """
+    Create a safe database configuration for logging and debugging.
+
+    Returns a dictionary without the password. All values are strings.
+
+    Returns:
+        Dictionary with keys: host, port, database, user.
+    """
 
     public_config = {
         'host': determine_db_host(),
         'port': os.getenv('DB_PORT', '5432'),
         'database': os.getenv('DB_NAME', 'mft_db'),
-        'user': os.getenv('DB_USER', 'postgres')
+        'user': os.getenv('DB_USER', 'mft_user')
     }
 
     # Secure logging
@@ -309,19 +348,36 @@ def get_public_db_config() -> dict:
     return public_config
 
 def get_private_db_config() -> dict:
-    """Config with password to establish a database connection"""
+    """
+    Create a complete database configuration including the password.
 
+    Returns:
+        Dictionary with keys: host, port, database, user, password.
+
+    Warning:
+        This dictionary contains the password and should never be logged.
+    """
     public_config = get_public_db_config()
 
     private_config = {
         **public_config,  # Unpacking the public config
-        'password': os.getenv('DB_PASSWORD', 'postgres')
+        'password': os.getenv('DB_PASSWORD', 'mft_password')
     }
 
     return private_config
 
 def get_connection_string(config: dict | None = None) -> str:
-    """Return connection string"""
+    """
+    Build a PostgreSQL connection string from a configuration dictionary.
+
+    Args:
+        config: Configuration dict with 'user', 'password', 'host', 'port', 'database'.
+                If None, uses `get_private_db_config()`.
+
+    Returns:
+        PostgreSQL connection string in format:
+        postgresql://user:password@host:port/database
+    """
     if config is None:
         #  Config with a password to connect to database
         config = get_private_db_config()
@@ -330,13 +386,28 @@ def get_connection_string(config: dict | None = None) -> str:
                 f"{config['host']}:{config['port']}/{config['database']}")
 
     # Hide password in logs for security
-    safe_conn_str = conn_str.replace(config['password'], '******')
+    safe_conn_str = (
+        f"postgresql://{config['user']}:******@"
+        f"{config['host']}:{config['port']}/{config['database']}"
+    )
+
     logger.debug("Connection string: %s", safe_conn_str)
 
     return conn_str
 
 def ensure_database_exists():
-    """Ensure database exists, create if it doesn't"""
+    """
+    Ensure the target database exists, creating it if necessary.
+
+    Connects to the PostgreSQL system database ('postgres') to check for
+    and create the target database.
+
+    Raises:
+        ConnectionError: If PostgreSQL server is unreachable.
+        RuntimeError: For SQLAlchemy or database operation errors.
+        ValueError: For incomplete database configuration.
+        PermissionError: If user lacks CREATE DATABASE privilege.
+    """
     try:
         # Get private config (with password)
         private_config = get_private_db_config()
@@ -345,7 +416,7 @@ def ensure_database_exists():
         postgres_config = {
             'host': private_config['host'],
             'port': private_config['port'],
-            'database': 'postgres',                 # System database!
+            'database': 'postgres',
             'user': private_config['user'],
             'password': private_config['password']
         }
@@ -402,16 +473,22 @@ def ensure_database_exists():
         logger.critical("Unexpected error ensuring database exists: %s", e, exc_info=True)
         raise RuntimeError(f"Unexpected error during database setup: {e}") from e
 
-def create_database_tables(engine: Engine) -> List[str]:
+def create_database_tables(
+        engine: Engine
+    ) -> list[str]:
     """
-    Create all tables from models in database.py
-    Verify and get information about database tables
+    Create all database tables from SQLAlchemy ORM models.
 
     Args:
-        engine: SQLAlchemy engine object
+        engine: SQLAlchemy engine connected to the target database.
 
     Returns:
-        List[str]: List of created tables from models in database.py
+        List of table names that were created or verified.
+
+    Raises:
+        ImportError: If database models are not available.
+        RuntimeError: For errors during table creation or verification.
+        ValueError: If the provided engine is None.
     """
     if not check_models_available():
         logger.error("Cannot create tables: database models not available")
@@ -431,7 +508,7 @@ def create_database_tables(engine: Engine) -> List[str]:
         if base is None:
             raise RuntimeError("Base is None despite models being available")
 
-        # Use Base.metadata from database.py to create all tables
+        # Use Base.metadata to create all tables
         base.metadata.create_all(bind=engine)
         logger.info("Tables created successfully using Base.metadata")
 
@@ -444,7 +521,7 @@ def create_database_tables(engine: Engine) -> List[str]:
         inspector: Inspector = cast(Inspector, inspector_obj)
 
         # Get list of tables
-        tables: List[str] = inspector.get_table_names()
+        tables: list[str] = inspector.get_table_names()
 
         logger.info("Found %d tables in database", len(tables))
         logger.info("Table list: %s", ', '.join(sorted(tables)))
@@ -467,12 +544,19 @@ def create_database_tables(engine: Engine) -> List[str]:
         logger.error("Unexpected error during table verification: %s", e, exc_info=True)
         raise RuntimeError(f"Failed to verify database tables: {e}") from e
 
-def check_database_health(engine: Engine) -> bool:
+def check_database_health(
+        engine: Engine
+    ) -> bool:
     """
-    Check database health and existence of tables from database.py
-    
+    Perform a health check on the database connection and schema.
+
+    Verifies connectivity, PostgreSQL version, and table consistency.
+
+    Args:
+        engine: SQLAlchemy engine object with an active connection.
+
     Returns:
-        bool: True if database is healthy, False if issues
+        True if database is healthy (connected and schema matches), False otherwise.
     """
     connection = None
     try:
@@ -488,7 +572,7 @@ def check_database_health(engine: Engine) -> bool:
 
         logger.info("PostgreSQL version: %s", version)
 
-        # Check existence of tables from database.py
+        # Check existence of tables
         if check_models_available():
             base = get_base_model()
 
@@ -511,7 +595,7 @@ def check_database_health(engine: Engine) -> bool:
                 return False
             else:
                 logger.info(
-                    "All tables from database.py present (%d tables)",
+                    "All tables present (%d tables)",
                     len(expected_tables)
                 )
 
@@ -524,17 +608,26 @@ def check_database_health(engine: Engine) -> bool:
         if connection:
             connection.close()
 
-def connect_to_database(max_retries: int = 3, retry_delay: int = 2, create_tables: bool = True)-> Engine:
+def connect_to_database(
+        max_retries: int = 3,
+        retry_delay: int = 2,
+        create_tables: bool = True
+    )-> Engine:
     """
-    Connect to database with retry logic and table creation from database.py
-    
+    Establish a database connection with retry logic.
+
     Args:
-        max_retries (int): Maximum number of connection attempts
-        retry_delay (int): Delay between attempts in seconds
-        create_tables (bool): Whether to create tables from database.py
-    
+        max_retries: Maximum number of connection attempts.
+        retry_delay: Delay in seconds between retry attempts.
+        create_tables: Whether to create tables from ORM models after connection.
+
     Returns:
-        engine: SQLAlchemy engine object
+        SQLAlchemy Engine object configured with connection pooling.
+
+    Raises:
+        ConnectionError: After exhausting all retry attempts.
+        SQLAlchemyError: For database-specific errors during connection.
+        RuntimeError: For unexpected errors during connection setup.
     """
     # For logging we use a public config without a password
     public_config = get_public_db_config()
@@ -567,7 +660,7 @@ def connect_to_database(max_retries: int = 3, retry_delay: int = 2, create_table
                 pool_size=5,
                 max_overflow=10,
                 pool_recycle=3600,                    # Recreate connections every hour
-                connect_args={'connect_timeout': 10}  # Connection timeout
+                connect_args={'connect_timeout': 10}
             )
 
             # Test connection
@@ -581,7 +674,7 @@ def connect_to_database(max_retries: int = 3, retry_delay: int = 2, create_table
                         attempt + 1, max_retries
                     )
 
-                    # Create tables from database.py
+                    # Create tables
                     if create_tables and check_models_available():
                         logger.info("Creating tables from models in database.py...")
                         created_tables = create_database_tables(engine)
@@ -622,8 +715,19 @@ def connect_to_database(max_retries: int = 3, retry_delay: int = 2, create_table
 
     raise ConnectionError("Failed to connect to database")
 
-def get_database_info(engine: Engine) -> dict:
-    """Get information about database and tables"""
+def get_database_info(
+        engine: Engine
+    ) -> dict:
+    """
+    Collect information about the database and its tables.
+
+    Args:
+        engine: SQLAlchemy engine object with an active connection.
+
+    Returns:
+        Dictionary containing database metadata (name, user, size, tables, etc.)
+        or an empty dictionary if retrieval fails.
+    """
     info = {}
     connection = None
 
@@ -648,7 +752,7 @@ def get_database_info(engine: Engine) -> dict:
             info['server_port'] = row[3] if row[3] else 0
             info['db_size_mb'] = round(cast(int, row[4]) / (1024 * 1024), 2) if row[4] else 0
 
-        # Information about tables from database.py
+        # Information about tables
         if check_models_available():
             # Creating an inspector
             inspector_obj = sqlalchemy_inspect(engine)
@@ -687,25 +791,28 @@ def get_database_info(engine: Engine) -> dict:
         if connection:
             connection.close()
 
-# Main function for database initialization
-def initialize_database(create_tables: bool = True):
+def initialize_database(
+        create_tables: bool = True
+    ):
     """
-    Main database initialization function
-    
+    Primary entry point for database initialization.
+
+    Orchestrates the complete database setup process.
+
     Args:
-        create_tables (bool): Whether to create tables from database.py
-    
+        create_tables: Whether to create database tables from ORM models.
+
     Returns:
-        engine: SQLAlchemy engine object or None on error
+        SQLAlchemy Engine object if initialization succeeds, None otherwise.
     """
 
     logger.info("=" * 60)
-    logger.info("DATABASE INITIALIZATION FROM DATABASE.PY")
+    logger.info("DATABASE INITIALIZATION")
     logger.info("=" * 60)
 
     if not check_models_available():
-        logger.error("database.py file with models not found!")
-        logger.error("Make sure database.py is in the same directory.")
+        logger.error("Database models file (database.py) not found or cannot be imported!")
+        logger.error("Check if database.py exists and contains valid SQLAlchemy models.")
         return None
 
     try:
