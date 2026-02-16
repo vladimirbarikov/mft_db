@@ -543,6 +543,11 @@ services:
     networks:
       - mft_airflow_network
 
+networks:
+  mft_airflow_network:
+    driver: bridge
+    name: mft_airflow_network
+
 volumes:
   airflow_db_volume:
   mft_db_volume:
