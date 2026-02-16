@@ -163,20 +163,28 @@ class AirflowTaskFilter(logging.Filter):
 class TimeBasedFilter(logging.Filter):
     """Filter logs based on time of day for scheduled DAGs"""
 
-    def __init__(self, name='', log_window_hours=2):
+    def __init__(self, name='', log_window_hours=2, dag_start_hour=3, timezone='Europe/Moscow'):
+        """
+        Args:
+            name: Filter name
+            log_window_hours: The length of the logging window in hours
+            dag_start_hour: The DAG launch hour (in the specified time zone)
+            timezone: Time zone (default is Europe/Moscow)
+        """
         super().__init__(name)
         self.log_window_hours = log_window_hours
-        self.moscow_tz = pytz.timezone('Europe/Moscow')
+        self.dag_start_hour = dag_start_hour
+        self.timezone = pytz.timezone(timezone)
 
     def filter(self, record):
-        # We always skip WARNING, ERROR, CRITICAL
-        # if these logs were created while the DAG was not running
+        # Always skip WARNING and higher
         if record.levelno >= logging.WARNING:
             return True
 
         # Checking if the message is related to our DAG
         is_our_dag = False
         dag_id = getattr(record, 'dag_id', '')
+
         if 'mft_etl_pipeline' in str(dag_id):
             is_our_dag = True
         elif 'mft' in record.name.lower() or 'etl' in record.name.lower():
@@ -185,17 +193,19 @@ class TimeBasedFilter(logging.Filter):
         if not is_our_dag:
             return True  # Skip all logs for other DAGs
 
-        # Current time in Moscow
-        moscow_time = datetime.now(self.moscow_tz)
-        current_hour = moscow_time.hour
+        # Current time in the specified time zone
+        current_time = datetime.now(self.timezone)
+        current_hour = current_time.hour
 
         # DAG starts at 3:00 a.m., we give you a interval of 2 hours to complete
-        dag_start_hour = 3
-        log_end_hour = dag_start_hour + self.log_window_hours
+        log_end_hour = (self.dag_start_hour + self.log_window_hours) % 24
 
-        # Check if it is the DAG execution interval 
-        if dag_start_hour <= current_hour < log_end_hour:
+        # Check if it is the DAG execution interval
+        if self.dag_start_hour <= current_hour < log_end_hour:
             return True  # Logging INFO can be created in the execution interval
+        elif self.dag_start_hour > log_end_hour:  # The interval goes through midnight
+            if current_hour >= self.dag_start_hour or current_hour < log_end_hour:
+                return True
 
         # Outside the execution interval the INFO logs are prohibited
         return False
@@ -214,7 +224,9 @@ LOGGING_CONFIG = {
         },
         "time_based_filter": {
             "()": TimeBasedFilter,
-            "log_window_hours": 2  # 2 hours interval after DAG launch (3:00-5:00)
+            "log_window_hours": 2,  # 2 hours interval after DAG launch (3:00-5:00)
+            "dag_start_hour": 3,  # 3:00 AM
+            "timezone": "Europe/Moscow"  # Moscow time
         }
     },
     "formatters": {
