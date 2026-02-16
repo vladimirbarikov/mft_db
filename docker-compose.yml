@@ -133,10 +133,10 @@ services:
     container_name: prometheus
     restart: unless-stopped
     volumes:
+      - prometheus_volume:/prometheus
       - ./config/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./config/monitoring/prometheus/recording_rules_airflow.yml:/etc/prometheus/recording_rules_airflow.yml
       - ./config/monitoring/prometheus/recording_rules_mft.yml:/etc/prometheus/recording_rules_mft.yml
-      - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -177,7 +177,7 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_TIMEZONE=Europe/Moscow
     volumes:
-      - grafana_data:/var/lib/grafana
+      - grafana_volume:/var/lib/grafana
       - ./config/monitoring/grafana/provisioning/datasources/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
       - ./config/monitoring/grafana/provisioning/dashboards/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml
       - ./config/monitoring/grafana/dashboards/dashboard_mft.json:/etc/grafana/dashboards/mft_dashboard.json
@@ -550,4 +550,10 @@ networks:
 
 volumes:
   airflow_db_volume:
+    name: airflow_db_volume
   mft_db_volume:
+    name: mft_db_volume
+  prometheus_volume:
+    name: prometheus_volume
+  grafana_volume:
+    name: grafana_volume
