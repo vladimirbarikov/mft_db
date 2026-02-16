@@ -1,786 +1,915 @@
+# pylint: disable=too-many-lines
+# pylint: disable=wrong-import-position
 """
-Data loader module for MFT database - Functional approach.
+Data Loading Module for Material Flow Table Database.
 
-This module provides comprehensive data loading functionality for the MFT database
-system. It handles the loading of transformed data into PostgreSQL using SQLAlchemy
-and Polars DataFrames, with support for entity tables, junction tables, and
-specialized breakpoint data.
+This module provides comprehensive functionality for bulk loading transformed
+manufacturing data into a PostgreSQL database. Refactored to eliminate code
+duplication with mapper.py and fix transactional issues.
 
-Key Features:
-- Bulk data insertion using SQLAlchemy ORM and PostgreSQL COPY for performance
-- Foreign key constraint management for PostgreSQL
-- Data validation and integrity checks
-- Support for entity tables, junction tables, and breakpoint data
-- Transaction-safe operations with proper error handling
-- Comprehensive logging and result reporting
-
-Architecture:
-The module follows a functional programming approach with clearly separated
-responsibilities for different data loading stages. It integrates with the
-transformer module to receive cleaned and transformed data.
-
-Primary Functions:
-- `load_transformed_data()`: Main entry point for data loading
-- `load_all_entity_tables()`: Loads all entity tables (supplier, part, box, etc.)
-- `load_all_junction_tables()`: Loads relationship tables
-- `load_breakpoint_data()`: Handles breakpoint-specific data loading
+Key Changes:
+    - Removed _resolve_core_entity_foreign_keys() - using mapper directly
+    - Split core entity loading into two phases with explicit commit
+    - Simplified _prepare_junction_dataframes() - removed duplicate validations
+    - Fixed transactional issues with mapper creation
 
 Dependencies:
-- SQLAlchemy 1.4.54: For database operations and ORM mapping
-- Polars: For DataFrame manipulation and validation
-- psycopg2: For PostgreSQL COPY operations (optional, falls back to SQLAlchemy)
-- Database models from `database.database` module
+    - SQLAlchemy for database operations
+    - Polars for DataFrame handling
+    - mapper.py for ID resolution and mapping
+    - config.columns_config for table requirements validation
 
-Usage Example:
-    ```python
-    from sqlalchemy import create_engine
-    from dags.tasks.loader import load_transformed_data
-    
-    # Create database engine
-    engine = create_engine("postgresql://user:pass@localhost:5432/dbname")
-    
-    # Load data (automatically calls transformer if needed)
-    results = load_transformed_data(engine, use_transformer=True)
-    
-    if results['success']:
-        print(f"Loaded {sum(results['record_counts'].values())} records")
-    else:
-        print(f"Error: {results['error']}")
-    ```
-
-Data Flow:
-1. Input: Transformed data dictionary from transformer module
-2. Validation: Check data integrity and required columns
-3. Foreign Key Management: Disable constraints for faster loading
-4. Entity Tables: Load primary entities (suppliers, parts, etc.)
-5. Junction Tables: Load relationship tables
-6. Breakpoint Data: Load specialized breakpoint information
-7. Verification: Count records and validate loading
-8. Foreign Key Management: Re-enable constraints
-9. Output: Comprehensive results dictionary
-
-Error Handling:
-- All database operations include try-except blocks with detailed logging
-- Foreign key constraints are always re-enabled, even on failure
-- Validation failures provide clear error messages
-- Failed operations return zero counts without stopping the entire process
-
-Performance Optimizations:
-- PostgreSQL COPY for bulk data insertion (when psycopg2 available)
-- Foreign key constraint disabling during bulk operations
-- DataFrame validation before database operations
-- Batch processing of related tables
-
-Configuration:
-- Logging is configured at INFO level by default
-- Project path is automatically added to sys.path
-- All table truncation operations include CASCADE option
-
-Note: This module is specifically optimized for PostgreSQL and uses PostgreSQL-
-specific features like session_replication_role for foreign key management.
-Compatibility with other databases may require modifications.
-
-Version: 1.0.0
-Compatibility: Python 3.12.3, SQLAlchemy 1.4.54, PostgreSQL 12+
 Maintainer: PLD Engineering Center
-Created: 2025
-Last Modified: 2025
+Version: 1.1.0
+Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
+Created: 2026-01-12
+Last Modified: 2025-02-16
 License: MIT
 Status: Production
 """
-
+# Standard library imports
 from pathlib import Path
 import sys
+from typing import Any, Optional
 import traceback
 
-from io import StringIO
-from typing import Dict, Any, List, Tuple, Optional
-
+# Third-party imports
 import polars as pl
-
 from sqlalchemy.engine import Engine
-from sqlalchemy import inspect, text
-from sqlalchemy.exc import SQLAlchemyError
-
-from psycopg2 import connect
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, DataError, ProgrammingError
 
 # The relative path to the root project directory
-project_path = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Add the project path to sys.path
-if str(project_path) not in sys.path:
-    sys.path.insert(0, str(project_path))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Logger setup
+# Local imports
 from config import get_logger
-logger = get_logger(__name__)
-
-# Import function transformer from module transformer
-from dags.tasks.transformer import transformer
-
-# Import database models
+from config.columns_config import TABLE_REQUIREMENTS
+from dags.tasks.connector import initialize_database
+from dags.tasks.mapper import create_mapper
 from database.database import (
-    SupplierData, PartData, BoxData, PalletData, ModelData,
-    WorkshopData, LineData, BreakpointData, PartToBox,
-    BoxToPallet, PartToModel, PartToLine, PartToBreakpoint
+    # Entity tables
+    SupplierData, PartData, BoxData, PalletData,
+    ModelData, WorkshopData, LineData,
+    # Junction tables
+    PartToBox, BoxToPallet, PartToModel, PartToLine
 )
 
 # Logger setup
 logger = get_logger(__name__)
 
-def validate_dataframe_not_empty(
-        df: pl.DataFrame,
-        df_name: str
-    ) -> bool:
-    """Validate DataFrame is not empty."""
-    if df.is_empty():
-        logger.warning("DataFrame '%s' is empty", df_name)
-        return False
-    return True
 
-
-def validate_required_columns(
-        df: pl.DataFrame,
-        df_name: str,
-        required_columns: List[str]
-    ) -> bool:
-    """Validate required columns exist."""
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        logger.error("DataFrame '%s' missing columns: %s", df_name, missing_columns)
-        return False
-    return True
-
-
-def validate_transformed_data(
-        transformed_df_dict: Dict[str, pl.DataFrame]
-    ) -> bool:
-    """Validate all transformed DataFrames."""
-    required_keys = [
-        'transformed_main_df',
-        'transformed_part_df',
-        'transformed_supplier_df',
-        'transformed_box_df',
-        'transformed_pallet_df',
-        'transformed_model_df',
-        'transformed_workshop_df',
-        'line_df'
-    ]
-
-    # Check for missing DataFrames
-    missing_keys = [key for key in required_keys if key not in transformed_df_dict]
-    if missing_keys:
-        logger.error("Missing required DataFrames: %s", missing_keys)
-        return False
-
-    # Validate critical DataFrames are not empty
-    critical_keys = ['transformed_main_df', 'transformed_part_df']
-    for key in critical_keys:
-        if not validate_dataframe_not_empty(transformed_df_dict[key], key):
-            return False
-
-    return True
-
-
-def disable_foreign_keys(
-        engine: Engine
-    ) -> None:
-    """Temporarily disable foreign key constraints for PostgreSQL."""
+def disable_foreign_keys(engine: Engine) -> None:
+    """
+    Temporarily disable foreign key constraints for PostgreSQL bulk operations.
+    
+    Args:
+        engine: SQLAlchemy database engine instance
+        
+    Sets session_replication_role to 'replica' to bypass FK checks during bulk load.
+    """
     try:
         with engine.begin() as connection:
-            # Disable triggers and foreign key constraints
             connection.execute(text('SET session_replication_role = replica;'))
-            logger.info("Foreign key constraints disabled")
+            logger.info("Foreign key constraints disabled.")
 
+    except SQLAlchemyError as e:
+        logger.warning("Could not disable foreign keys due to SQLAlchemy error: %s", e)
     except Exception as e:
-        logger.warning("Could not disable foreign keys: %s", e)
+        logger.warning("Unexpected error while disabling foreign keys: %s", e)
 
 
 def enable_foreign_keys(engine: Engine) -> None:
-    """Re-enable foreign key constraints for PostgreSQL."""
+    """
+    Re-enable foreign key constraints after bulk loading operations.
+    
+    Args:
+        engine: SQLAlchemy database engine instance
+        
+    Restores default session_replication_role to re-enable FK validation.
+    Raises exception if re-enable fails to ensure data integrity.
+    """
     try:
         with engine.begin() as connection:
-            # Re-enable triggers and foreign key constraints
             connection.execute(text('SET session_replication_role = DEFAULT;'))
-            logger.info("Foreign key constraints enabled")
-
-    except Exception as e:
-        logger.error("Could not enable foreign keys: %s", e)
-        raise
-
-
-def truncate_table(
-        engine: Engine,
-        table_name: str,
-        cascade: bool = True
-    ) -> None:
-    """Truncate a table in PostgreSQL."""
-    try:
-        inspector = inspect(engine)
-        if not inspector.has_table(table_name):
-            logger.warning("Table %s does not exist", table_name)
-            return
-
-        with engine.begin() as connection:
-            if cascade:
-                # TRUNCATE with CASCADE to also truncate tables with foreign key references
-                stmt = text(f'TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE')
-            else:
-                stmt = text(f'TRUNCATE TABLE {table_name} RESTART IDENTITY')
-
-            connection.execute(stmt)
-            logger.info("Truncated table: %s", table_name)
-
-    except Exception as e:
-        logger.error("Could not truncate table %s: %s", table_name, e)
-        raise
-
-
-def bulk_insert_dataframe(
-        engine: Engine,
-        df: pl.DataFrame,
-        table_name: str,
-        model_class
-    ) -> int:
-    """Bulk insert DataFrame into table using SQLAlchemy."""
-    if df.is_empty():
-        return 0
-
-    # Convert polars DataFrame to list of dictionaries
-    records = df.to_dicts()
-
-    try:
-        # Use SQLAlchemy's bulk insert
-        with engine.begin() as connection:
-            insert_stmt = model_class.__table__.insert()
-            connection.execute(insert_stmt, records)
-
-        logger.debug("Inserted %d records into %s", len(records), table_name)
-        return len(records)
+            logger.info("Foreign key constraints enabled.")
 
     except SQLAlchemyError as e:
-        logger.error("Error inserting into %s: %s", table_name, e)
+        logger.error("Could not enable foreign keys due to SQLAlchemy error: %s", e)
+        raise
+    except Exception as e:
+        logger.error("Unexpected error while enabling foreign keys: %s", e)
         raise
 
 
-def bulk_insert_dataframe_copy(
-        engine: Engine,
-        df: pl.DataFrame,
-        table_name: str
-    ) -> int:
+def _bulk_insert_dataframe(
+    engine: Engine,
+    df: pl.DataFrame,
+    table_name: str,
+    model_class,
+    required_columns_check: bool = True
+) -> int:
     """
-    Alternative method using PostgreSQL COPY for better performance with large datasets.
-    Creates a direct psycopg2 connection for COPY operations.
+    Internal function for bulk insertion of Polars DataFrame data.
+    
+    Args:
+        engine: SQLAlchemy database engine
+        df: Polars DataFrame with data to insert
+        table_name: Name of target table for logging
+        model_class: SQLAlchemy model class for the table
+        required_columns_check: Whether to validate required columns
+        
+    Returns:
+        Number of records successfully inserted
+        
+    Performs upsert with conflict handling on primary key constraint.
+    Falls back to regular insert if constraint doesn't exist.
+    """
+    if df is None or df.is_empty():
+        logger.debug("Skipping %s - no data.", table_name)
+        return 0
+
+    # Checking required columns for core entity tables only
+    if required_columns_check:
+        if table_name in TABLE_REQUIREMENTS:
+            required_cols = TABLE_REQUIREMENTS[table_name]
+            missing_cols = [col for col in required_cols if col not in df.columns]
+
+            if missing_cols:
+                logger.error(
+                    "Cannot load %s: missing required columns: %s. Available: %s.",
+                    table_name, missing_cols, list(df.columns)
+                )
+                return 0
+
+            # Validate foreign key relationships
+            if table_name == 'part_data':
+                null_supplier_count = df.filter(pl.col('supplier_id').is_null()).height
+                if null_supplier_count > 0:
+                    logger.error(
+                        "Cannot load %s: found %d records with NULL supplier_id.",
+                        table_name, null_supplier_count
+                    )
+                    return 0
+
+            elif table_name == 'line_data':
+                null_workshop_count = df.filter(pl.col('workshop_id').is_null()).height
+                if null_workshop_count > 0:
+                    logger.error(
+                        "Cannot load %s: found %d records with NULL workshop_id.",
+                        table_name, null_workshop_count
+                    )
+                    return 0
+
+    try:
+        records = df.to_dicts()
+
+        # Constraint name mapping
+        junction_table_constraints = {
+            'part_to_box': 'part_to_box_pkey',
+            'box_to_pallet': 'box_to_pallet_pkey',
+            'part_to_model': 'part_to_model_pkey',
+            'part_to_line': 'part_to_line_pkey'
+        }
+
+        constraint_name = junction_table_constraints.get(table_name, f"{table_name}_pkey")
+
+        with engine.begin() as connection:
+            stmt = pg_insert(model_class.__table__).values(records)
+            stmt = stmt.on_conflict_do_nothing(constraint=constraint_name)
+
+            result = connection.execute(stmt)
+            inserted_count = result.rowcount
+
+            # Logging results
+            total_records = len(records)
+            if inserted_count < total_records:
+                skipped = total_records - inserted_count
+                logger.info(
+                    "Inserted %d/%d records into %s (%d duplicates skipped).",
+                    inserted_count, total_records, table_name, skipped
+                )
+            else:
+                logger.info("Loaded %d records into %s", inserted_count, table_name)
+
+            return inserted_count
+
+    except (IntegrityError, DataError, ProgrammingError) as e:
+        logger.error("Database error loading %s: %s", table_name, e)
+
+        # Check if it's a constraint error that we can fallback
+        error_str = str(e)
+        if "constraint" in error_str.lower() and "does not exist" in error_str.lower():
+            logger.warning("Constraint not found for %s, retrying with regular insert", table_name)
+            try:
+                with engine.begin() as connection:
+                    insert_stmt = model_class.__table__.insert()
+                    result = connection.execute(insert_stmt, records)
+                    logger.info(
+                        "Loaded %d records into %s (regular insert)",
+                        len(records), table_name
+                    )
+                    return len(records)
+            except (IntegrityError, DataError, ProgrammingError) as e2:
+                logger.error("Regular insert failed for %s: %s", table_name, e2)
+            except Exception as e2:
+                logger.error("Unexpected error during regular insert for %s: %s", table_name, e2)
+
+        return 0
+
+    except SQLAlchemyError as e:
+        logger.error("SQLAlchemy error loading %s: %s", table_name, e)
+        return 0
+
+    except Exception as e:
+        logger.error("Unexpected error loading %s: %s", table_name, e)
+        logger.debug(traceback.format_exc())
+        return 0
+
+
+def _process_dependent_entity_with_mapper(
+    engine: Engine,
+    df: pl.DataFrame,
+    table_name: str,
+    mapper,
+    unique_cols
+) -> int:
+    """
+    Process and load dependent entity tables using mapper for foreign key resolution.
+    
+    Args:
+        engine: SQLAlchemy database engine
+        df: Input DataFrame with text references
+        table_name: Name of target table ('line_data' or 'part_data')
+        mapper: Mapper instance for ID resolution
+        unique_cols: Column(s) defining uniqueness for deduplication
+        
+    Returns:
+        Number of records successfully loaded
+        
+    Converts text codes to IDs using mapper, filters invalid references,
+    removes duplicates, and loads the processed data.
     """
     if df.is_empty():
         return 0
 
+    result_df = df.clone()
+    null_count = 0
+
     try:
-        # Get the connection parameters from the engine.url
-        url = engine.url
-        conn_params = {
-            'host': url.host or 'localhost',
-            'port': url.port or 5432,
-            'database': url.database,
-            'user': url.username,
-            'password': url.password
-        }
+        if table_name == 'line_data':
+            # Convert workshop_code to workshop_id using mapper
+            if 'workshop_code' in result_df.columns:
+                workshop_ids = []
+                for workshop_code in result_df['workshop_code'].to_list():
+                    workshop_id = mapper.get_id('workshop_code', workshop_code)
+                    workshop_ids.append(workshop_id)
+                    if workshop_id is None:
+                        null_count += 1
 
-        # Creating a direct connection to psycopg2
-        connection = connect(**conn_params)
-        cursor = connection.cursor()
+                result_df = result_df.with_columns(pl.Series('workshop_id', workshop_ids))
+                result_df = result_df.drop('workshop_code')
 
-        try:
-            # Use StringIO for CSV output
-            output = StringIO()
+        elif table_name == 'part_data':
+            # Convert supplier_name to supplier_id using mapper
+            if 'supplier_name' in result_df.columns:
+                supplier_ids = []
+                for supplier_name in result_df['supplier_name'].to_list():
+                    supplier_id = mapper.get_id('supplier_name', supplier_name)
+                    supplier_ids.append(supplier_id)
+                    if supplier_id is None:
+                        null_count += 1
 
-            # Write DataFrame to CSV with tab separator for COPY
-            df.write_csv(output, separator='\t', include_header=False)
-            output.seek(0)
+                result_df = result_df.with_columns(pl.Series('supplier_id', supplier_ids))
+                result_df = result_df.drop('supplier_name')
 
-            # Execute COPY command using psycopg2
-            cursor.copy_from(output, table_name, sep='\t', null='\\N')
-
-            connection.commit()
-
-            logger.debug("COPY inserted %d records into %s", df.height, table_name)
-            return df.height
-
-        except Exception as e:
-            connection.rollback()
-            logger.error("Error in COPY operation: %s", e)
-            raise
-        finally:
-            cursor.close()
-            connection.close()
-
-    except ImportError:
-        logger.warning("psycopg2 not installed, falling back to regular insert")
-        return 0
-    except Exception as e:
-        logger.error("Error using COPY for %s: %s", table_name, e)
-        # Fall back to regular insert
-        return 0
-
-
-def load_entity_table(
-        engine: Engine,
-        df: pl.DataFrame,
-        model_class,
-        primary_key: str,
-        truncate: bool = True) -> int:
-    """
-    Load an entity table.
-    
-    Args:
-        engine: Database engine
-        df: DataFrame to load
-        model_class: SQLAlchemy model class
-        primary_key: Primary key column name
-        truncate: Whether to truncate table first
-        
-    Returns:
-        Number of records loaded
-    """
-    table_name = model_class.__tablename__
-
-    # Validate DataFrame is not empty
-    if not validate_dataframe_not_empty(df, table_name):
-        return 0
-
-    if not validate_required_columns(df, table_name, [primary_key]):
-        raise ValueError(f"Missing primary key: {primary_key}")
-
-    # Check for NULL primary keys
-    null_pk_count = df[primary_key].null_count()
-    if null_pk_count > 0:
-        logger.error("Found %d NULL values in %s", null_pk_count, primary_key)
-        raise ValueError(f"NULL values in primary key: {primary_key}")
-
-    # Remove duplicates
-    df = df.unique(subset=[primary_key], keep='first')
-
-    # Truncate if requested
-    if truncate:
-        truncate_table(engine, table_name)
-
-    # Insert data
-    records_loaded = bulk_insert_dataframe(engine, df, table_name, model_class)
-
-    logger.info("Loaded %d records into %s", records_loaded, table_name)
-    return records_loaded
-
-
-def load_all_entity_tables(
-        engine: Engine,
-        transformed_df_dict: Dict[str, pl.DataFrame],
-        truncate: bool = True
-    ) -> Dict[str, int]:
-    """
-    Load all entity tables.
-    
-    Returns:
-        Dictionary mapping table names to record counts
-    """
-    logger.info("Loading entity tables...")
-
-    # Mapping of DataFrame keys to (model_class, primary_key)
-    entity_mapping = {
-        'transformed_supplier_df': (SupplierData, 'supplier_id'),
-        'transformed_part_df': (PartData, 'part_id'),
-        'transformed_box_df': (BoxData, 'box_id'),
-        'transformed_pallet_df': (PalletData, 'pallet_id'),
-        'transformed_model_df': (ModelData, 'model_id'),
-        'transformed_workshop_df': (WorkshopData, 'workshop_id'),
-        'line_df': (LineData, 'line_id'),
-    }
-
-    results = {}
-
-    for df_key, (model_class, primary_key) in entity_mapping.items():
-        if df_key in transformed_df_dict:
-            df = transformed_df_dict[df_key]
-            table_name = model_class.__tablename__
-
-            try:
-                records_loaded = load_entity_table(
-                    engine, df, model_class, primary_key, truncate
-                )
-                results[table_name] = records_loaded
-
-            except Exception as e:
-                logger.error("Error loading %s: %s", table_name, e)
-                results[table_name] = 0
-
-    return results
-
-
-def load_junction_table(
-        engine: Engine,
-        main_df: pl.DataFrame,
-        model_class,
-        foreign_keys: List[str],
-        truncate: bool = True
-    ) -> int:
-    """
-    Load a junction table from main DataFrame.
-    
-    Args:
-        engine: Database engine
-        main_df: Main DataFrame containing relationships
-        model_class: Junction model class
-        foreign_keys: List of foreign key column names
-        truncate: Whether to truncate table first
-        
-    Returns:
-        Number of records loaded
-    """
-    table_name = model_class.__tablename__
-
-    # Check if required columns exist
-    missing_cols = [fk for fk in foreign_keys if fk not in main_df.columns]
-    if missing_cols:
-        logger.warning("Missing columns for %s: %s", table_name, missing_cols)
-        return 0
-
-    # Extract relationships
-    junction_df = main_df.select(foreign_keys).drop_nulls().unique(keep='first')
-
-    if junction_df.is_empty():
-        logger.warning("No data for %s", table_name)
-        return 0
-
-    # Convert to appropriate types (polars already handles types well)
-    # Ensure integer types where needed
-    for fk in foreign_keys:
-        if junction_df[fk].dtype != pl.Int64:
-            junction_df = junction_df.with_columns(
-                pl.col(fk).cast(pl.Int64, strict=False)
+        # Log warnings about null foreign keys
+        if null_count > 0:
+            logger.warning(
+                "Found %d records with invalid references in %s (will be filtered out).",
+                null_count, table_name
+            )
+            # Filter out records with null foreign keys
+            result_df = result_df.filter(
+                pl.col('workshop_id' if table_name == 'line_data' else 'supplier_id').is_not_null()
             )
 
-    # Remove any nulls that might have been created by casting
-    junction_df = junction_df.drop_nulls()
+        # Remove duplicates
+        if unique_cols:
+            if isinstance(unique_cols, str):
+                unique_cols_list = [unique_cols]
+            else:
+                unique_cols_list = unique_cols
 
-    if junction_df.is_empty():
+            missing_cols = [col for col in unique_cols_list if col not in result_df.columns]
+            if not missing_cols:
+                initial_count = result_df.height
+                result_df = result_df.unique(subset=unique_cols_list, keep='first')
+                removed_count = initial_count - result_df.height
+                if removed_count > 0:
+                    logger.debug(
+                        "Removed %d duplicates from %s based on unique columns %s",
+                        removed_count, table_name, unique_cols_list
+                    )
+
+        # Load the processed data
+        model_class = LineData if table_name == 'line_data' else PartData
+        return _bulk_insert_dataframe(engine, result_df, table_name, model_class, required_columns_check=True)
+
+    except (AttributeError, KeyError, ValueError) as e:
+        logger.error("Data processing error for %s with mapper: %s", table_name, e)
+        logger.debug(traceback.format_exc())
+        return 0
+    except (IntegrityError, DataError, ProgrammingError) as e:
+        logger.error("Database error loading %s after mapper processing: %s", table_name, e)
+        logger.debug(traceback.format_exc())
+        return 0
+    except SQLAlchemyError as e:
+        logger.error("SQLAlchemy error for %s: %s", table_name, e)
+        logger.debug(traceback.format_exc())
+        return 0
+    except Exception as e:
+        logger.error("Unexpected error processing %s with mapper: %s", table_name, e)
+        logger.debug(traceback.format_exc())
         return 0
 
-    # Truncate if requested
-    if truncate:
-        truncate_table(engine, table_name)
 
-    # Insert data
-    records_loaded = bulk_insert_dataframe(engine, junction_df, table_name, model_class)
-
-    logger.info("Loaded %d records into %s", records_loaded, table_name)
-    return records_loaded
-
-
-def load_all_junction_tables(
-        engine: Engine,
-        main_df: pl.DataFrame,
-        truncate: bool = True
-    ) -> Dict[str, int]:
+def load_core_entity_tables(
+    transformed_data: dict[str, pl.DataFrame],
+    engine: Optional[Engine] = None,
+    resolve_foreign_keys: bool = True
+) -> dict[str, int]:
     """
-    Load all junction tables.
+    Load core entity tables into the database from transformed data.
     
+    Args:
+        transformed_data: Dictionary mapping table keys to Polars DataFrames
+        engine: Optional SQLAlchemy engine (creates new if not provided)
+        resolve_foreign_keys: Whether to process dependent tables with FK resolution
+        
     Returns:
-        Dictionary mapping table names to record counts
+        Dictionary mapping table names to number of records loaded
+        
+    Performs two-phase loading:
+    1. Independent tables (no foreign keys)
+    2. Commit transaction
+    3. Create mapper
+    4. Dependent tables using mapper for FK resolution
     """
-    logger.info("Loading junction tables...")
+    logger.info("Starting core entity tables loading...")
 
-    if main_df is None or main_df.is_empty():
-        logger.warning("Main DataFrame is empty")
-        return {}
-
-    # Define junction tables
-    junction_definitions = [
-        ('part_to_box', PartToBox, ['part_id', 'box_id']),
-        ('box_to_pallet', BoxToPallet, ['box_id', 'pallet_id']),
-        ('part_to_model', PartToModel, ['part_id', 'model_id']),
-        ('part_to_line', PartToLine, ['part_id', 'line_id']),
-    ]
+    # Initialize database if engine not provided
+    if engine is None:
+        engine = initialize_database(create_tables=True)
+        if not engine:
+            logger.error("Failed to initialize database!")
+            return {}
 
     results = {}
 
-    for table_name, model_class, foreign_keys in junction_definitions:
-        try:
-            records_loaded = load_junction_table(
-                engine, main_df, model_class, foreign_keys, truncate
+    try:
+        # PHASE 1: Load independent tables (no foreign keys)
+        logger.info("Phase 1: Loading independent tables...")
+
+        independent_tables = [
+            (
+                'transformed_supplier_df',
+                SupplierData,
+                'supplier_data',
+                'supplier_name'
+            ),
+            (
+                'transformed_box_df',
+                BoxData,
+                'box_data',
+                ['box_type', 'box_length_mm', 'box_width_mm', 'box_height_mm']
+            ),
+            (
+                'transformed_pallet_df',
+                PalletData,
+                'pallet_data',
+                ['pallet_type', 'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm']
+            ),
+            (
+                'transformed_model_df',
+                ModelData,
+                'model_data',
+                'model_code'
+            ),
+            (
+                'transformed_workshop_df',
+                WorkshopData,
+                'workshop_data',
+                'workshop_code'
+            ),
+        ]
+
+        disable_foreign_keys(engine)
+
+        for df_key, model_class, table_name, unique_cols in independent_tables:
+            if df_key not in transformed_data:
+                logger.warning("Missing DataFrame: %s", df_key)
+                results[table_name] = 0
+                continue
+
+            df = transformed_data[df_key]
+            if df is None or df.is_empty():
+                logger.info("Skipping %s - DataFrame is empty", table_name)
+                results[table_name] = 0
+                continue
+
+            # Remove duplicates
+            if unique_cols:
+                if isinstance(unique_cols, str):
+                    unique_cols_list = [unique_cols]
+                else:
+                    unique_cols_list = unique_cols
+
+                missing_cols = [col for col in unique_cols_list if col not in df.columns]
+                if not missing_cols:
+                    initial_count = df.height
+                    df = df.unique(subset=unique_cols_list, keep='first')
+                    removed_count = initial_count - df.height
+                    if removed_count > 0:
+                        logger.debug("Removed %d duplicates from %s", removed_count, table_name)
+
+            # Load data
+            records_loaded = _bulk_insert_dataframe(
+                engine, df, table_name, model_class, required_columns_check=True
             )
             results[table_name] = records_loaded
 
-        except Exception as e:
-            logger.error("Error loading %s: %s", table_name, e)
-            results[table_name] = 0
+        # Commit Phase 1 so mapper can see the data
+        logger.info("Committing Phase 1 transactions...")
+        with engine.begin() as connection:
+            connection.execute(text("COMMIT"))
+
+        enable_foreign_keys(engine)
+
+        # PHASE 2: Load dependent tables (with foreign keys) using mapper
+        if resolve_foreign_keys:
+            logger.info("Phase 2: Loading dependent tables with foreign keys...")
+
+            # Create mapper AFTER Phase 1 commit
+            mapper = None
+            try:
+                mapper = create_mapper(engine)
+                logger.info("Mapper created successfully for foreign key resolution.")
+            except (SQLAlchemyError, ProgrammingError) as e:
+                logger.error("Database error creating mapper: %s", e)
+                logger.warning("Skipping dependent tables due to mapper creation failure!")
+                return results
+            except Exception as e:
+                logger.error("Unexpected error creating mapper: %s", e)
+                logger.warning("Skipping dependent tables due to mapper creation failure!")
+                return results
+
+            dependent_tables = [
+                (
+                    'transformed_line_df',
+                    'line_data',
+                    'line_code'
+                ),
+                (
+                    'transformed_part_df',
+                    'part_data',
+                    'part_number'
+                ),
+            ]
+
+            disable_foreign_keys(engine)
+
+            for df_key, table_name, unique_cols in dependent_tables:
+                if df_key not in transformed_data:
+                    logger.warning("Missing DataFrame: %s", df_key)
+                    results[table_name] = 0
+                    continue
+
+                df = transformed_data[df_key]
+                if df is None or df.is_empty():
+                    logger.info("Skipping %s - DataFrame is empty", table_name)
+                    results[table_name] = 0
+                    continue
+
+                # Process and load using mapper for FK resolution
+                records_loaded = _process_dependent_entity_with_mapper(
+                    engine, df, table_name, mapper, unique_cols
+                )
+                results[table_name] = records_loaded
+
+            enable_foreign_keys(engine)
+
+            # Clear mapper cache
+            if mapper:
+                mapper.clear_cache()
+                logger.debug("Cleared mapper cache")
+
+    except (IntegrityError, DataError, ProgrammingError) as e:
+        logger.error("Database error loading entity tables: %s", e)
+        logger.debug(traceback.format_exc())
+
+        # Always re-enable foreign keys on error
+        try:
+            logger.warning("Attempting to re-enable foreign keys after error...")
+            enable_foreign_keys(engine)
+        except (SQLAlchemyError, ProgrammingError) as fk_error:
+            logger.error("Failed to re-enable foreign keys: %s", fk_error)
+        except Exception as fk_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+
+        return {}
+
+    except SQLAlchemyError as e:
+        logger.error("SQLAlchemy error loading entity tables: %s", e)
+        logger.debug(traceback.format_exc())
+
+        # Always re-enable foreign keys on error
+        try:
+            logger.warning("Attempting to re-enable foreign keys after error...")
+            enable_foreign_keys(engine)
+        except (SQLAlchemyError, ProgrammingError) as fk_error:
+            logger.error("Failed to re-enable foreign keys: %s", fk_error)
+        except Exception as fk_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+
+        return {}
+
+    except Exception as e:
+        logger.error("Unexpected error loading entity tables: %s", e)
+        logger.debug(traceback.format_exc())
+
+        # Always re-enable foreign keys on error
+        try:
+            logger.warning("Attempting to re-enable foreign keys after error...")
+            enable_foreign_keys(engine)
+        except (SQLAlchemyError, ProgrammingError) as fk_error:
+            logger.error("Failed to re-enable foreign keys: %s", fk_error)
+        except Exception as fk_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+
+        return {}
+
+    # Calculate and log totals
+    total_records = sum(results.values())
+    tables_with_data = [k for k, v in results.items() if v > 0]
+
+    logger.info(
+        "Core entity tables loading completed.\n"
+        "Total records loaded: %d.\n"
+        "Tables with data: %s",
+        total_records,
+        ', '.join(tables_with_data) or 'none'
+    )
 
     return results
 
 
-def extract_breakpoint_data(
-        main_df: pl.DataFrame
-    ) -> Tuple[pl.DataFrame, pl.DataFrame]:
+def _prepare_junction_dataframes(
+    junction_dict: dict[str, pl.DataFrame],
+    mapper
+) -> dict[str, dict[str, Any]]:
     """
-    Extract breakpoint data from main DataFrame.
+    Prepare junction table DataFrames by replacing text values with foreign key IDs.
     
+    Args:
+        junction_dict: Dictionary mapping junction types to DataFrames
+        mapper: Mapper instance for ID resolution
+        
     Returns:
-        Tuple of (breakpoint_df, part_to_breakpoint_df)
+        Dictionary with processed DataFrames, model classes, and junction types
+        
+    Relies on mapper.map_junction_records() for all validation and processing,
+    eliminating duplicate validation logic.
     """
-    breakpoint_cols = ['breakpoint_date', 'old_part_id', 'new_part_id']
+    mapped_data = {}
 
-    if not all(col in main_df.columns for col in breakpoint_cols):
-        return pl.DataFrame(), pl.DataFrame()
+    # Mapping between DataFrame keys and mapper junction types
+    junction_type_mapping = {
+        'part_to_box': 'part_to_box_composite',
+        'box_to_pallet': 'box_to_pallet_composite',
+        'part_to_model': 'part_to_model',
+        'part_to_line': 'part_to_line'
+    }
 
-    # Extract unique breakpoints
-    breakpoint_df = main_df.select(breakpoint_cols).drop_nulls().unique(keep='first')
+    # Model class mapping
+    model_class_map = {
+        'part_to_box_composite': PartToBox,
+        'box_to_pallet_composite': BoxToPallet,
+        'part_to_model': PartToModel,
+        'part_to_line': PartToLine
+    }
 
-    if breakpoint_df.is_empty():
-        return pl.DataFrame(), pl.DataFrame()
+    # Deduplication configuration
+    deduplication_config = {
+        'part_to_box_composite': ['part_id', 'box_id'],
+        'box_to_pallet_composite': ['box_id', 'pallet_id'],
+        'part_to_model': ['part_id', 'model_id'],
+        'part_to_line': ['part_id', 'line_id']
+    }
 
-    # Create breakpoint records
-    breakpoint_records = []
-    part_to_breakpoint_records = []
+    for df_key in ['part_to_box', 'box_to_pallet', 'part_to_model', 'part_to_line']:
+        if df_key not in junction_dict:
+            logger.debug("Missing junction DataFrame: %s", df_key)
+            continue
 
-    for i, row in enumerate(breakpoint_df.iter_rows(named=True), 1):
-        # Breakpoint record
-        breakpoint_records.append({
-            'breakpoint_id': i,
-            'breakpoint_date': row['breakpoint_date'],
-            'description': f"Change: {row['old_part_id']} → {row['new_part_id']}",
-            'old_part_id': row['old_part_id'],
-            'new_part_id': row['new_part_id']
-        })
+        df = junction_dict[df_key]
+        if df is None or df.is_empty():
+            logger.debug("Empty junction DataFrame: %s", df_key)
+            continue
 
-        # Part-to-breakpoint relationships
-        part_to_breakpoint_records.append({
-            'part_id': row['old_part_id'],
-            'breakpoint_id': i,
-            'is_active_before_breakpoint': True,
-            'is_active_after_breakpoint': False
-        })
+        junction_type = junction_type_mapping.get(df_key)
+        if not junction_type:
+            logger.error("No junction type mapping for: %s", df_key)
+            continue
 
-        part_to_breakpoint_records.append({
-            'part_id': row['new_part_id'],
-            'breakpoint_id': i,
-            'is_active_before_breakpoint': False,
-            'is_active_after_breakpoint': True
-        })
+        model_class = model_class_map.get(junction_type)
+        if not model_class:
+            logger.error("No model class for junction type: %s", junction_type)
+            continue
 
-    return (
-        pl.DataFrame(breakpoint_records),
-        pl.DataFrame(part_to_breakpoint_records)
-    )
+        try:
+            logger.debug("Mapping junction records for '%s'", df_key)
+
+            # Delegate ALL processing to mapper
+            mapped_records = mapper.map_junction_records(df, junction_type)
+
+            if not mapped_records:
+                logger.debug("No valid mapped records for: %s", junction_type)
+                continue
+
+            # Convert to DataFrame
+            df_mapped = pl.DataFrame(mapped_records)
+
+            if df_mapped.is_empty():
+                logger.debug("Empty DataFrame after mapping for: %s", junction_type)
+                continue
+
+            # Remove duplicates using mapper's configuration
+            unique_cols = deduplication_config.get(junction_type)
+            if unique_cols:
+                missing_cols = [col for col in unique_cols if col not in df_mapped.columns]
+                if not missing_cols:
+                    initial_count = df_mapped.height
+                    df_mapped = df_mapped.unique(subset=unique_cols, keep='first')
+                    removed_count = initial_count - df_mapped.height
+                    if removed_count > 0:
+                        logger.info(
+                            "Removed %d duplicate relationships for %s",
+                            removed_count, df_key
+                        )
+
+            # Store processed data
+            mapped_data[df_key] = {
+                'df': df_mapped,
+                'model_class': model_class,
+                'junction_type': junction_type
+            }
+
+            logger.debug("Mapped %d records for %s", df_mapped.height, junction_type)
+
+        except (AttributeError, KeyError, ValueError) as e:
+            logger.error("Data processing error mapping junction records for %s: %s", df_key, e)
+            logger.debug(traceback.format_exc())
+            continue
+        except Exception as e:
+            logger.error("Unexpected error mapping junction records for %s: %s", df_key, e)
+            logger.debug(traceback.format_exc())
+            continue
+
+    return mapped_data
 
 
-def load_breakpoint_data(
-        engine: Engine,
-        main_df: pl.DataFrame,
-        truncate: bool = True
-    ) -> Dict[str, int]:
+def load_junction_tables(
+    junction_dict: dict[str, pl.DataFrame],
+    engine: Optional[Engine] = None,
+    preserve_cache: bool = False
+) -> dict[str, int]:
     """
-    Load breakpoint data and relationships.
+    Load junction tables (many-to-many relationships) into the database.
     
+    Args:
+        junction_dict: Dictionary mapping junction types to DataFrames
+        engine: Optional SQLAlchemy engine (creates new if not provided)
+        preserve_cache: Whether to keep mapper cache after loading
+        
     Returns:
-        Dictionary with record counts
+        Dictionary mapping table names to number of records loaded
+        
+    Validates core entity tables exist, creates mapper, pre-loads mappings,
+    processes junction data through mapper, and performs bulk insert.
     """
-    logger.info("Loading breakpoint data...")
+    logger.info("Starting junction tables loading...")
+
+    # Initialize database if engine not provided
+    if engine is None:
+        engine = initialize_database(create_tables=False)
+        if not engine:
+            logger.error("Failed to initialize database!")
+            return {}
+
+    # Verify core entity tables are loaded
+    try:
+        with engine.begin() as conn:
+            critical_tables = {
+                'part_data': "SELECT COUNT(*) FROM part_data",
+                'box_data': "SELECT COUNT(*) FROM box_data",
+                'model_data': "SELECT COUNT(*) FROM model_data",
+                'line_data': "SELECT COUNT(*) FROM line_data"
+            }
+
+            missing_tables = []
+            for table_name, query in critical_tables.items():
+                try:
+                    count = conn.execute(text(query)).scalar()
+                    if count == 0:
+                        missing_tables.append(table_name)
+                        logger.warning("Table %s is empty (0 records)", table_name)
+                    else:
+                        logger.debug("Table %s has %d records", table_name, count)
+                except (SQLAlchemyError, ProgrammingError) as e:
+                    missing_tables.append(table_name)
+                    logger.debug("Error checking table %s: %s", table_name, e)
+                except Exception as e:
+                    missing_tables.append(table_name)
+                    logger.debug("Unexpected error checking table %s: %s", table_name, e)
+
+            if missing_tables:
+                logger.error(
+                    "Cannot load junction tables: missing or empty entity tables: %s\n"
+                    "Please load core entity tables first.",
+                    missing_tables
+                )
+                return {}
+
+    except (SQLAlchemyError, ProgrammingError) as check_error:
+        logger.error("Database error checking entity table status: %s", check_error)
+        return {}
+    except Exception as check_error:
+        logger.error("Unexpected error checking entity table status: %s", check_error)
+        return {}
+
+    # Create mapper
+    try:
+        mapper = create_mapper(engine)
+        if mapper is None:
+            logger.error("Mapper creation returned None!")
+            return {}
+    except (SQLAlchemyError, ProgrammingError) as e:
+        logger.error("Database error creating mapper: %s", e)
+        return {}
+    except Exception as e:
+        logger.error("Unexpected error creating mapper: %s", e)
+        return {}
+
+    # Pre-load all mappings for performance
+    try:
+        logger.info("Pre-loading all ID mappings...")
+
+        mappings_to_load = [
+            ('suppliers', mapper.get_supplier_mapping),
+            ('parts', mapper.get_part_mapping),
+            ('boxes', mapper.get_box_mapping),
+            ('pallets', mapper.get_pallet_mapping),
+            ('models', mapper.get_model_mapping),
+            ('workshops', mapper.get_workshop_mapping),
+            ('lines', mapper.get_line_mapping)
+        ]
+
+        empty_mappings = []
+        for name, load_func in mappings_to_load:
+            try:
+                mapping = load_func()
+                if not mapping:
+                    empty_mappings.append(name)
+                    logger.warning("Empty mapping for %s", name)
+                else:
+                    logger.debug("Mapping '%s' has %d entries", name, len(mapping))
+            except (SQLAlchemyError, ProgrammingError) as e:
+                logger.error("Database error loading mapping for %s: %s", name, e)
+                empty_mappings.append(name)
+            except Exception as e:
+                logger.error("Unexpected error loading mapping for %s: %s", name, e)
+                empty_mappings.append(name)
+
+        if empty_mappings:
+            logger.warning(
+                "Some mappings are empty: %s. Junction records referencing these will fail.",
+                empty_mappings
+            )
+
+        mapper.log_mapping_statistics()
+
+    except Exception as e:
+        logger.error("Failed to load mappings: %s", e)
+        if mapper:
+            mapper.clear_cache()
+        return {}
 
     results = {}
 
     try:
-        # Extract data
-        breakpoint_df, part_to_breakpoint_df = extract_breakpoint_data(main_df)
-
-        if breakpoint_df.is_empty():
-            logger.info("No breakpoint data to load")
-            return {'breakpoint_data': 0, 'part_to_breakpoint': 0}
-
-        # Load breakpoint data
-        if truncate:
-            truncate_table(engine, 'breakpoint_data')
-
-        records_loaded = bulk_insert_dataframe(
-            engine, breakpoint_df, 'breakpoint_data', BreakpointData
-        )
-        results['breakpoint_data'] = records_loaded
-
-        # Load part-to-breakpoint relationships
-        if not part_to_breakpoint_df.is_empty():
-            if truncate:
-                truncate_table(engine, 'part_to_breakpoint')
-
-            records_loaded = bulk_insert_dataframe(
-                engine, part_to_breakpoint_df, 'part_to_breakpoint', PartToBreakpoint
-            )
-            results['part_to_breakpoint'] = records_loaded
-
-        logger.info("Loaded %d breakpoint records", results.get('breakpoint_data', 0))
-
-    except Exception as e:
-        logger.error("Error loading breakpoint data: %s", e)
-        results = {'breakpoint_data': 0, 'part_to_breakpoint': 0}
-
-    return results
-
-
-def verify_table_counts(
-        engine: Engine
-    ) -> Dict[str, int]:
-    """Count records in all tables using PostgreSQL."""
-    tables = [
-        'supplier_data', 'part_data', 'box_data', 'pallet_data',
-        'model_data', 'workshop_data', 'line_data', 'breakpoint_data',
-        'part_to_box', 'box_to_pallet', 'part_to_model',
-        'part_to_line', 'part_to_breakpoint'
-    ]
-
-    counts = {}
-
-    try:
-        with engine.connect() as connection:
-            for table in tables:
-                try:
-                    stmt = text(f"SELECT COUNT(*) FROM {table}")
-                    result = connection.execute(stmt)
-                    counts[table] = result.scalar() or 0
-
-                except Exception as e:
-                    logger.debug("Could not count records in %s: %s", table, e)
-                    counts[table] = 0
-
-        # Log counts
-        for table, count in counts.items():
-            logger.info("Table %s: %d records", table, count)
-
-    except Exception as e:
-        logger.error("Error verifying table counts: %s", e)
-
-    return counts
-
-
-def load_transformed_data(
-        engine: Engine,
-        transformed_df_dict: Optional[Dict[str, pl.DataFrame]] = None,
-        truncate_before_load: bool = True,
-        use_transformer: bool = True
-    ) -> Dict[str, Any]:
-    """
-    Main function to load transformed data into database.
-    
-    Args:
-        engine: SQLAlchemy engine
-        transformed_df_dict: Dictionary of transformed DataFrames (optional if use_transformer=True)
-        truncate_before_load: Whether to truncate tables before loading
-        use_transformer: If True, call transformer() to get data
-        
-    Returns:
-        Dictionary with loading results
-    """
-    results = {
-        'success': False,
-        'record_counts': {},
-        'error': None,
-        'step_results': {}
-    }
-
-    try:
-        logger.info("=" * 60)
-        logger.info("STARTING DATA LOADING PROCESS")
-        logger.info("=" * 60)
-
-        # If the data is transmitted explicitly
-        if transformed_df_dict is not None:
-            logger.info("Using provided transformed data")
-            # Check if transformed_df_dict is dictionary
-            if not isinstance(transformed_df_dict, dict):
-                raise ValueError(
-                    f"transformed_df_dict should be dict, got {type(transformed_df_dict)}"
-                )
-
-        # We need to call for transformer() to get data
-        elif use_transformer:
-            logger.info("Calling transformer function...")
-
-            # Call for the transformer() from module transformer.py
-            transformed_df_dict = transformer()
-
-            # Check if transformed_df_dict is dictionary
-            if not isinstance(transformed_df_dict, dict):
-                raise ValueError(
-                    f"transformer() returned {type(transformed_df_dict)}, expected dict"
-                )
-
-            logger.info("Transformer returned %d DataFrames", len(transformed_df_dict))
-
-        else:
-            raise ValueError(
-                "No data provided. Either pass transformed_df_dict or set use_transformer=True"
-            )
-
-        # Validate input
-        if not validate_transformed_data(transformed_df_dict):
-            results['error'] = "Data validation failed"
-            return results
-
-        # Disable foreign keys for faster loading (PostgreSQL)
+        # Disable foreign keys for bulk loading
         disable_foreign_keys(engine)
 
-        try:
-            # Load entity tables
-            logger.info("Loading entity tables...")
-            entity_results = load_all_entity_tables(
-                engine, transformed_df_dict, truncate_before_load
-            )
-            results['step_results']['entity_tables'] = entity_results
-            logger.info("Entity tables loaded: %d tables", len(entity_results))
+        # Prepare data using mapper (simplified)
+        mapped_data = _prepare_junction_dataframes(junction_dict, mapper)
 
-            # Load junction tables
-            main_df = transformed_df_dict['transformed_main_df']
-            logger.info("Loading junction tables...")
-            junction_results = load_all_junction_tables(
-                engine, main_df, truncate_before_load
-            )
-            results['step_results']['junction_tables'] = junction_results
-            logger.info("Junction tables loaded: %d tables", len(junction_results))
-
-            # Load breakpoint data
-            logger.info("Loading breakpoint data...")
-            breakpoint_results = load_breakpoint_data(
-                engine, main_df, truncate_before_load
-            )
-            results['step_results']['breakpoint_data'] = breakpoint_results
-            logger.info("Breakpoint data loaded")
-
-        finally:
-            # Re-enable foreign keys (PostgreSQL)
+        if not mapped_data:
+            logger.info("No junction data to load")
             enable_foreign_keys(engine)
+            return {}
 
-        # Verify all tables
-        results['record_counts'] = verify_table_counts(engine)
+        # Load sequence
+        load_sequence = ['part_to_box', 'box_to_pallet', 'part_to_model', 'part_to_line']
 
-        # Check if loading was successful
-        total_records = sum(results['record_counts'].values())
-        results['success'] = total_records > 0
+        for df_key in load_sequence:
+            if df_key not in mapped_data:
+                results[df_key] = 0
+                continue
 
-        if results['success']:
-            logger.info("=" * 60)
-            logger.info("DATA LOADING SUCCESSFUL!")
-            logger.info("Total records loaded: %d", total_records)
-            logger.info("=" * 60)
-        else:
-            logger.warning("Data loading completed but no records were loaded")
+            data = mapped_data[df_key]
+            model_class = data['model_class']
+            df = data['df']
+            table_name = model_class.__tablename__
+
+            records_loaded = _bulk_insert_dataframe(
+                engine, df, table_name, model_class,
+                required_columns_check=False  # Mapper already validated
+            )
+            results[table_name] = records_loaded
+
+        # Re-enable foreign keys
+        enable_foreign_keys(engine)
+
+    except (IntegrityError, DataError, ProgrammingError) as e:
+        logger.error("Database error loading junction tables: %s", e)
+        logger.debug(traceback.format_exc())
+
+        # Always try to re-enable foreign keys
+        try:
+            logger.warning("Attempting to re-enable foreign keys after error...")
+            enable_foreign_keys(engine)
+        except (SQLAlchemyError, ProgrammingError) as fk_error:
+            logger.error("Failed to re-enable foreign keys: %s", fk_error)
+        except Exception as fk_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+
+        return {}
+
+    except SQLAlchemyError as e:
+        logger.error("SQLAlchemy error loading junction tables: %s", e)
+        logger.debug(traceback.format_exc())
+
+        # Always try to re-enable foreign keys
+        try:
+            logger.warning("Attempting to re-enable foreign keys after error...")
+            enable_foreign_keys(engine)
+        except (SQLAlchemyError, ProgrammingError) as fk_error:
+            logger.error("Failed to re-enable foreign keys: %s", fk_error)
+        except Exception as fk_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+
+        return {}
 
     except Exception as e:
-        results['error'] = str(e)
-        logger.error("Error in load_transformed_data: %s", e)
-        logger.error(traceback.format_exc())
+        logger.error("Unexpected error loading junction tables: %s", e)
+        logger.debug(traceback.format_exc())
 
-        # Ensure foreign keys are re-enabled on error
+        # Always try to re-enable foreign keys
         try:
+            logger.warning("Attempting to re-enable foreign keys after error...")
             enable_foreign_keys(engine)
-        except Exception as reenable_error:
-            logger.warning("Could not re-enable foreign keys: %s", reenable_error)
+        except (SQLAlchemyError, ProgrammingError) as fk_error:
+            logger.error("Failed to re-enable foreign keys: %s", fk_error)
+        except Exception as fk_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", fk_error)
+
+        return {}
+
+    finally:
+        # Cache management
+        if mapper:
+            if preserve_cache:
+                logger.debug("Preserving mapper cache as requested")
+            else:
+                mapper.clear_cache()
+                logger.debug("Cleared mapper cache")
+
+    # Calculate and log totals
+    total_records = sum(results.values())
+    tables_with_data = [k for k, v in results.items() if v > 0]
+
+    logger.info(
+        "Junction tables loading completed.\n"
+        "Total records loaded: %d.\n"
+        "Tables with data: %s",
+        total_records,
+        ', '.join(tables_with_data) or 'none'
+    )
 
     return results
-
-if __name__ == '__main__':
-    load_transformed_data()
