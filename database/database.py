@@ -71,7 +71,7 @@ RELATIONSHIP STRUCTURE:
    Part (N) ↔ (N) Line (N) ↔ (1) Workshop
    Part (N) ↔ (N) Breakpoint (change history)
 
-Version: 1.0.0
+Version: 1.1.0
 Compatibility: Python 3.12.3, SQLAlchemy 1.4.54, PostgreSQL 12+
 Maintainer: PLD Engineering Center
 Created: 2026-01-16
