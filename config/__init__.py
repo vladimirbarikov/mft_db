@@ -1,6 +1,5 @@
-# config/__init__.py
 """
-Пакет конфигурации проекта MFT Database.
+The logging configuration package for the Material Flow Table Database project.
 """
 
 from .logging_config import (
@@ -11,7 +10,7 @@ from .logging_config import (
     PROJECT_ROOT
 )
 
-# Автоматическая инициализация логирования при импорте пакета
+# Automatic initialization of logging when importing a package
 setup_logging()
 
 __all__ = [
@@ -22,4 +21,4 @@ __all__ = [
     'PROJECT_ROOT'
 ]
 
-logger.info("Пакет конфигурации загружен. Логи в: %s", LOG_DIR)
+logger.info("The configuration package is loaded. Logs in: %s", LOG_DIR)
