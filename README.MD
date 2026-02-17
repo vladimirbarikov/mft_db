@@ -370,8 +370,8 @@
 | BREAKPOINT_ID               | breakpoint_data             | BREAKPOINT_ID  | внешний ключ |
 | PART_NUMBER_BEFORE_CHANGE   | sample_breakpoint_data.xlsx |                |              |
 | SUPPLIER_NAME_BEFORE_CHANGE | sample_breakpoint_data.xlsx |                |              |
+| LOCALIZATION_BEFORE_CHANGE  | sample_breakpoint_data.xlsx |                | ENUM = ('yes' - local, 'no' - foreign) |
 | LINE_NAME_BEFORE_CHANGE     | sample_breakpoint_data.xlsx |                |              |
-| LOCALIZATION_BEFORE_CHANGE  | sample_breakpoint_data.xlsx |                |              |
 
 </li>
 
