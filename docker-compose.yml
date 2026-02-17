@@ -404,12 +404,12 @@ services:
 
         echo "Creating admin user..."
         airflow users create \
-          --username admin \
+          --username "${AIRFLOW_USER}" \
           --firstname admin \
           --lastname admin \
           --role Admin \
           --email admin@example.com \
-          --password airflow 2>/dev/null || true
+          --password "${AIRFLOW_PASSWORD}" 2>/dev/null || true
 
         echo "Enabling mft_etl_pipeline DAG..."
         airflow dags unpause mft_etl_pipeline 2>/dev/null || true
@@ -423,8 +423,6 @@ services:
       <<: *airflow-common-env
       _AIRFLOW_DB_MIGRATE: 'true'
       _AIRFLOW_WWW_USER_CREATE: 'true'
-      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
       _PIP_ADDITIONAL_REQUIREMENTS: ''
     user: "0:0"
     volumes:
