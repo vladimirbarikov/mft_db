@@ -231,7 +231,10 @@ class MFTObjectMapper:
 
         # Standard lookup for non-composite columns
         if column_name not in self.COLUMN_TO_MODEL:
-            logger.warning("Unknown column for mapping: %s", column_name)
+            logger.warning(
+                "Unknown column for mapping: %s",
+                column_name
+            )
             return None
 
         model_class, lookup_column, id_column = self.COLUMN_TO_MODEL[column_name]
@@ -276,7 +279,10 @@ class MFTObjectMapper:
 
             elif isinstance(value, (tuple, list)):
                 if len(value) != 4:
-                    logger.debug("Composite key must have 4 elements, got %d", len(value))
+                    logger.debug(
+                        "Composite key must have 4 elements, got %d",
+                        len(value)
+                    )
                     return None
 
                 pack_type, length, width, height = value
@@ -298,9 +304,7 @@ class MFTObjectMapper:
 
             # Skip if type is 'null'
             if pack_type == 'null':
-                logger.debug(
-                    "Skipping 'null' type."
-                )
+                logger.debug("Skipping 'null' type.")
                 return None
 
             # Assert that the values are not None after verification
@@ -343,9 +347,14 @@ class MFTObjectMapper:
 
                 if box_id:
                     logger.debug(
-                        "Found box_id %s for composite %s", box_id, composite_key)
+                        "Found box_id %s for composite %s",
+                        box_id, composite_key
+                    )
                 else:
-                    logger.debug("No box found for composite %s", composite_key)
+                    logger.debug(
+                        "No box found for composite %s",
+                        composite_key
+                    )
 
                 return box_id
 
@@ -360,17 +369,29 @@ class MFTObjectMapper:
 
                 if pallet_id:
                     logger.debug(
-                        "Found pallet_id %s for composite %s", pallet_id, composite_key)
+                        "Found pallet_id %s for composite %s",
+                        pallet_id, composite_key
+                    )
                 else:
-                    logger.debug("No pallet found for composite %s", composite_key)
+                    logger.debug(
+                        "No pallet found for composite %s",
+                        composite_key
+                    )
 
                 return pallet_id
 
         except (ValueError, TypeError, AttributeError) as e:
-            logger.error("Error processing composite key %s: %s", value, e)
+            logger.error(
+                "Error processing composite key %s: %s",
+                value, e
+            )
             return None
+
         except Exception as unexpected_error:
-            logger.error("Unexpected error processing composite key %s: %s", value, unexpected_error)
+            logger.error(
+                "Unexpected error processing composite key %s: %s",
+                value, unexpected_error
+            )
             return None
 
     def _load_mapping(
@@ -433,12 +454,14 @@ class MFTObjectMapper:
                 cache_key, e
             )
             self._cached_mappings[cache_key] = {}
+
         except (ValueError, TypeError, AttributeError) as e:
             logger.error(
                 "Data error loading mapping for %s: %s",
                 cache_key, e
             )
             self._cached_mappings[cache_key] = {}
+
         except Exception as unexpected_error:
             logger.error(
                 "Unexpected error loading mapping for %s: %s",
@@ -546,13 +569,19 @@ class MFTObjectMapper:
             required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_box_composite']
             for col in required_cols:
                 if col not in record:
-                    logger.debug("Missing required column '%s' in part_to_box record", col)
+                    logger.debug(
+                        "Missing required column '%s' in part_to_box record",
+                        col
+                    )
                     return None
 
             # Mapping part_number → part_id
             part_id = self.get_id('part_number', record['part_number'])
             if not part_id:
-                logger.warning("No part_id found for part_number: %s", record['part_number'])
+                logger.warning(
+                    "No part_id found for part_number: %s",
+                    record['part_number']
+                )
                 return None
 
             # Mapping composite box → box_id
@@ -565,7 +594,10 @@ class MFTObjectMapper:
 
             box_id = self.get_id('box_composite', box_composite)
             if not box_id:
-                logger.warning("No box_id found for composite: %s", box_composite)
+                logger.warning(
+                    "No box_id found for composite: %s",
+                    box_composite
+                )
                 return None
 
             # Create result
@@ -585,8 +617,12 @@ class MFTObjectMapper:
         except (KeyError, ValueError, TypeError) as e:
             logger.debug("Error mapping part_to_box record: %s", e)
             return None
+
         except Exception as unexpected_error:
-            logger.error("Unexpected error mapping part_to_box record: %s", unexpected_error)
+            logger.error(
+                "Unexpected error mapping part_to_box record: %s",
+                unexpected_error
+            )
             return None
 
     def _map_box_to_pallet_composite(self, record: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -606,7 +642,10 @@ class MFTObjectMapper:
             required_cols = JUNCTION_REQUIRED_COLUMNS['box_to_pallet_composite']
             for col in required_cols:
                 if col not in record:
-                    logger.debug("Missing required column '%s' in box_to_pallet record", col)
+                    logger.debug(
+                        "Missing required column '%s' in box_to_pallet record",
+                        col
+                    )
                     return None
 
             # Mapping composite box → box_id
@@ -619,7 +658,10 @@ class MFTObjectMapper:
 
             box_id = self.get_id('box_composite', box_composite)
             if not box_id:
-                logger.debug("No box_id found for composite: %s", box_composite)
+                logger.debug(
+                    "No box_id found for composite: %s",
+                    box_composite
+                )
                 return None
 
             # Mapping composite pallet → pallet_id
@@ -632,7 +674,10 @@ class MFTObjectMapper:
 
             pallet_id = self.get_id('pallet_composite', pallet_composite)
             if not pallet_id:
-                logger.debug("No pallet_id found for composite: %s", pallet_composite)
+                logger.debug(
+                    "No pallet_id found for composite: %s",
+                    pallet_composite
+                )
                 return None
 
             # Create result
@@ -652,8 +697,12 @@ class MFTObjectMapper:
         except (KeyError, ValueError, TypeError) as e:
             logger.debug("Error mapping box_to_pallet record: %s", e)
             return None
+
         except Exception as unexpected_error:
-            logger.error("Unexpected error mapping box_to_pallet record: %s", unexpected_error)
+            logger.error(
+                "Unexpected error mapping box_to_pallet record: %s",
+                unexpected_error
+            )
             return None
 
     def _map_part_to_model(self, record: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -672,19 +721,28 @@ class MFTObjectMapper:
             required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_model']
             for col in required_cols:
                 if col not in record:
-                    logger.debug("Missing required column '%s' in part_to_model record", col)
+                    logger.debug(
+                        "Missing required column '%s' in part_to_model record",
+                        col
+                    )
                     return None
 
             # Mapping part_number → part_id
             part_id = self.get_id('part_number', record['part_number'])
             if not part_id:
-                logger.debug("No part_id found for part_number: %s", record['part_number'])
+                logger.debug(
+                    "No part_id found for part_number: %s",
+                    record['part_number']
+                )
                 return None
 
             # Mapping model_code → model_id
             model_id = self.get_id('model_code', record['model_code'])
             if not model_id:
-                logger.debug("No model_id found for model_code: %s", record['model_code'])
+                logger.debug(
+                    "No model_id found for model_code: %s",
+                    record['model_code']
+                )
                 return None
 
             # Create result
@@ -704,8 +762,12 @@ class MFTObjectMapper:
         except (KeyError, ValueError, TypeError) as e:
             logger.debug("Error mapping part_to_model record: %s", e)
             return None
+
         except Exception as unexpected_error:
-            logger.error("Unexpected error mapping part_to_model record: %s", unexpected_error)
+            logger.error(
+                "Unexpected error mapping part_to_model record: %s",
+                unexpected_error
+            )
             return None
 
     def _map_part_to_line(self, record: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -723,19 +785,28 @@ class MFTObjectMapper:
             required_cols = JUNCTION_REQUIRED_COLUMNS['part_to_line']
             for col in required_cols:
                 if col not in record:
-                    logger.debug("Missing required column '%s' in part_to_line record", col)
+                    logger.debug(
+                        "Missing required column '%s' in part_to_line record",
+                        col
+                    )
                     return None
 
             # Mapping part_number → part_id
             part_id = self.get_id('part_number', record['part_number'])
             if not part_id:
-                logger.debug("No part_id found for part_number: %s", record['part_number'])
+                logger.debug(
+                    "No part_id found for part_number: %s",
+                    record['part_number']
+                )
                 return None
 
             # Mapping line_code → line_id
             line_id = self.get_id('line_code', record['line_code'])
             if not line_id:
-                logger.debug("No line_id found for line_code: %s", record['line_code'])
+                logger.debug(
+                    "No line_id found for line_code: %s",
+                    record['line_code']
+                )
                 return None
 
             # Create result
@@ -749,8 +820,12 @@ class MFTObjectMapper:
         except (KeyError, ValueError, TypeError) as e:
             logger.debug("Error mapping part_to_line record: %s", e)
             return None
+        
         except Exception as unexpected_error:
-            logger.error("Unexpected error mapping part_to_line record: %s", unexpected_error)
+            logger.error(
+                "Unexpected error mapping part_to_line record: %s",
+                unexpected_error
+            )
             return None
 
     # ========== MAIN MAPPING METHODS ==========
@@ -824,7 +899,10 @@ class MFTObjectMapper:
         Examples:
             >>> records = mapper.map_junction_records(df, 'part_to_box_composite')
         """
-        logger.info("Mapping junction records for: %s", junction_type)
+        logger.info(
+            "Mapping junction records for: %s",
+            junction_type
+        )
 
         # Mapping junction types to corresponding handlers
         handler_map = {
@@ -835,7 +913,10 @@ class MFTObjectMapper:
         }
 
         if junction_type not in handler_map:
-            logger.error("Unknown junction type: %s", junction_type)
+            logger.error(
+                "Unknown junction type: %s",
+                junction_type
+            )
             return []
 
         handler = handler_map[junction_type]
@@ -845,8 +926,12 @@ class MFTObjectMapper:
         except (ValueError, TypeError, AttributeError) as e:
             logger.error("Error converting DataFrame to dicts: %s", e)
             return []
+
         except Exception as unexpected_error:
-            logger.error("Unexpected error converting DataFrame: %s", unexpected_error)
+            logger.error(
+                "Unexpected error converting DataFrame: %s",
+                unexpected_error
+            )
             return []
 
         mapped_records = []
@@ -860,7 +945,10 @@ class MFTObjectMapper:
                 else:
                     skipped += 1
             except Exception as unexpected_error:
-                logger.error("Unexpected error in handler for record %s: %s", record, unexpected_error)
+                logger.error(
+                    "Unexpected error in handler for record %s: %s",
+                    record, unexpected_error
+                )
                 skipped += 1
 
         # Logging statistics
@@ -947,9 +1035,18 @@ def create_mapper(engine=None) -> MFTObjectMapper:
     except SQLAlchemyError as e:
         logger.error("Database error creating mapper: %s", e)
         raise
+
     except (ValueError, TypeError, AttributeError) as e:
         logger.error("Configuration error creating mapper: %s", e)
-        raise RuntimeError(f"Failed to create mapper: {e}") from e
+        raise RuntimeError(
+            f"Failed to create mapper: {e}"
+        ) from e
+
     except Exception as unexpected_error:
-        logger.error("Unexpected error creating mapper: %s", unexpected_error)
-        raise RuntimeError(f"Unexpected error creating mapper: {unexpected_error}") from unexpected_error
+        logger.error(
+            "Unexpected error creating mapper: %s",
+            unexpected_error
+        )
+        raise RuntimeError(
+            f"Unexpected error creating mapper: {unexpected_error}"
+        ) from unexpected_error
