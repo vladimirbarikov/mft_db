@@ -229,11 +229,11 @@
 | Поле          | Источник             | Поле источника | Комментарий                                                                                                                                                                           |
 | ------------- | -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SUPPLIER_ID   | Генерация            |                | первичный ключ генерируется автоматически и состоит из 2 частей: "SUP_" + uuid. Пример "SUP_f47ac10b-58cc-4372-a567-0e02b2c3d479" |
-| SUPPLIER_NAME | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| LOCATION      | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| CITY          | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| BUILDING      | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| LOCALIZATION  | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
+| SUPPLIER_NAME | sample_mft_data.xlsx |                |                                                 |
+| LOCATION      | sample_mft_data.xlsx |                |                                                 |
+| CITY          | sample_mft_data.xlsx |                |                                                 |
+| BUILDING      | sample_mft_data.xlsx |                |                                                 |
+| LOCALIZATION  | sample_mft_data.xlsx |                | ENUM = ('yes' - local, 'no' - foreign)          |
 </li>
 
 <li><b>Таблица part_data</b>
@@ -241,10 +241,10 @@
 | Поле           | Источник             | Поле источника | Комментарий                                                                                                                                                                           |
 | -------------- | -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | PART_ID        | Генерация            |                | первичный ключ генерируется автоматически и состоит из 2 частей: "PRT_" + uuid. Пример "PRT_f47ac10b-58cc-4372-a567-0e02b2c3d479" |
-| PART_NUMBER    | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| PART_NAME      | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| PART_WEIGHT_KG | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| SUPPLIER_ID    | supplier_data        | SUPPLIER_ID    |                                                                                                                                                                                       |
+| PART_NUMBER    | sample_mft_data.xlsx |                |                                                 |
+| PART_NAME      | sample_mft_data.xlsx |                |                                                 |
+| PART_WEIGHT_KG | sample_mft_data.xlsx |                |                                                 |
+| SUPPLIER_ID    | supplier_data        | SUPPLIER_ID    |                                                 |
 </li>
 
 <li><b>Таблица box_data</b>
@@ -252,15 +252,15 @@
 | Поле          | Источник             | Поле источника | Комментарий                                                                                                                                                                           |
 | ------------- | -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | BOX_ID        | Генерация            |                | первичный ключ генерируется автоматически и состоит из 2 частей: "BOX_" + uuid. Пример "BOX_f47ac10b-58cc-4372-a567-0e02b2c3d479" |
-| BOX_NUMBER    | Генерация            |                | генерируется на стороне базы данных из 4 частей: префикс "R" если 'BOX_TYPE'="returnable" или "N" если 'BOX_TYPE'="non-returnable" + 'BOX_LENGTH_MM' + 'BOX_WIDTH_MM' + 'BOX_HEIGHT_MM'. Пример 'R 1340-560-440' |
+| BOX_NUMBER    | Генерация            |                | генерируется на стороне базы данных из 4 частей: префикс "R" если 'BOX_TYPE'="returnable" или "N" если 'BOX_TYPE'="non-returnable" 'BOX_LENGTH_MM' - 'BOX_WIDTH_MM' - 'BOX_HEIGHT_MM'. Пример 'R 1340-560-440' |
 | BOX_TYPE      | sample_mft_data.xlsx |                | ENUM = ('returnable', 'non-returnable')         |
 | BOX_WEIGHT_KG | sample_mft_data.xlsx |                |                                                 |
 | BOX_LENGTH_MM | sample_mft_data.xlsx |                |                                                 |
-| BOX_WIDTH_MM  | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| BOX_HEIGHT_MM | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
-| BOX_VOL_M3    | supplier_data        |                | вычисляется на стороне базы данных по формуле 'BOX_VOL_M3' = ROUND(('BOX_LENGTH_MM' / 1000) * ('BOX_WIDTH_MM' / 1000) * ('BOX_HEIGHT_MM' / 1000), 4)                                                           |
-| BOX_AREA_M2   | supplier_data        |                | вычисляется на стороне базы данных по формуле 'BOX_AREA_M2' = ROUND(('BOX_LENGTH_MM' / 1000) * ('BOX_WIDTH_MM' / 1000), 4)                                                                                     |
-| BOX_STACKING  | sample_mft_data.xlsx |                |                                                                                                                                                                                       |
+| BOX_WIDTH_MM  | sample_mft_data.xlsx |                |                                                 |
+| BOX_HEIGHT_MM | sample_mft_data.xlsx |                |                                                 |
+| BOX_VOL_M3    | supplier_data        |                | вычисляется на стороне базы данных по формуле 'BOX_VOL_M3' = ROUND(('BOX_LENGTH_MM' / 1000) * ('BOX_WIDTH_MM' / 1000) * ('BOX_HEIGHT_MM' / 1000), 4)                                                    |
+| BOX_AREA_M2   | supplier_data        |                | вычисляется на стороне базы данных по формуле 'BOX_AREA_M2' = ROUND(('BOX_LENGTH_MM' / 1000) * ('BOX_WIDTH_MM' / 1000), 4)                                                                               |
+| BOX_STACKING  | sample_mft_data.xlsx |                |                                                 |
 </li>
 
 <li><b>Таблица pallet_data</b>
@@ -268,8 +268,8 @@
 | Поле             | Источник             | Поле источника | Комментарий                                                                      |
 | ---------------- | -------------------- | -------------- | -------------------------------------------------------------------------------- |
 | PALLET_ID        | Генерация            |                | первичный ключ генерируется автоматически и состоит из 2 частей: "PLT_" + uuid. Пример "PLT_f47ac10b-58cc-4372-a567-0e02b2c3d479"             |
-| PALLET_NUMBER    | Формула              |                | A + PALLET_LENGTH_MM-PALLET_WIDTH_MM-PALLET_HEIGHT_MM. Пример "A 1340-1560-1440" |
-| PALLET_TYPE      | sample_mft_data.xlsx |                |                                                                                  |
+| PALLET_NUMBER    | Генерация            |                | генерируется на стороне базы данных из 4 частей: "R" если 'PALLET_TYPE'="returnable" или "N" если 'PALLET_TYPE'="non-returnable" 'PALLET_LENGTH_MM' - 'PALLET_WIDTH_MM' - 'PALLET_HEIGHT_MM'. Пример "R 1340-1560-1440" |
+| PALLET_TYPE      | sample_mft_data.xlsx |                | ENUM = ('returnable', 'non-returnable')                                          |
 | PALLET_WEIGHT_KG | sample_mft_data.xlsx |                |                                                                                  |
 | PALLET_LENGTH_MM | sample_mft_data.xlsx |                |                                                                                  |
 | PALLET_WIDTH_MM  | sample_mft_data.xlsx |                |                                                                                  |
@@ -305,8 +305,8 @@
 | Поле       | Источник             | Поле источника | Комментарий                                   |
 | ---------- | -------------------- | -------------- | --------------------------------------------- |
 | MODEL_ID   | Генерация            |                | первичный ключ генерируется автоматически и состоит из 2 частей: "MDL_" + uuid. Пример "MDL_f47ac10b-58cc-4372-a567-0e02b2c3d479" |
-| MODEL_CODE | sample_mft_data.xlsx |                |                                               |
-| MODEL_NAME | sample_mft_data.xlsx |                |                                               |
+| MODEL_CODE | sample_mft_data.xlsx |                | ENUM = ('A01', 'A08', 'B02' ...)              |
+| MODEL_NAME | sample_mft_data.xlsx |                | ENUM = ('Jolion', 'H3', 'F7' ...)             |
 
 </li>
 
@@ -326,8 +326,8 @@
 | Поле          | Источник             | Поле источника | Комментарий                                   |
 | ------------- | -------------------- | -------------- | --------------------------------------------- |
 | WORKSHOP_ID   | Генерация            |                | первичный ключ генерируется автоматически и состоит из 2 частей: "WSP_" + uuid. Пример "WSP_f47ac10b-58cc-4372-a567-0e02b2c3d479" |
-| WORKSHOP_CODE | sample_mft_data.xlsx |                |                                               |
-| WORKSHOP_NAME | sample_mft_data.xlsx |                |                                               |
+| WORKSHOP_CODE | sample_mft_data.xlsx |                | ENUM = ('AS', 'COMP', 'PAINT' ...)               |
+| WORKSHOP_NAME | sample_mft_data.xlsx |                | ENUM = ('Assembly', 'Component', 'Painting' ...) |
 
 </li>
 
