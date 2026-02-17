@@ -2487,12 +2487,12 @@
       },
       "targets": [
         {
-          "expr": "pg_missing_foreign_key_indexes",
+          "expr": "mft_missing_foreign_key_indexes",
           "legendFormat": "Missing FK indexes",
           "refId": "A"
         },
         {
-          "expr": "pg_unused_indexes",
+          "expr": "mft_unused_indexes",
           "legendFormat": "Unused indexes",
           "refId": "B"
         }
@@ -2552,7 +2552,7 @@
       },
       "targets": [
         {
-          "expr": "pg_cache_hit_ratio",
+          "expr": "mft_cache_hit_ratio",
           "legendFormat": "Cache Hit",
           "refId": "A"
         }
@@ -2672,17 +2672,17 @@
       },
       "targets": [
         {
-          "expr": "pg_missing_foreign_key_indexes",
+          "expr": "mft_missing_foreign_key_indexes",
           "legendFormat": "Missing FK Indexes",
           "refId": "A"
         },
         {
-          "expr": "pg_unused_indexes",
+          "expr": "mft_unused_indexes",
           "legendFormat": "Unused Indexes",
           "refId": "B"
         },
         {
-          "expr": "pg_cache_hit_ratio",
+          "expr": "mft_cache_hit_ratio",
           "legendFormat": "Cache Hit %",
           "refId": "C"
         }
