@@ -140,7 +140,7 @@
       },
       "targets": [
         {
-          "expr": "mft_suppliers_total",
+          "expr": "mft_suppliers_total_count",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -193,7 +193,7 @@
       },
       "targets": [
         {
-          "expr": "mft_parts_total",
+          "expr": "mft_parts_total_count",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -246,7 +246,7 @@
       },
       "targets": [
         {
-          "expr": "mft_active_parts_total",
+          "expr": "mft_active_parts_total_count",
           "legendFormat": "Active",
           "refId": "A"
         }
@@ -299,7 +299,7 @@
       },
       "targets": [
         {
-          "expr": "mft_boxes_total",
+          "expr": "mft_boxes_total_count",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -352,7 +352,7 @@
       },
       "targets": [
         {
-          "expr": "mft_pallets_total",
+          "expr": "mft_pallets_total_count",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -405,7 +405,7 @@
       },
       "targets": [
         {
-          "expr": "mft_models_total",
+          "expr": "mft_models_total_count",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -458,7 +458,7 @@
       },
       "targets": [
         {
-          "expr": "mft_workshops_total",
+          "expr": "mft_workshops_total_count",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -511,7 +511,7 @@
       },
       "targets": [
         {
-          "expr": "mft_lines_total",
+          "expr": "mft_lines_total_count",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -564,7 +564,7 @@
       },
       "targets": [
         {
-          "expr": "mft_breakpoints_total",
+          "expr": "mft_breakpoints_total_count",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -617,7 +617,7 @@
       },
       "targets": [
         {
-          "expr": "mft_breakpoints_last_7_days",
+          "expr": "mft_breakpoints_last_7_days_count",
           "legendFormat": "Last 7d",
           "refId": "A"
         }
@@ -670,7 +670,7 @@
       },
       "targets": [
         {
-          "expr": "mft_breakpoints_last_30_days",
+          "expr": "mft_breakpoints_last_30_days_count",
           "legendFormat": "Last 30d",
           "refId": "A"
         }
@@ -730,7 +730,7 @@
       },
       "targets": [
         {
-          "expr": "mft_data_completeness_score",
+          "expr": "mft_data_completeness_score_avg",
           "legendFormat": "Completeness",
           "refId": "A"
         }
@@ -797,42 +797,42 @@
       },
       "targets": [
         {
-          "expr": "mft_parts_without_box",
+          "expr": "mft_parts_without_box_count",
           "legendFormat": "Parts without box",
           "refId": "A"
         },
         {
-          "expr": "mft_parts_without_model",
+          "expr": "mft_parts_without_model_count",
           "legendFormat": "Parts without model",
           "refId": "B"
         },
         {
-          "expr": "mft_parts_without_line",
+          "expr": "mft_parts_without_line_count",
           "legendFormat": "Parts without line",
           "refId": "C"
         },
         {
-          "expr": "mft_boxes_without_pallet",
+          "expr": "mft_boxes_without_pallet_count",
           "legendFormat": "Boxes without pallet",
           "refId": "D"
         },
         {
-          "expr": "mft_boxes_without_parts",
+          "expr": "mft_boxes_without_parts_count",
           "legendFormat": "Boxes without parts",
           "refId": "E"
         },
         {
-          "expr": "mft_models_without_parts",
+          "expr": "mft_models_without_parts_count",
           "legendFormat": "Models without parts",
           "refId": "F"
         },
         {
-          "expr": "mft_lines_without_parts",
+          "expr": "mft_lines_without_parts_count",
           "legendFormat": "Lines without parts",
           "refId": "G"
         },
         {
-          "expr": "mft_suppliers_without_parts",
+          "expr": "mft_suppliers_without_parts_count",
           "legendFormat": "Suppliers without parts",
           "refId": "H"
         }
@@ -885,27 +885,27 @@
       },
       "targets": [
         {
-          "expr": "mft_average_parts_per_box",
+          "expr": "mft_parts_per_box_avg_avg",
           "legendFormat": "Avg parts/box",
           "refId": "A"
         },
         {
-          "expr": "mft_average_boxes_per_pallet",
+          "expr": "mft_boxes_per_pallet_avg_avg",
           "legendFormat": "Avg boxes/pallet",
           "refId": "B"
         },
         {
-          "expr": "mft_average_parts_per_vehicle",
+          "expr": "mft_parts_per_vehicle_avg_avg",
           "legendFormat": "Avg parts/vehicle",
           "refId": "C"
         },
         {
-          "expr": "mft_max_parts_per_box",
+          "expr": "mft_parts_per_box_max_max",
           "legendFormat": "Max parts/box",
           "refId": "D"
         },
         {
-          "expr": "mft_min_parts_per_box",
+          "expr": "mft_parts_per_box_min_min",
           "legendFormat": "Min parts/box",
           "refId": "E"
         }
@@ -958,17 +958,17 @@
       },
       "targets": [
         {
-          "expr": "mft_zero_part_per_box",
+          "expr": "mft_zero_part_per_box_count",
           "legendFormat": "Zero parts/box",
           "refId": "A"
         },
         {
-          "expr": "mft_zero_box_per_pallet",
+          "expr": "mft_zero_box_per_pallet_count",
           "legendFormat": "Zero boxes/pallet",
           "refId": "B"
         },
         {
-          "expr": "mft_zero_part_per_vehicle",
+          "expr": "mft_zero_part_per_vehicle_count",
           "legendFormat": "Zero parts/vehicle",
           "refId": "C"
         }
@@ -1523,27 +1523,27 @@
       },
       "targets": [
         {
-          "expr": "mft_part_weight_min",
+          "expr": "mft_part_weight_min_min",
           "legendFormat": "Min weight",
           "refId": "A"
         },
         {
-          "expr": "mft_part_weight_max",
+          "expr": "mft_part_weight_max_max",
           "legendFormat": "Max weight",
           "refId": "B"
         },
         {
-          "expr": "mft_part_weight_avg",
+          "expr": "mft_part_weight_avg_avg",
           "legendFormat": "Avg weight",
           "refId": "C"
         },
         {
-          "expr": "mft_part_weight_stddev",
+          "expr": "mft_part_weight_stddev_stddev",
           "legendFormat": "StdDev",
           "refId": "D"
         },
         {
-          "expr": "mft_parts_with_weight_total",
+          "expr": "mft_parts_with_weight_total_count",
           "legendFormat": "Parts with weight",
           "refId": "E"
         }
@@ -1597,12 +1597,12 @@
       },
       "targets": [
         {
-          "expr": "mft_box_dimensions_avg",
+          "expr": "mft_box_dimensions_avg_value",
           "legendFormat": "Avg {{dimension}}",
           "refId": "A"
         },
         {
-          "expr": "mft_box_dimensions_minmax",
+          "expr": "mft_box_dimensions_minmax_value",
           "legendFormat": "{{stat}}",
           "refId": "B"
         }
@@ -1656,7 +1656,7 @@
       },
       "targets": [
         {
-          "expr": "mft_box_volume_stats",
+          "expr": "mft_box_volume_stats_value",
           "legendFormat": "{{stat}} volume",
           "refId": "A"
         }
@@ -1710,12 +1710,12 @@
       },
       "targets": [
         {
-          "expr": "mft_pallet_dimensions_avg",
+          "expr": "mft_pallet_dimensions_avg_value",
           "legendFormat": "Avg {{dimension}}",
           "refId": "A"
         },
         {
-          "expr": "mft_pallet_dimensions_minmax",
+          "expr": "mft_pallet_dimensions_minmax_value",
           "legendFormat": "{{stat}}",
           "refId": "B"
         }
@@ -1769,12 +1769,12 @@
       },
       "targets": [
         {
-          "expr": "mft_box_stacking_stats",
+          "expr": "mft_box_stacking_stats_value",
           "legendFormat": "Box - {{stat}}",
           "refId": "A"
         },
         {
-          "expr": "mft_pallet_stacking_stats",
+          "expr": "mft_pallet_stacking_stats_value",
           "legendFormat": "Pallet - {{stat}}",
           "refId": "B"
         }
@@ -1828,7 +1828,7 @@
       },
       "targets": [
         {
-          "expr": "mft_box_dimensions_minmax",
+          "expr": "mft_box_dimensions_minmax_value",
           "legendFormat": "{{stat}}",
           "refId": "A"
         }
@@ -1887,7 +1887,7 @@
       },
       "targets": [
         {
-          "expr": "mft_breakpoints_by_month",
+          "expr": "mft_breakpoints_by_month_count",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{label}}",
@@ -1951,12 +1951,12 @@
       },
       "targets": [
         {
-          "expr": "mft_breakpoint_lag_avg_days",
+          "expr": "mft_breakpoint_lag_avg_days_avg",
           "legendFormat": "Avg Lag",
           "refId": "A"
         },
         {
-          "expr": "mft_breakpoint_lag_max_days",
+          "expr": "mft_breakpoint_lag_max_days_max",
           "legendFormat": "Max Lag",
           "refId": "B"
         }
@@ -2010,17 +2010,17 @@
       },
       "targets": [
         {
-          "expr": "mft_parts_per_breakpoint_avg",
+          "expr": "mft_parts_per_breakpoint_avg_avg",
           "legendFormat": "Avg parts",
           "refId": "A"
         },
         {
-          "expr": "mft_parts_per_breakpoint_max",
+          "expr": "mft_parts_per_breakpoint_max_max",
           "legendFormat": "Max parts",
           "refId": "B"
         },
         {
-          "expr": "mft_parts_per_breakpoint_min",
+          "expr": "mft_parts_per_breakpoint_min_min",
           "legendFormat": "Min parts",
           "refId": "C"
         }
@@ -2073,17 +2073,17 @@
       },
       "targets": [
         {
-          "expr": "mft_oldest_breakpoints",
+          "expr": "mft_oldest_breakpoints_count",
           "legendFormat": ">1 year old",
           "refId": "A"
         },
         {
-          "expr": "mft_future_breakpoints",
+          "expr": "mft_future_breakpoints_count",
           "legendFormat": "Scheduled",
           "refId": "B"
         },
         {
-          "expr": "mft_breakpoints_last_90_days",
+          "expr": "mft_breakpoints_last_90_days_count",
           "legendFormat": "Last 90 days",
           "refId": "C"
         }
@@ -2131,42 +2131,42 @@
       },
       "targets": [
         {
-          "expr": "mft_breakpoints_total",
+          "expr": "mft_breakpoints_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "Total Breakpoints",
           "refId": "A"
         },
         {
-          "expr": "mft_breakpoints_last_7_days",
+          "expr": "mft_breakpoints_last_7_days_count",
           "format": "table",
           "instant": true,
           "legendFormat": "Last 7 Days",
           "refId": "B"
         },
         {
-          "expr": "mft_breakpoints_last_30_days",
+          "expr": "mft_breakpoints_last_30_days_count",
           "format": "table",
           "instant": true,
           "legendFormat": "Last 30 Days",
           "refId": "C"
         },
         {
-          "expr": "mft_breakpoints_last_90_days",
+          "expr": "mft_breakpoints_last_90_days_count",
           "format": "table",
           "instant": true,
           "legendFormat": "Last 90 Days",
           "refId": "D"
         },
         {
-          "expr": "mft_future_breakpoints",
+          "expr": "mft_future_breakpoints_count",
           "format": "table",
           "instant": true,
           "legendFormat": "Future Scheduled",
           "refId": "E"
         },
         {
-          "expr": "mft_oldest_breakpoints",
+          "expr": "mft_oldest_breakpoints_count",
           "format": "table",
           "instant": true,
           "legendFormat": ">1 Year Old",
@@ -2251,32 +2251,32 @@
       },
       "targets": [
         {
-          "expr": "mft_missing_supplier_city",
+          "expr": "mft_missing_supplier_city_count",
           "legendFormat": "Supplier missing city",
           "refId": "A"
         },
         {
-          "expr": "mft_missing_part_weight",
+          "expr": "mft_missing_part_weight_count",
           "legendFormat": "Part missing weight",
           "refId": "B"
         },
         {
-          "expr": "mft_missing_box_dimensions",
+          "expr": "mft_missing_box_dimensions_count",
           "legendFormat": "Box missing dims",
           "refId": "C"
         },
         {
-          "expr": "mft_missing_pallet_dimensions",
+          "expr": "mft_missing_pallet_dimensions_count",
           "legendFormat": "Pallet missing dims",
           "refId": "D"
         },
         {
-          "expr": "mft_missing_box_type",
+          "expr": "mft_missing_box_type_count",
           "legendFormat": "Box missing type",
           "refId": "E"
         },
         {
-          "expr": "mft_missing_pallet_type",
+          "expr": "mft_missing_pallet_type_count",
           "legendFormat": "Pallet missing type",
           "refId": "F"
         }
@@ -2333,22 +2333,22 @@
       },
       "targets": [
         {
-          "expr": "mft_duplicate_part_numbers",
+          "expr": "mft_duplicate_part_numbers_count",
           "legendFormat": "Duplicate part numbers",
           "refId": "A"
         },
         {
-          "expr": "mft_zero_part_per_box",
+          "expr": "mft_zero_part_per_box_count",
           "legendFormat": "Zero parts/box",
           "refId": "B"
         },
         {
-          "expr": "mft_zero_box_per_pallet",
+          "expr": "mft_zero_box_per_pallet_count",
           "legendFormat": "Zero boxes/pallet",
           "refId": "C"
         },
         {
-          "expr": "mft_zero_part_per_vehicle",
+          "expr": "mft_zero_part_per_vehicle_count",
           "legendFormat": "Zero parts/vehicle",
           "refId": "D"
         }
@@ -2413,7 +2413,7 @@
       },
       "targets": [
         {
-          "expr": "mft_data_completeness_score",
+          "expr": "mft_data_completeness_score_avg",
           "legendFormat": "Completeness Score",
           "refId": "A"
         }
@@ -2487,12 +2487,12 @@
       },
       "targets": [
         {
-          "expr": "mft_missing_foreign_key_indexes",
+          "expr": "mft_missing_foreign_key_indexes_count",
           "legendFormat": "Missing FK indexes",
           "refId": "A"
         },
         {
-          "expr": "mft_unused_indexes",
+          "expr": "mft_unused_indexes_count",
           "legendFormat": "Unused indexes",
           "refId": "B"
         }
@@ -2552,7 +2552,7 @@
       },
       "targets": [
         {
-          "expr": "mft_cache_hit_ratio",
+          "expr": "mft_cache_hit_ratio_ratio",
           "legendFormat": "Cache Hit",
           "refId": "A"
         }
@@ -2614,12 +2614,12 @@
       },
       "targets": [
         {
-          "expr": "mft_index_maintenance_days_since_vacuum",
+          "expr": "mft_index_maintenance_days_since_vacuum_days",
           "legendFormat": "Days since VACUUM",
           "refId": "A"
         },
         {
-          "expr": "mft_index_maintenance_days_since_analyze",
+          "expr": "mft_index_maintenance_days_since_analyze_days",
           "legendFormat": "Days since ANALYZE",
           "refId": "B"
         }
@@ -2672,17 +2672,17 @@
       },
       "targets": [
         {
-          "expr": "mft_missing_foreign_key_indexes",
+          "expr": "mft_missing_foreign_key_indexes_count",
           "legendFormat": "Missing FK Indexes",
           "refId": "A"
         },
         {
-          "expr": "mft_unused_indexes",
+          "expr": "mft_unused_indexes_count",
           "legendFormat": "Unused Indexes",
           "refId": "B"
         },
         {
-          "expr": "mft_cache_hit_ratio",
+          "expr": "mft_cache_hit_ratio_ratio",
           "legendFormat": "Cache Hit %",
           "refId": "C"
         }
@@ -2764,56 +2764,56 @@
       },
       "targets": [
         {
-          "expr": "mft_suppliers_total",
+          "expr": "mft_suppliers_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "supplier_data",
           "refId": "A"
         },
         {
-          "expr": "mft_parts_total",
+          "expr": "mft_parts_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "part_data",
           "refId": "B"
         },
         {
-          "expr": "mft_boxes_total",
+          "expr": "mft_boxes_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "box_data",
           "refId": "C"
         },
         {
-          "expr": "mft_pallets_total",
+          "expr": "mft_pallets_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "pallet_data",
           "refId": "D"
         },
         {
-          "expr": "mft_models_total",
+          "expr": "mft_models_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "model_data",
           "refId": "E"
         },
         {
-          "expr": "mft_workshops_total",
+          "expr": "mft_workshops_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "workshop_data",
           "refId": "F"
         },
         {
-          "expr": "mft_lines_total",
+          "expr": "mft_lines_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "line_data",
           "refId": "G"
         },
         {
-          "expr": "mft_breakpoints_total",
+          "expr": "mft_breakpoints_total_count",
           "format": "table",
           "instant": true,
           "legendFormat": "breakpoint_data",
@@ -2906,7 +2906,7 @@
       },
       "targets": [
         {
-          "expr": "mft_table_bloat_estimate",
+          "expr": "mft_table_bloat_estimate_bloat_percent",
           "format": "table",
           "instant": true,
           "legendFormat": "{{table_name}}",
