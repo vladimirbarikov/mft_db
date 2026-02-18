@@ -1020,7 +1020,7 @@
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": ["sum"],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -1030,8 +1030,8 @@
       },
       "targets": [
         {
-          "expr": "mft_suppliers_by_localization",
-          "format": "table",
+          "expr": "mft_suppliers_by_localization_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{localization}}",
           "refId": "A"
@@ -1057,7 +1057,9 @@
           "color": {
             "mode": "palette-classic"
           },
-          "mappings": []
+          "mappings": [],
+          "displayName": "${__field.labels.box_type}",
+          "unit": "none"
         },
         "overrides": []
       },
@@ -1071,7 +1073,7 @@
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": ["sum"],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -1081,8 +1083,8 @@
       },
       "targets": [
         {
-          "expr": "mft_boxes_by_type",
-          "format": "table",
+          "expr": "mft_boxes_by_type_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{box_type}}",
           "refId": "A"
