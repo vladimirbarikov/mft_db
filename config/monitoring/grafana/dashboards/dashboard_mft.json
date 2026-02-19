@@ -1221,13 +1221,21 @@
         "overrides": []
       },
       "options": {
-        "orientation": "auto",
-        "barWidth": 0.8,
-        "barRadius": 2,
-        "xTickLabelRotation": 0,
-        "showValues": true,
+        "displayLabels": ["name", "percent"],
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "table",
+          "placement": "right",
+          "show": true,
+          "values": ["value", "percent"]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
         }
       },
       "targets": [
@@ -1265,27 +1273,19 @@
         "overrides": []
       },
       "options": {
-        "displayLabels": ["name", "percent"],
+        "orientation": "auto",
+        "barWidth": 0.8,
+        "barRadius": 2,
+        "xTickLabelRotation": 45,
+        "showValues": true,
         "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "show": true,
-          "values": ["value", "percent"]
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "tooltip": {
-          "mode": "single"
+          "displayMode": "hidden"
         }
       },
       "targets": [
         {
           "expr": "mft_parts_by_model",
-          "format": "time_series",
+          "format": "table",
           "instant": true,
           "legendFormat": "{{model_code}}",
           "refId": "A"
