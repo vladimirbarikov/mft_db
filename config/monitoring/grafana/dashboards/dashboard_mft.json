@@ -1446,8 +1446,8 @@
       },
       "targets": [
         {
-          "expr": "mft_parts_by_box_type",
-          "format": "table",
+          "expr": "mft_parts_by_box_type_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{box_type}}",
           "refId": "A"
