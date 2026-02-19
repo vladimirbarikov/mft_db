@@ -1110,7 +1110,9 @@
           "color": {
             "mode": "palette-classic"
           },
-          "mappings": []
+          "mappings": [],
+          "displayName": "${__field.labels.pallet_type}",
+          "unit": "none"
         },
         "overrides": []
       },
@@ -1124,7 +1126,7 @@
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": ["sum"],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -1134,8 +1136,8 @@
       },
       "targets": [
         {
-          "expr": "mft_pallets_by_type",
-          "format": "table",
+          "expr": "mft_pallets_by_type_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{pallet_type}}",
           "refId": "A"
