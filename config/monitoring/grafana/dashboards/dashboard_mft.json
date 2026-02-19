@@ -1147,58 +1147,6 @@
     {
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 19
-      },
-      "id": 19,
-      "title": "Models by Code",
-      "type": "piechart",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus-material-flow"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "options": {
-        "displayLabels": ["name", "percent"],
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "show": true,
-          "values": ["value", "percent"]
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "expr": "mft_models_by_code_count",
-          "format": "time_series",
-          "instant": true,
-          "legendFormat": "{{model_code}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "gridPos": {
-        "h": 8,
         "w": 8,
         "x": 0,
         "y": 27
@@ -1458,71 +1406,6 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 35
-      },
-      "id": 25,
-      "title": "Workshops by Code",
-      "type": "piechart",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus-material-flow"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "options": {
-        "displayLabels": ["name", "percent"],
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "show": true,
-          "values": ["value", "percent"]
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": ["sum"],
-          "fields": "",
-          "values": false
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "expr": "mft_workshops_by_code_count",
-          "format": "time_series",
-          "instant": true,
-          "legendFormat": "{{workshop_code}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 43
-      },
-      "id": 103,
-      "title": "GROUP D: PHYSICAL CHARACTERISTICS",
-      "type": "row",
-      "collapsed": false,
-      "panels": []
-    },
-    {
-      "gridPos": {
-        "h": 8,
-        "w": 8,
         "x": 0,
         "y": 44
       },
@@ -1761,65 +1644,6 @@
         {
           "expr": "mft_pallet_dimensions_minmax_value",
           "legendFormat": "{{stat}}",
-          "refId": "B"
-        }
-      ]
-    },
-    {
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 52
-      },
-      "id": 30,
-      "title": "Stacking Limits",
-      "type": "stat",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus-material-flow"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "none",
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "vertical",
-        "textMode": "value_and_name",
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "mft_box_stacking_stats_value",
-          "legendFormat": "Box - {{stat}}",
-          "refId": "A"
-        },
-        {
-          "expr": "mft_pallet_stacking_stats_value",
-          "legendFormat": "Pallet - {{stat}}",
           "refId": "B"
         }
       ]
