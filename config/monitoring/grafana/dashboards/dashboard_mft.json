@@ -1153,7 +1153,7 @@
       },
       "id": 19,
       "title": "Models by Code",
-      "type": "barchart",
+      "type": "piechart",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-material-flow"
@@ -1169,19 +1169,27 @@
         "overrides": []
       },
       "options": {
-        "orientation": "auto",
-        "barWidth": 0.8,
-        "barRadius": 2,
-        "xTickLabelRotation": 0,
-        "showValues": true,
+        "displayLabels": ["name", "percent"],
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "table",
+          "placement": "right",
+          "show": true,
+          "values": ["value", "percent"]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
         }
       },
       "targets": [
         {
-          "expr": "mft_models_by_code",
-          "format": "table",
+          "expr": "mft_models_by_code_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{model_code}}",
           "refId": "A"
@@ -1197,7 +1205,7 @@
       },
       "id": 20,
       "title": "Parts by Workshop",
-      "type": "barchart",
+      "type": "piechart",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-material-flow"
@@ -1224,8 +1232,8 @@
       },
       "targets": [
         {
-          "expr": "mft_parts_by_workshop",
-          "format": "table",
+          "expr": "mft_parts_by_workshop_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{workshop_code}}",
           "refId": "A"
@@ -1257,19 +1265,27 @@
         "overrides": []
       },
       "options": {
-        "orientation": "auto",
-        "barWidth": 0.8,
-        "barRadius": 2,
-        "xTickLabelRotation": 45,
-        "showValues": true,
+        "displayLabels": ["name", "percent"],
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "table",
+          "placement": "right",
+          "show": true,
+          "values": ["value", "percent"]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
         }
       },
       "targets": [
         {
           "expr": "mft_parts_by_model",
-          "format": "table",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{model_code}}",
           "refId": "A"
