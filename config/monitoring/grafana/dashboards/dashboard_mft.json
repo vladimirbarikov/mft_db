@@ -1463,7 +1463,7 @@
       },
       "id": 25,
       "title": "Workshops by Code",
-      "type": "barchart",
+      "type": "piechart",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-material-flow"
@@ -1479,19 +1479,27 @@
         "overrides": []
       },
       "options": {
-        "orientation": "auto",
-        "barWidth": 0.8,
-        "barRadius": 2,
-        "xTickLabelRotation": 45,
-        "showValues": true,
+        "displayLabels": ["name", "percent"],
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "table",
+          "placement": "right",
+          "show": true,
+          "values": ["value", "percent"]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": ["sum"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
         }
       },
       "targets": [
         {
-          "expr": "mft_workshops_by_code",
-          "format": "table",
+          "expr": "mft_workshops_by_code_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{workshop_code}}",
           "refId": "A"
