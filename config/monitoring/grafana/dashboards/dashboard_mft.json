@@ -1309,7 +1309,7 @@
       },
       "id": 22,
       "title": "Lines per Workshop",
-      "type": "barchart",
+      "type": "piechart",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-material-flow"
@@ -1325,19 +1325,27 @@
         "overrides": []
       },
       "options": {
-        "orientation": "auto",
-        "barWidth": 0.8,
-        "barRadius": 2,
-        "xTickLabelRotation": 0,
-        "showValues": true,
+        "displayLabels": ["name", "percent"],
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "table",
+          "placement": "right",
+          "show": true,
+          "values": ["value", "percent"]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
         }
       },
       "targets": [
         {
-          "expr": "mft_lines_by_workshop",
-          "format": "table",
+          "expr": "mft_lines_by_workshop_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{workshop_code}}",
           "refId": "A"
@@ -1387,8 +1395,8 @@
       },
       "targets": [
         {
-          "expr": "mft_parts_by_supplier_localization",
-          "format": "table",
+          "expr": "mft_parts_by_supplier_localization_count",
+          "format": "time_series",
           "instant": true,
           "legendFormat": "{{localization}}",
           "refId": "A"
