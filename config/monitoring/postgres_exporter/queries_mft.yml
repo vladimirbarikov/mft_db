@@ -1207,11 +1207,16 @@ mft_index_maintenance_days_since_analyze:
 mft_table_bloat_estimate:
   query: |
     SELECT 
-      schemaname || '.' || tablename AS table_name,
-      ROUND(100 * (GREATEST(avg_chain_len, 1) - 1) / GREATEST(avg_chain_len, 1), 2) AS bloat_percent
+      schemaname || '.' || relname AS table_name,
+      CASE 
+        WHEN (n_live_tup + n_dead_tup) > 0 THEN 
+          ROUND(100.0 * n_dead_tup / (n_live_tup + n_dead_tup), 2)
+        ELSE 0
+      END AS bloat_percent
     FROM pg_stat_user_tables
     WHERE schemaname = 'public'
-      AND avg_chain_len IS NOT NULL
+      AND (n_live_tup + n_dead_tup) > 0
+      AND (100.0 * n_dead_tup / (n_live_tup + n_dead_tup)) > 15  -- только > 15%
     ORDER BY bloat_percent DESC
     LIMIT 20
   master: true

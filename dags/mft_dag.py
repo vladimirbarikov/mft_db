@@ -159,15 +159,7 @@ from config.columns_config import (
     PART_TO_BOX_COMPOSITE_COLS, BOX_TO_PALLET_COMPOSITE_COLS,
     PART_TO_MODEL_COLS, PART_TO_LINE_COLS
 )
-# from dags.tasks.metrics_collector import (
-#     collect_metrics,
-#     collect_database_metrics,
-#     collect_extraction_metrics,
-#     collect_transformation_metrics,
-#     collect_pipeline_summary_metrics,
-#     get_current_memory_mb,
-#     TaskMetrics
-# )
+
 from dags.tasks.serializer import (
     serialize_df,
     deserialize_df
