@@ -156,7 +156,7 @@ class SupplierData(Base):
         unique=True,
         nullable=False
     )
-    supplier_name = Column(String(200))
+    supplier_name = Column(String(200), unique=True, nullable=False)
     location = Column(String(50))
     city = Column(String(50))
     street = Column(String(100))
@@ -204,7 +204,7 @@ class PartData(Base):
         unique=True,
         nullable=False
     )
-    part_number = Column(String(50))
+    part_number = Column(String(50), unique=True, nullable=False)
     part_name = Column(String(100))
     part_weight_kg = Column(
         Numeric(5, 2),
@@ -453,7 +453,7 @@ class ModelData(Base):
         unique=True,
         nullable=False
     )
-    model_code = Column(MODEL_CODES_ENUM)
+    model_code = Column(MODEL_CODES_ENUM, unique=True, nullable=False)
     model_name = Column(MODEL_NAMES_ENUM)
     parts = relationship('PartToModel', back_populates='model', lazy='select')
 
@@ -491,7 +491,7 @@ class WorkshopData(Base):
         unique=True,
         nullable=False
     )
-    workshop_code = Column(WORKSHOP_CODES_ENUM)
+    workshop_code = Column(WORKSHOP_CODES_ENUM, unique=True, nullable=False)
     workshop_name = Column(WORKSHOP_NAMES_ENUM)
     lines = relationship('LineData', back_populates='workshop', lazy='joined')
 
@@ -532,7 +532,7 @@ class LineData(Base):
         unique=True,
         nullable=False
     )
-    line_code = Column(String(10))
+    line_code = Column(String(10), unique=True, nullable=False)
     line_name = Column(String(50))
     workshop_id = Column(
         String(40),
@@ -580,7 +580,7 @@ class BreakpointData(Base):
         nullable=False
     )
     input_date = Column(DateTime(), server_default=func.now())
-    breakpoint_number = Column(String(10), nullable=False)
+    breakpoint_number = Column(String(10), unique=True, nullable=False)
     breakpoint_date = Column(DateTime())
     parts = relationship('PartToBreakpoint', back_populates='breakpoint', lazy='select')
 
