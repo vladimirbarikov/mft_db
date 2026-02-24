@@ -1,0 +1,7 @@
+# Web framework and security
+flask==2.3.3
+clamd==1.0.2
+
+# Additional utilities
+requests==2.32.5
+python-dotenv==1.2.1
