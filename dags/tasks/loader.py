@@ -112,7 +112,9 @@ def _bulk_insert_dataframe(
     df: pl.DataFrame,
     table_name: str,
     model_class,
-    required_columns_check: bool = True
+    required_columns_check: bool = True,
+    conflict_columns: Optional[list[str]] = None,
+    constraint_name: Optional[str] = None
 ) -> int:
     """
     Internal function for bulk insertion of Polars DataFrame data.
@@ -123,12 +125,16 @@ def _bulk_insert_dataframe(
         table_name: Name of target table for logging
         model_class: SQLAlchemy model class for the table
         required_columns_check: Whether to validate required columns
+        conflict_columns: List of columns to check for conflicts (for ON CONFLICT DO NOTHING)
+        constraint_name: Explicit constraint name to use (alternative to conflict_columns)
         
     Returns:
         Number of records successfully inserted
         
     Performs upsert with conflict handling on primary key constraint.
-    Falls back to regular insert if constraint doesn't exist.
+    - If conflict_columns provided, uses ON CONFLICT (columns) DO NOTHING
+    - If constraint_name provided, uses ON CONFLICT ON CONSTRAINT constraint_name DO NOTHING
+    - Otherwise falls back to constraint detection
     """
     if df is None or df.is_empty():
         logger.debug("Skipping %s - no data.", table_name)
@@ -169,7 +175,7 @@ def _bulk_insert_dataframe(
     try:
         records = df.to_dicts()
 
-        # Constraint name mapping
+        # Constraint name mapping for junction tables
         junction_table_constraints = {
             'part_to_box': 'part_to_box_pkey',
             'box_to_pallet': 'box_to_pallet_pkey',
@@ -177,11 +183,58 @@ def _bulk_insert_dataframe(
             'part_to_line': 'part_to_line_pkey'
         }
 
-        constraint_name = junction_table_constraints.get(table_name, f"{table_name}_pkey")
+        # Mapping for unique constraints core entity tables
+        core_table_unique_constraints = {
+            'supplier_data': ['supplier_name'],
+            'part_data': ['part_number'],
+            'model_data': ['model_code'],
+            'workshop_data': ['workshop_code'],
+            'line_data': ['line_code'],
+            # For box_data and pallet_data, we use a composite constraint
+            'box_data': ['box_type', 'box_length_mm', 'box_width_mm', 'box_height_mm'],
+            'pallet_data': ['pallet_type', 'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm']
+        }
+
+        # constraint_name = junction_table_constraints.get(table_name, f"{table_name}_pkey")
 
         with engine.begin() as connection:
             stmt = pg_insert(model_class.__table__).values(records)
-            stmt = stmt.on_conflict_do_nothing(constraint=constraint_name)
+            # stmt = stmt.on_conflict_do_nothing(constraint=constraint_name)
+
+            # Defining a way to handle conflicts
+            if conflict_columns is not None:
+                # We use the specified columns for conflict
+                stmt = stmt.on_conflict_do_nothing(index_elements=conflict_columns)
+                logger.debug(
+                    "Using conflict columns for %s: %s",
+                    table_name, conflict_columns
+                )
+
+            elif constraint_name is not None:
+                # Using the specified constraint
+                stmt = stmt.on_conflict_do_nothing(constraint=constraint_name)
+                logger.debug(
+                    "Using constraint for %s: %s",
+                    table_name, constraint_name
+                )
+
+            elif table_name in core_table_unique_constraints:
+                # For core entity tables, we use their unique constraints
+                conflict_cols = core_table_unique_constraints[table_name]
+                stmt = stmt.on_conflict_do_nothing(index_elements=conflict_cols)
+                logger.debug(
+                    "Using auto-detected unique columns for %s: %s",
+                    table_name, conflict_cols
+                )
+
+            else:
+                # For the rest of the tables, we use the primary key constraint
+                constraint_name = junction_table_constraints.get(table_name, f"{table_name}_pkey")
+                stmt = stmt.on_conflict_do_nothing(constraint=constraint_name)
+                logger.debug(
+                    "Using primary key constraint for %s: %s",
+                    table_name, constraint_name
+                )
 
             result = connection.execute(stmt)
             inserted_count = result.rowcount
@@ -191,11 +244,14 @@ def _bulk_insert_dataframe(
             if inserted_count < total_records:
                 skipped = total_records - inserted_count
                 logger.info(
-                    "Inserted %d/%d records into %s (%d duplicates skipped).",
+                    "Inserted %d/%d records into %s (%d duplicates skipped based on unique constraints).",
                     inserted_count, total_records, table_name, skipped
                 )
             else:
-                logger.info("Loaded %d records into %s", inserted_count, table_name)
+                logger.info(
+                    "Loaded %d records into %s",
+                    inserted_count, table_name
+                )
 
             return inserted_count
 
@@ -205,7 +261,10 @@ def _bulk_insert_dataframe(
         # Check if it's a constraint error that we can fallback
         error_str = str(e)
         if "constraint" in error_str.lower() and "does not exist" in error_str.lower():
-            logger.warning("Constraint not found for %s, retrying with regular insert", table_name)
+            logger.warning(
+                "Constraint not found for %s, retrying with regular insert",
+                table_name
+            )
             try:
                 with engine.begin() as connection:
                     insert_stmt = model_class.__table__.insert()
@@ -215,10 +274,15 @@ def _bulk_insert_dataframe(
                         len(records), table_name
                     )
                     return len(records)
+
             except (IntegrityError, DataError, ProgrammingError) as e2:
                 logger.error("Regular insert failed for %s: %s", table_name, e2)
+
             except Exception as unexpected_error:
-                logger.error("Unexpected error during regular insert for %s: %s", table_name, unexpected_error)
+                logger.error(
+                    "Unexpected error during regular insert for %s: %s",
+                    table_name, unexpected_error
+                )
 
         return 0
 
@@ -237,8 +301,9 @@ def _process_dependent_entity_with_mapper(
     df: pl.DataFrame,
     table_name: str,
     mapper,
-    unique_cols
-) -> int:
+    unique_cols,
+    return_df: bool = False
+) -> Optional[pl.DataFrame] | int:
     """
     Process and load dependent entity tables using mapper for foreign key resolution.
     
@@ -248,9 +313,11 @@ def _process_dependent_entity_with_mapper(
         table_name: Name of target table ('line_data' or 'part_data')
         mapper: Mapper instance for ID resolution
         unique_cols: Column(s) defining uniqueness for deduplication
+        return_df: If True, returns processed DataFrame instead of loading to DB
         
     Returns:
-        Number of records successfully loaded
+        If return_df=True: Processed Polars DataFrame or None
+        If return_df=False: Number of records successfully loaded
         
     Converts text codes to IDs using mapper, filters invalid references,
     removes duplicates, and loads the processed data.
@@ -306,7 +373,9 @@ def _process_dependent_entity_with_mapper(
             else:
                 unique_cols_list = unique_cols
 
-            missing_cols = [col for col in unique_cols_list if col not in result_df.columns]
+            missing_cols = [
+                col for col in unique_cols_list if col not in result_df.columns
+            ]
             if not missing_cols:
                 initial_count = result_df.height
                 result_df = result_df.unique(subset=unique_cols_list, keep='first')
@@ -317,24 +386,45 @@ def _process_dependent_entity_with_mapper(
                         removed_count, table_name, unique_cols_list
                     )
 
-        # Load the processed data
+        # Return DataFrame if requested
+        if return_df:
+            return result_df
+
+        # Otherwise load to database
         model_class = LineData if table_name == 'line_data' else PartData
-        return _bulk_insert_dataframe(engine, result_df, table_name, model_class, required_columns_check=True)
+        return _bulk_insert_dataframe(
+            engine, result_df, table_name, model_class, required_columns_check=True
+        )
 
     except (AttributeError, KeyError, ValueError) as e:
-        logger.error("Data processing error for %s with mapper: %s", table_name, e)
+        logger.error(
+            "Data processing error for %s with mapper: %s",
+            table_name, e
+        )
         logger.debug(traceback.format_exc())
         return 0
+
     except (IntegrityError, DataError, ProgrammingError) as e:
-        logger.error("Database error loading %s after mapper processing: %s", table_name, e)
+        logger.error(
+            "Database error loading %s after mapper processing: %s",
+            table_name, e
+        )
         logger.debug(traceback.format_exc())
         return 0
+
     except SQLAlchemyError as e:
-        logger.error("SQLAlchemy error for %s: %s", table_name, e)
+        logger.error(
+            "SQLAlchemy error for %s: %s",
+            table_name, e
+        )
         logger.debug(traceback.format_exc())
         return 0
+
     except Exception as unexpected_error:
-        logger.error("Unexpected error processing %s with mapper: %s", table_name, unexpected_error)
+        logger.error(
+            "Unexpected error processing %s with mapper: %s",
+            table_name, unexpected_error
+        )
         logger.debug(traceback.format_exc())
         return 0
 
@@ -409,6 +499,15 @@ def load_core_entity_tables(
             ),
         ]
 
+        # Mapping for unique constraints (to transfer into _bulk_insert_dataframe)
+        conflict_columns_map = {
+            'supplier_data': ['supplier_name'],
+            'box_data': ['box_type', 'box_length_mm', 'box_width_mm', 'box_height_mm'],
+            'pallet_data': ['pallet_type', 'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm'],
+            'model_data': ['model_code'],
+            'workshop_data': ['workshop_code']
+        }
+
         disable_foreign_keys(engine)
 
         for df_key, model_class, table_name, unique_cols in independent_tables:
@@ -438,9 +537,11 @@ def load_core_entity_tables(
                     if removed_count > 0:
                         logger.debug("Removed %d duplicates from %s", removed_count, table_name)
 
-            # Load data
+            # Load data with conflict columns for unique constraints
             records_loaded = _bulk_insert_dataframe(
-                engine, df, table_name, model_class, required_columns_check=True
+                engine, df, table_name, model_class,
+                required_columns_check=True,
+                conflict_columns=conflict_columns_map.get(table_name)
             )
             results[table_name] = records_loaded
 
@@ -460,10 +561,12 @@ def load_core_entity_tables(
             try:
                 mapper = create_mapper(engine)
                 logger.info("Mapper created successfully for foreign key resolution.")
+
             except (SQLAlchemyError, ProgrammingError) as e:
                 logger.error("Database error creating mapper: %s", e)
                 logger.warning("Skipping dependent tables due to mapper creation failure!")
                 return results
+
             except Exception as unexpected_error:
                 logger.error("Unexpected error creating mapper: %s", unexpected_error)
                 logger.warning("Skipping dependent tables due to mapper creation failure!")
@@ -482,6 +585,11 @@ def load_core_entity_tables(
                 ),
             ]
 
+            conflict_columns_dependent = {
+                'line_data': ['line_code'],
+                'part_data': ['part_number']
+            }
+
             disable_foreign_keys(engine)
 
             for df_key, table_name, unique_cols in dependent_tables:
@@ -497,10 +605,33 @@ def load_core_entity_tables(
                     continue
 
                 # Process and load using mapper for FK resolution
-                records_loaded = _process_dependent_entity_with_mapper(
-                    engine, df, table_name, mapper, unique_cols
+                result = _process_dependent_entity_with_mapper(
+                    engine, df, table_name, mapper, unique_cols, return_df=True
                 )
-                results[table_name] = records_loaded
+
+                if isinstance(result, pl.DataFrame):
+                    processed_df = result
+                    if not processed_df.is_empty():
+                        model_class = LineData if table_name == 'line_data' else PartData
+                        records_loaded = _bulk_insert_dataframe(
+                            engine, processed_df, table_name, model_class,
+                            required_columns_check=True,
+                            conflict_columns=conflict_columns_dependent.get(table_name)
+                        )
+                        results[table_name] = records_loaded
+                    else:
+                        logger.info(
+                            "Processed DataFrame for %s is empty",
+                            table_name
+                        )
+                        results[table_name] = 0
+                else:
+                    # If int is returned (something went wrong)
+                    logger.error(
+                        "Expected DataFrame but got %s for %s",
+                        type(result), table_name
+                    )
+                    results[table_name] = 0
 
             enable_foreign_keys(engine)
 
@@ -517,8 +648,10 @@ def load_core_entity_tables(
         try:
             logger.warning("Attempting to re-enable foreign keys after error...")
             enable_foreign_keys(engine)
+
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
+
         except Exception as unexpected_error:
             logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
@@ -532,8 +665,10 @@ def load_core_entity_tables(
         try:
             logger.warning("Attempting to re-enable foreign keys after error...")
             enable_foreign_keys(engine)
+
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
+
         except Exception as unexpected_error:
             logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
@@ -547,10 +682,12 @@ def load_core_entity_tables(
         try:
             logger.warning("Attempting to re-enable foreign keys after error...")
             enable_foreign_keys(engine)
+
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
-        except Exception as unexpected_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
+
+        except Exception as unexpected_error2:
+            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error2)
 
         return {}
 
@@ -673,11 +810,18 @@ def _prepare_junction_dataframes(
             logger.debug("Mapped %d records for %s", df_mapped.height, junction_type)
 
         except (AttributeError, KeyError, ValueError) as e:
-            logger.error("Data processing error mapping junction records for %s: %s", df_key, e)
+            logger.error(
+                "Data processing error mapping junction records for %s: %s",
+                df_key, e
+            )
             logger.debug(traceback.format_exc())
             continue
+
         except Exception as unexpected_error:
-            logger.error("Unexpected error mapping junction records for %s: %s", df_key, unexpected_error)
+            logger.error(
+                "Unexpected error mapping junction records for %s: %s",
+                df_key, unexpected_error
+            )
             logger.debug(traceback.format_exc())
             continue
 
@@ -731,12 +875,17 @@ def load_junction_tables(
                         logger.warning("Table %s is empty (0 records)", table_name)
                     else:
                         logger.debug("Table %s has %d records", table_name, count)
+
                 except (SQLAlchemyError, ProgrammingError) as e:
                     missing_tables.append(table_name)
                     logger.debug("Error checking table %s: %s", table_name, e)
+
                 except Exception as unexpected_error:
                     missing_tables.append(table_name)
-                    logger.debug("Unexpected error checking table %s: %s", table_name, unexpected_error)
+                    logger.debug(
+                        "Unexpected error checking table %s: %s",
+                        table_name, unexpected_error
+                    )
 
             if missing_tables:
                 logger.error(
@@ -747,10 +896,17 @@ def load_junction_tables(
                 return {}
 
     except (SQLAlchemyError, ProgrammingError) as check_error:
-        logger.error("Database error checking entity table status: %s", check_error)
+        logger.error(
+            "Database error checking entity table status: %s",
+            check_error
+        )
         return {}
+
     except Exception as unexpected_error:
-        logger.error("Unexpected error checking entity table status: %s", unexpected_error)
+        logger.error(
+            "Unexpected error checking entity table status: %s",
+            unexpected_error
+        )
         return {}
 
     # Create mapper
@@ -759,11 +915,16 @@ def load_junction_tables(
         if mapper is None:
             logger.error("Mapper creation returned None!")
             return {}
+
     except (SQLAlchemyError, ProgrammingError) as e:
         logger.error("Database error creating mapper: %s", e)
         return {}
+
     except Exception as unexpected_error:
-        logger.error("Unexpected error creating mapper: %s", unexpected_error)
+        logger.error(
+            "Unexpected error creating mapper: %s",
+            unexpected_error
+        )
         return {}
 
     # Pre-load all mappings for performance
@@ -789,11 +950,19 @@ def load_junction_tables(
                     logger.warning("Empty mapping for %s", name)
                 else:
                     logger.debug("Mapping '%s' has %d entries", name, len(mapping))
+
             except (SQLAlchemyError, ProgrammingError) as e:
-                logger.error("Database error loading mapping for %s: %s", name, e)
+                logger.error(
+                    "Database error loading mapping for %s: %s",
+                    name, e
+                )
                 empty_mappings.append(name)
+
             except Exception as unexpected_error:
-                logger.error("Unexpected error loading mapping for %s: %s", name, unexpected_error)
+                logger.error(
+                    "Unexpected error loading mapping for %s: %s",
+                    name, unexpected_error
+                )
                 empty_mappings.append(name)
 
         if empty_mappings:
@@ -854,10 +1023,15 @@ def load_junction_tables(
         try:
             logger.warning("Attempting to re-enable foreign keys after error...")
             enable_foreign_keys(engine)
+
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
+
         except Exception as unexpected_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
+            logger.error(
+                "Unexpected error re-enabling foreign keys: %s",
+                unexpected_error
+            )
 
         return {}
 
@@ -869,25 +1043,38 @@ def load_junction_tables(
         try:
             logger.warning("Attempting to re-enable foreign keys after error...")
             enable_foreign_keys(engine)
+
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
+
         except Exception as unexpected_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
+            logger.error(
+                "Unexpected error re-enabling foreign keys: %s",
+                unexpected_error
+            )
 
         return {}
 
     except Exception as unexpected_error:
-        logger.error("Unexpected error loading junction tables: %s", unexpected_error)
+        logger.error(
+            "Unexpected error loading junction tables: %s",
+            unexpected_error
+        )
         logger.debug(traceback.format_exc())
 
         # Always try to re-enable foreign keys
         try:
             logger.warning("Attempting to re-enable foreign keys after error...")
             enable_foreign_keys(engine)
+
         except (SQLAlchemyError, ProgrammingError) as fk_error:
             logger.error("Failed to re-enable foreign keys: %s", fk_error)
-        except Exception as unexpected_error:
-            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
+
+        except Exception as unexpected_error2:
+            logger.error(
+                "Unexpected error re-enabling foreign keys: %s",
+                unexpected_error2
+            )
 
         return {}
 
