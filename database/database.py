@@ -81,8 +81,8 @@ Status: Production
 """
 import uuid
 from sqlalchemy import (
-    CheckConstraint, Column, Computed, DateTime,
-    Enum as SqlEnum, ForeignKey, func, Index
+    CheckConstraint, Column, Computed, DateTime, Enum as SqlEnum,
+    ForeignKey, func, Index, UniqueConstraint
 )
 from sqlalchemy.types import (
     Integer, Numeric, String, SmallInteger
@@ -231,7 +231,9 @@ class BoxData(Base):
         Index('idx_box_number', 'box_number'),          # Search by box number
         Index('idx_box_type', 'box_type'),              # Returnable/non-returnable filter
         Index('idx_box_dimensions',                     # Composite index for searching by box dimensions
-              'box_length_mm', 'box_width_mm', 'box_height_mm'),                  
+              'box_length_mm', 'box_width_mm', 'box_height_mm'),
+        UniqueConstraint('box_type', 'box_length_mm', 'box_width_mm', 'box_height_mm',
+                         name='unique_box_dimensions'),
         {
             'comment': """
             PURPOSE: Packaging specifications for logistics
@@ -333,6 +335,8 @@ class PalletData(Base):
         Index('idx_pallet_type', 'pallet_type'),                # Returnable/non-returnable filter
         Index('idx_pallet_dimensions',                          # Composite index for searching by pallet dimensions
               'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm'),
+        UniqueConstraint('pallet_type', 'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm',
+                         name='unique_pallet_dimensions'),
         {
             'comment': """
             PURPOSE: Pallet specifications for logistics
