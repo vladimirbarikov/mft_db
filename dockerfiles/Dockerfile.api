@@ -1,0 +1,44 @@
+FROM python:3.9-slim
+
+# Identification labels
+LABEL maintainer="MFT Project"
+LABEL description="API services for MFT Project (upload, display, modify)"
+
+# Disabling buffering of Python logs
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Installing system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Creating a working directory
+WORKDIR /app
+
+# Copying only requirements first (for caching)
+COPY dockerfiles/requirements_api.txt .
+RUN pip install --no-cache-dir -r requirements_api.txt
+
+# Copying the necessary modules
+COPY endpoints/ /app/endpoints/
+COPY database/ /app/database/
+COPY config/ /app/config/
+
+# Creating an unprivileged user
+RUN useradd -m -u 1000 -s /bin/bash appuser && \
+    chown -R appuser:appuser /app && \
+    mkdir -p /opt/airflow/data && \
+    chown -R appuser:appuser /opt/airflow/data
+
+# Switching to an unprivileged user
+USER appuser
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:5002/health || exit 1
+
+# Default command (will be overridden by docker-compose)
+CMD ["python", "endpoints/upload_api.py"]
