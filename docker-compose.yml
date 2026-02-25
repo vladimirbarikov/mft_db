@@ -3,7 +3,7 @@ x-airflow-common:
   image: ${AIRFLOW_IMAGE_NAME:-mft-airflow:2.9.3}
   build:
     context: ./dockerfiles
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.airflow
   networks:
     - mft_airflow_network
   environment:
@@ -61,6 +61,57 @@ x-airflow-common:
       condition: service_healthy
     db:
       condition: service_healthy
+
+x-api-common:
+    &api-common
+    image: ${API_IMAGE_NAME:-mft-api:3.9-slim}
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.api
+    networks:
+      - mft_airflow_network
+    environment:
+      &api-env
+      # Flask settings
+      FLASK_HOST: ${FLASK_HOST:-0.0.0.0}
+      FLASK_PORT: ${FLASK_PORT:-5000}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-}
+      FLASK_DEBUG: ${FLASK_DEBUG:-false}
+      FLASK_ENV: ${FLASK_ENV:-development}
+      # Airflow connection
+      AIRFLOW_API_URL: http://airflow-webserver:8080/api/v1
+      AIRFLOW_USER: ${AIRFLOW_USER:-admin}
+      AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD:-airflow}
+      DAG_ID: mft_etl_pipeline
+      # ClamAV settings
+      CLAMAV_HOST: ${CLAMAV_HOST:-clamav}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-5}
+      FILE_RETENTION_DAYS: ${FILE_RETENTION_DAYS:-1}
+      TEMP_RETENTION_HOURS: ${TEMP_RETENTION_HOURS:-1}
+      # Database connection
+      MFT_DB_HOST: ${DB_HOST:-db}
+      MFT_DB_PORT: ${DB_PORT:-5432}
+      MFT_DB_NAME: ${DB_NAME:-mft_db}
+      MFT_DB_USER: ${DB_USER:-mft_user}
+      MFT_DB_PASSWORD: ${DB_PASSWORD:-mft_password}
+      DB_MAX_RETRIES: ${DB_MAX_RETRIES:-5}
+      DB_RETRY_DELAY: ${DB_RETRY_DELAY:-2}
+      # Python path
+      PYTHONPATH: /app
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}/endpoints:/app/endpoints
+      - ${AIRFLOW_PROJ_DIR:-.}/database:/app/database
+      - ${AIRFLOW_PROJ_DIR:-.}/config:/app/config
+      - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
+      - ${AIRFLOW_PROJ_DIR:-.}/.env:/app/.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
 
 services:
   postgres:
@@ -546,6 +597,86 @@ services:
     networks:
       - mft_airflow_network
 
+  upload-api:
+    <<: *api-common
+    container_name: mft_upload_api
+    environment:
+      <<: *api-env
+      FLASK_PORT: 5002
+    command: python /app/endpoints/upload_api.py
+    ports:
+      - "5002:5002"
+    depends_on:
+      clamav:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  clamav:
+    image: clamav/clamav:1.4.1
+    container_name: clamav
+    restart: unless-stopped
+    volumes:
+      - clamav_db:/var/lib/clamav
+      - clamav_temp:/tmp
+    networks:
+      - mft_airflow_network
+    environment:
+      # Network settings
+      - CLAMD_CONF_TCPAddr=0.0.0.0
+      - CLAMD_CONF_TCPPort=${CLAMAV_PORT:-3310}
+      # File size limits
+      - CLAMD_CONF_MaxScanSize=${MAX_FILE_SIZE_MB:-5}M
+      - CLAMD_CONF_MaxFileSize=${MAX_FILE_SIZE_MB:-5}M
+      - CLAMD_CONF_StreamMaxLength=${MAX_FILE_SIZE_MB:-5}M
+      # Scan settings
+      - CLAMD_CONF_MaxRecursion=5
+      - CLAMD_CONF_MaxFiles=1000
+      - CLAMD_CONF_SelfCheck=3600
+      # Enable all security scans
+      - CLAMD_CONF_ScanPE=yes
+      - CLAMD_CONF_ScanOLE2=yes
+      - CLAMD_CONF_ScanHTML=yes
+      - CLAMD_CONF_ScanMail=yes
+      - CLAMD_CONF_ScanArchive=yes
+      # Alert settings
+      - CLAMD_CONF_AlertBrokenExecutables=yes
+      - CLAMD_CONF_AlertEncrypted=yes
+      - CLAMD_CONF_AlertEncryptedArchive=yes
+      - CLAMD_CONF_AlertEncryptedDoc=yes
+      # Freshclam (database updater) settings
+      - FRESHCLAM_CONF_Checks=24
+      - FRESHCLAM_CONF_DatabaseMirror=database.clamav.net
+      - FRESHCLAM_CONF_LogSyslog=yes
+      - FRESHCLAM_CONF_LogRotate=yes
+    healthcheck:
+      test: ["CMD", "clamdscan", "--fdpass", "--quiet", "/tmp"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
 networks:
   mft_airflow_network:
     driver: bridge
@@ -560,3 +691,7 @@ volumes:
     name: prometheus_volume
   grafana_volume:
     name: grafana_volume
+  clamav_db:
+    name: clamav_db_volume
+  clamav_temp:
+    name: clamav_temp_volume
