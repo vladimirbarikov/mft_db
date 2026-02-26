@@ -1,6 +1,12 @@
 # Web framework and security
-flask==2.3.3
+Flask==2.2.5
+Flask-Limiter==3.12
 clamd==1.0.2
+
+# Excel file handling
+openpyxl==3.1.5
+xlrd==2.0.2
+oletools==0.60.2
 
 # Additional utilities
 requests==2.32.5
