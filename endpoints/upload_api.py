@@ -127,7 +127,8 @@ RATE_LIMIT_STORAGE_URL = os.getenv('RATE_LIMIT_STORAGE_URL', 'memory://')
 # Excel validation settings
 MAX_EXCEL_ROWS = int(os.getenv('MAX_EXCEL_ROWS', '1000000'))
 MAX_EXCEL_COLS = int(os.getenv('MAX_EXCEL_COLS', '1000'))
-ALLOWED_EXCEL_EXTENSIONS = {'.xlsx', '.xls'}
+extensions_str = os.getenv('ALLOWED_EXCEL_EXTENSIONS', '.xlsx,.xls')
+ALLOWED_EXCEL_EXTENSIONS = set(extensions_str.split(','))
 FIXED_SHEET_NAME = os.getenv('FIXED_SHEET_NAME', 'mft')
 IGNORE_OTHER_SHEETS = os.getenv('IGNORE_OTHER_SHEETS', 'true').lower() == 'true'
 
