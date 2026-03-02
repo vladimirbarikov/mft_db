@@ -433,8 +433,8 @@ services:
           echo
         fi
 
-        mkdir -p /sources/logs /sources/dags /sources/plugins
-        chown -R "${AIRFLOW_UID:-1000}:0" /sources/{logs,dags,plugins}
+        # mkdir -p /sources/logs /sources/dags /sources/plugins
+        # chown -R "${AIRFLOW_UID:-1000}:0" /sources/{logs,dags,plugins}
 
         echo "Running Airflow initialization..."
         /entrypoint airflow version
