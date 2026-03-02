@@ -27,6 +27,7 @@ import sys
 import tempfile
 import threading
 import shutil
+from io import BytesIO
 from socket import gaierror, timeout
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -370,7 +371,9 @@ class ClamAVScanner:
 
         try:
             logger.info("Memory scan: %s (%d bytes)", filename, len(data))
-            result = self.cd.instream(data)
+
+            file_like = BytesIO(data)
+            result = self.cd.instream(file_like)
 
             if result:
                 for _, (status, signature) in result.items():
