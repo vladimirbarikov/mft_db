@@ -1,6 +1,6 @@
 FROM apache/airflow:2.9.3
 
-COPY requirements_airflow.txt /tmp/requirements_airflow.txt
+COPY dockerfiles/requirements_airflow.txt /tmp/requirements_airflow.txt
 
 USER root
 
