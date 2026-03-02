@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.12.3-slim
 
 # Identification labels
 LABEL maintainer="MFT Project"
@@ -12,7 +12,11 @@ ENV PYTHONUNBUFFERED=1 \
 # Installing system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    curl && \
+    curl \
+    build-essential \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Creating a working directory
@@ -30,7 +34,10 @@ COPY config/ /app/config/
 # Creating an unprivileged user
 RUN useradd -m -u 1000 -s /bin/bash appuser && \
     chown -R appuser:appuser /app && \
-    mkdir -p /opt/airflow/data && \
+    mkdir -p /opt/airflow/data/uploads && \
+    mkdir -p /opt/airflow/data/backups && \
+    mkdir -p /opt/airflow/data/processed && \
+    mkdir -p /opt/airflow/data/quarantine && \
     chown -R appuser:appuser /opt/airflow/data
 
 # Switching to an unprivileged user
