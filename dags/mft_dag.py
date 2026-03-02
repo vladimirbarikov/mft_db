@@ -9,10 +9,13 @@ processes Excel-based manufacturing data, transforms it, and loads it into
 a PostgreSQL database with proper referential integrity.
 
 Pipeline Architecture:
-    The DAG follows a three-phase ETL pattern:
-    1. EXTRACT: Reads data from Excel files and extracts specialized datasets
-    2. TRANSFORM: Cleans, validates, and prepares data for database loading
-    3. LOAD: Bulk loads data into PostgreSQL with constraint management
+    The DAG follows a three-phase ETL pattern and is triggered by the upload API:
+    1. TRIGGER: DAG is automatically triggered by upload-mft-excel endpoint with 
+       file metadata passed via DAG run configuration (file_path, unique_id, etc.)
+    2. EXTRACT: Reads the Excel file from the provided path, extracts main DataFrame,
+       and creates specialized datasets for each entity
+    3. TRANSFORM: Cleans, validates, and prepares data for database loading
+    4. LOAD: Bulk loads data into PostgreSQL with constraint management
 
 Data Entities Processed:
     - Core Entities: Suppliers, Parts, Boxes, Pallets, Models, Workshops, Lines
@@ -36,8 +39,10 @@ Technical Implementation:
     - Supports both standard and composite key mappings
     - Collects execution metrics for monitoring and optimization
 
-DAG Schedule:
-    - Daily execution at 3:00 AM UTC
+DAG Schedule & Triggering:
+    - Trigger-based execution (schedule_interval=None) - DAG runs only when triggered
+    - Automatically triggered by upload API after successful file upload
+    - File metadata passed via DAG run configuration (conf parameter)
     - No catchup to prevent duplicate processing
     - Single concurrent run for data consistency
     - Configurable retry logic (3 attempts with 5-minute delays)
@@ -48,6 +53,27 @@ Metrics Collected:
     - Database insertion rates (records per second)
     - Memory usage for large DataFrames
     - Success/failure rates per entity type
+
+Integration with Upload API:
+    This DAG is designed to work seamlessly with the upload_api.py module:
+    
+    1. File Upload: User uploads Excel file via /upload-mft-excel endpoint
+    2. Validation: upload_api performs virus scan, Excel validation, security checks
+    3. Storage: File is saved to shared volume with unique name
+    4. Trigger: upload_api triggers this DAG with file metadata in conf
+    5. Processing: DAG reads file from provided path and processes it
+    6. Cleanup: upload_api handles automatic cleanup of old files
+    
+    Data passed from upload_api to DAG via conf:
+    - file_path: Full path to the uploaded file
+    - original_filename: Original uploaded filename
+    - unique_id: Unique identifier for tracking
+    - file_hash: SHA-256 hash for integrity
+    - upload_timestamp: When file was uploaded
+    - total_rows: Total rows in main sheet
+    - file_format: Excel format (xlsx/xls)
+    - file_size: Size in bytes
+    - sheets: List of sheets in file
 
 Prerequisites:
     - Docker Desktop installed and running
@@ -97,8 +123,13 @@ Testing and Monitoring:
 Troubleshooting:
     - If DAG doesn't appear:
         Check file is in ./dags directory
+    - If DAG isn't triggered after upload:
+        Check upload_api.py logs for trigger errors
+        Verify Airflow API connectivity
+        Check dag_run.conf in Airflow UI
     - If tasks fail:
         Check database connectivity and credentials
+        Verify file exists at path from dag_run.conf
     - If imports fail:
         Ensure custom modules are in Python path
     - For Docker issues: 
@@ -135,8 +166,11 @@ import pytz
 
 # Third-party imports
 import polars as pl
-from airflow.models.dag import DAG
 from airflow.decorators import dag, task
+from airflow.exceptions import AirflowSkipException
+from airflow.models.dag import DAG
+from airflow.operators.python import get_current_context
+
 
 # The relative path to the root project directory
 try:
@@ -185,7 +219,7 @@ from dags.tasks.loader import (
 logger = get_logger(__name__)
 
 # Get the file path from the root project directory
-file_path = PROJECT_ROOT / 'data/mft.xlsx'
+# file_path = PROJECT_ROOT / 'data/mft.xlsx'
 
 # Timezone setup
 moscow_tz = pytz.timezone('Europe/Moscow')
@@ -193,7 +227,7 @@ moscow_tz = pytz.timezone('Europe/Moscow')
 # DAG configuration
 @dag(
     dag_id="mft_etl_pipeline",
-    schedule_interval="0 3 * * *",
+    schedule_interval=None,  #  Triggered
     start_date=moscow_tz.localize(datetime(2026, 2, 7)),
     end_date=None,
     catchup=False,
@@ -204,18 +238,40 @@ moscow_tz = pytz.timezone('Europe/Moscow')
         'retry_delay': timedelta(minutes=5),
         'depends_on_past': False,
     },
-    tags=['etl', 'manufacturing', 'postgres']
+    tags=['etl', 'manufacturing', 'postgres', 'triggered']
 )
 
 def mft_etl_pipeline():
     """
-    Manufacturing ETL pipeline processing daily at 3:00 AM.
+    Manufacturing ETL pipeline triggered by file upload API.
     
-    Extracts data from Excel, transforms, and loads to PostgreSQL.
-    Processes suppliers, parts, packaging, models, workshops, and lines.
+    Triggered automatically after successful file upload via upload-mft-excel endpoint.
+    Processes Excel files containing MFT data with comprehensive validation.
     
-    Schedule: Daily @ 3 AM | No catchup | Single concurrent run.
-    Start: 2026-01-15 | Retries: 3 with 5-min delays.
+    Configuration passed via DAG run conf (from upload_api.py):
+        - file_path: Full path to the uploaded file
+        - original_filename: Original uploaded filename
+        - unique_id: Unique identifier for tracking
+        - file_hash: SHA-256 hash for integrity
+        - upload_timestamp: When file was uploaded
+        - total_rows: Total rows in main sheet
+        - file_format: Excel format (xlsx/xls)
+        - file_size: Size in bytes
+        - sheets: List of sheets in file
+    
+    Processing Flow:
+        1. Extract main DataFrame from file at file_path
+        2. Create specialized DataFrames for each entity
+        3. Transform and clean all DataFrames
+        4. Load core entities in correct dependency order
+        5. Load junction tables
+        6. Validate data integrity
+    
+    DAG Configuration:
+        - Schedule: None (trigger-based)
+        - Catchup: False
+        - Max active runs: 1
+        - Retries: 3 with 5-minute delays
     """
 
     # ========== EXTRACT PHASE ==========
@@ -223,10 +279,50 @@ def mft_etl_pipeline():
     # Extract data for main Dataframe
     @task(task_id="extract_main_data")
     def extract_main_data() -> bytes:
-        """Task extracts raw main data from Excel file"""
-        logger.info(
-            "Extracting main data..."
-        )
+        """Task extracts raw main data from Excel file provided by upload API"""
+
+        # Getting the context
+        context = get_current_context()
+
+        # Getting the configuration from DAG run
+        dag_run = context.get('dag_run')
+        if not dag_run or not dag_run.conf:
+            error_msg = "No configuration provided. DAG must be triggered with file information."
+            logger.error(error_msg)
+            raise AirflowSkipException(error_msg)
+
+        conf = dag_run.conf
+
+        # Logging metadata from upload_api
+        logger.info("=" * 60)
+        logger.info("PROCESSING FILE FROM UPLOAD API")
+        logger.info("=" * 60)
+        logger.info("File ID: %s", conf.get('unique_id', 'N/A'))
+        logger.info("Original filename: %s", conf.get('original_filename', 'N/A'))
+        logger.info("File path: %s", conf.get('file_path', 'N/A'))
+        logger.info("Upload timestamp: %s", conf.get('upload_timestamp', 'N/A'))
+        logger.info("File hash: %s", conf.get('file_hash', 'N/A'))
+        logger.info("Total rows: %s", conf.get('total_rows', 'N/A'))
+        logger.info("File format: %s", conf.get('file_format', 'N/A'))
+        logger.info("File size: %s bytes", conf.get('file_size', 'N/A'))
+
+        # Get the file path from the configuration
+        file_path_str = conf.get('file_path')
+        if not file_path_str:
+            error_msg = "No file_path provided in DAG run configuration"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        file_path = Path(file_path_str)
+
+        # Saving metadata in XCom for future tasks
+        ti  = context.get('ti')
+        if ti:
+            ti.xcom_push(key='file_metadata', value=conf)
+        else:
+            logger.warning("Could not get task instance from context")
+
+        logger.info("Extracting main data from: %s", file_path)
 
         main_df = create_main_df(file_path)
 
