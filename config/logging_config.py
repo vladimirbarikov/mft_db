@@ -60,6 +60,7 @@ Status: Production
 """
 # Standard library imports
 from pathlib import Path
+import os
 import sys
 import logging
 import logging.config
@@ -84,25 +85,40 @@ JSON_LOG_DIR = LOG_DIR / "json_logs"
 ERROR_LOG_DIR = LOG_DIR / "error_logs"
 
 # Create all log directories if they don't exist
-def create_log_directories():
-    """Create all necessary log directories"""
-    directories = [
-        LOG_DIR,
-        AIRFLOW_LOG_DIR,
-        API_LOG_DIR,
-        APP_LOG_DIR,
-        DATABASE_LOG_DIR,
-        JSON_LOG_DIR,
-        ERROR_LOG_DIR
-    ]
+# def create_log_directories():
+#     """Create all necessary log directories"""
+#     directories = [
+#         LOG_DIR,
+#         AIRFLOW_LOG_DIR,
+#         API_LOG_DIR,
+#         APP_LOG_DIR,
+#         DATABASE_LOG_DIR,
+#         JSON_LOG_DIR,
+#         ERROR_LOG_DIR
+#     ]
 
-    for directory in directories:
-        directory.mkdir(exist_ok=True)
+#     for directory in directories:
+#         directory.mkdir(exist_ok=True)
 
-    return directories
+#     return directories
+
+def ensure_log_dir(directory: Path) -> None:
+    """Function for lazy creating directories"""
+    if not directory.exists():
+        directory.mkdir(parents=True, exist_ok=True)
+
+        # For Linux systems, install rights 755 (rwxr-xr-x)
+        if sys.platform.startswith('linux'):
+            try:
+                # Rights: the owner can do everything,
+                # the group and the rest can only read and execute
+                os.chmod(directory, 0o755)
+            except OSError as e:
+                # We log the error, but do not interrupt the execution
+                print(f"Warning: Could not set permissions on {directory}: {e}", file=sys.stderr)
 
 # Create directories
-create_log_directories()
+# create_log_directories()
 
 # Unique identifier for log filenames
 LOG_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -212,6 +228,7 @@ class TimeBasedFilter(logging.Filter):
 
 def get_log_file_path(directory: Path, filename: str) -> str:
     """Get full path to log file in specific directory"""
+    ensure_log_dir(directory)
     return str(directory / filename)
 
 # Main logging configuration
@@ -284,6 +301,7 @@ LOGGING_CONFIG = {
             "maxBytes": 10 * 1024 * 1024,
             "backupCount": 5,
             "encoding": "utf8",
+            "delay": True,
         },
 
         # JSON logs
@@ -295,6 +313,7 @@ LOGGING_CONFIG = {
             "maxBytes": 10 * 1024 * 1024,
             "backupCount": 3,
             "encoding": "utf8",
+            "delay": True,
         },
 
         # Airflow-specific logs (in the airfow_logs directory)
@@ -306,6 +325,7 @@ LOGGING_CONFIG = {
             "maxBytes": 20 * 1024 * 1024,  # 20 MB
             "backupCount": 10,
             "encoding": "utf8",
+            "delay": True,
             "filters": ["time_based_filter", "airflow_task_filter"]
         },
 
@@ -318,6 +338,7 @@ LOGGING_CONFIG = {
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 3,
             "encoding": "utf8",
+            "delay": True,
         },
 
         # API logs (in the api_logs directory)
@@ -329,6 +350,7 @@ LOGGING_CONFIG = {
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 3,
             "encoding": "utf8",
+            "delay": True,
         },
     },
     "loggers": {
