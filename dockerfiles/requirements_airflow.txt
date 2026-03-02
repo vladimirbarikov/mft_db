@@ -1,16 +1,21 @@
-# Utilities for data handling
+# Core data processing
 polars==1.36.1
 pyarrow==16.0.0
+
+# Excel file handling
 openpyxl==3.1.5
+
+# Timezone handling
+pytz==2025.2
 
 # PostgreSQL driver
 psycopg2-binary==2.9.11
 
-# Additional utilities
+# Utilities
 python-dotenv==1.2.1
 pypinyin==0.55.0
 requests==2.32.5
 
-# Airflow providers for basic SQL operations and for HTTP requests
+# Airflow providers
 apache-airflow-providers-common-sql==1.26.0
 apache-airflow-providers-http==5.2.2
