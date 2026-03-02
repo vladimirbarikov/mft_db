@@ -64,7 +64,7 @@ x-airflow-common:
 
 x-api-common:
     &api-common
-    image: ${API_IMAGE_NAME:-mft-api:3.9-slim}
+    image: ${API_IMAGE_NAME:-mft-api:3.12.3-slim}
     build:
       context: .
       dockerfile: dockerfiles/Dockerfile.api
@@ -621,18 +621,30 @@ services:
       start_period: 30s
 
   clamav:
-    image: clamav/clamav:1.4.1
+    image: clamav/clamav:1.5.1
     container_name: clamav
+    command:
+      - /bin/sh
+      - -c
+      - |
+        pkill clamd 2>/dev/null || true
+        rm -f /var/log/clamav/clamd.log 2>/dev/null || true
+        freshclam -d &
+        sleep 1
+        exec clamd --foreground
     restart: unless-stopped
     volumes:
       - clamav_db:/var/lib/clamav
       - clamav_temp:/tmp
+      - /etc/ssl/certs:/etc/ssl/certs
+      - /etc/localtime:/etc/localtime:ro
     networks:
       - mft_airflow_network
     environment:
       # Network settings
       - CLAMD_CONF_TCPAddr=0.0.0.0
-      - CLAMD_CONF_TCPPort=${CLAMAV_PORT:-3310}
+      - CLAMD_CONF_TCPSocket=${CLAMAV_PORT:-3310}
+      - CLAMD_ENABLE=true
       # File size limits
       - CLAMD_CONF_MaxScanSize=${MAX_FILE_SIZE_MB:-5}M
       - CLAMD_CONF_MaxFileSize=${MAX_FILE_SIZE_MB:-5}M
@@ -654,15 +666,17 @@ services:
       - CLAMD_CONF_AlertEncryptedDoc=yes
       # Freshclam (database updater) settings
       - FRESHCLAM_CONF_Checks=24
-      - FRESHCLAM_CONF_DatabaseMirror=database.clamav.net
+      - FRESHCLAM_CONF_DatabaseMirror=http://database.clamav.net
       - FRESHCLAM_CONF_LogSyslog=yes
       - FRESHCLAM_CONF_LogRotate=yes
+      - FRESHCLAM_CONF_ConnectTimeout=30
+      - FRESHCLAM_CONF_ReceiveTimeout=30
     healthcheck:
       test: ["CMD", "clamdscan", "--fdpass", "--quiet", "/tmp"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 300s
     logging:
       driver: "json-file"
       options:
@@ -671,7 +685,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 3G
           cpus: '0.5'
         reservations:
           memory: 512M
