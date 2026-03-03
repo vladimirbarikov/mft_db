@@ -1,26 +1,41 @@
 # Ignoring the log files
-logs/*
+logs/
+*.log
 
 # Ignoring configuration files
 .env
 
 # Ignore Python cache
-dags/__pycache__/
-dags/tasks/__pycache__/
-database/__pycache__/
-config/__pycache__/
-endpoints/__pycache__/
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.coverage
+**/.mypy_cache
+**/.ruff_cache
 
 # Ignoring standard files
 .DS_Store
 Thumbs.db
+*~
+*.swp
+*.swo
 
 # Ignoring testing tools
 *.pid
 *.cfg
+*.lock
 
 # Ignoring the dependencies of the local virtual environment
 .mft_db_env/
+venv/
+.venv/
+env/
 
 # Ignoring the data
-data/*
+data/
+uploads/
+backups/
+processed/
+quarantine/
