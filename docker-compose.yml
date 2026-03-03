@@ -620,6 +620,25 @@ services:
       retries: 3
       start_period: 30s
 
+  display-api:
+    <<: *api-common
+    container_name: mft_display_api
+    environment:
+      <<: *api-env
+      FLASK_PORT: 5003
+    command: python /app/endpoints/display_api.py
+    ports:
+      - "5003:5003"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   clamav:
     image: clamav/clamav:1.5.1
     container_name: clamav
