@@ -140,19 +140,16 @@ HOST_DATA_DIR = Path(AIRFLOW_PROJ_DIR) / 'data'
 # Subdirectories
 UPLOAD_SUBDIR = 'uploads'
 BACKUP_SUBDIR = 'backups'
-PROCESSED_SUBDIR = 'processed'
 QUARANTINE_SUBDIR = 'quarantine'
 
 # Full paths
 UPLOAD_DIR = AIRFLOW_DATA_DIR / UPLOAD_SUBDIR
 BACKUP_DIR = AIRFLOW_DATA_DIR / BACKUP_SUBDIR
-PROCESSED_DIR = AIRFLOW_DATA_DIR / PROCESSED_SUBDIR
 QUARANTINE_DIR = AIRFLOW_DATA_DIR / QUARANTINE_SUBDIR
 
 # Host paths (for creating directories)
 HOST_UPLOAD_DIR = UPLOAD_DIR
 HOST_BACKUP_DIR = BACKUP_DIR
-HOST_PROCESSED_DIR = PROCESSED_DIR
 HOST_QUARANTINE_DIR = QUARANTINE_DIR
 
 # ========== THREAD-SAFE STORAGE FOR FILE METADATA ==========
@@ -258,7 +255,7 @@ class FileMetadataStore:
 file_metadata_store = FileMetadataStore(retention_hours=FILE_RETENTION_DAYS * 24)
 
 # ========== CREATING DIRECTORIES ==========
-for directory in [HOST_UPLOAD_DIR, HOST_BACKUP_DIR, HOST_PROCESSED_DIR, HOST_QUARANTINE_DIR]:
+for directory in [HOST_UPLOAD_DIR, HOST_BACKUP_DIR, HOST_QUARANTINE_DIR]:
     try:
         directory.mkdir(parents=True, exist_ok=True)
         logger.info("The directory was created successfully: %s", directory)
@@ -1170,15 +1167,15 @@ def upload_mft_excel():
         response_data = {
             'message': 'File uploaded successfully',
             'file': {
-                'name': safe_filename,
-                'original_name': file.filename,
-                'size': file_size,
+                'safe_filename': safe_filename,
+                'original_filename': file.filename,
+                'file_size': file_size,
                 'upload_time': timestamp,
-                'id': unique_id,
+                'unique_id': unique_id,
                 'sheets': file_info.get('sheets', []),
                 'total_rows': file_info.get('total_rows', 0),
                 'format': file_info.get('format', 'unknown'),
-                'hash': file_info.get('file_hash')
+                'file_hash': file_info.get('file_hash')
             },
             'dag_triggered': dag_success
         }
