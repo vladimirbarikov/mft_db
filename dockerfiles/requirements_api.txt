@@ -12,6 +12,14 @@ openpyxl==3.1.5
 xlrd==2.0.2
 oletools==0.60.2
 
+# Database
+SQLAlchemy==1.4.54
+psycopg2-binary==2.9.11
+
+# Data processing
+polars==1.36.1
+xlsxwriter==3.2.9
+
 # Timezone handling
 pytz==2025.2
 
