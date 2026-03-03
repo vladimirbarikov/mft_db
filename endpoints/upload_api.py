@@ -16,6 +16,7 @@ Key Features:
     - Automatic DAG triggering after successful upload
     - Health check and statistics endpoints
     - Background cleanup of expired files
+    - Admin endpoints for quarantine management
     - Comprehensive error handling and logging
 
 Environment Variables:
@@ -37,6 +38,12 @@ Endpoints:
     POST /upload-mft-excel - Main file upload endpoint
     GET /file/<file_id> - Get file metadata by ID
     GET /file/<file_id>/status - Check file existence
+    
+    Admin endpoints (require admin privileges):
+    GET /admin/quarantine/files - List all files in quarantine
+    GET /admin/quarantine/files/<filename> - Get detailed file info
+    DELETE /admin/quarantine/files/<filename> - Delete specific file
+    POST /admin/quarantine/files/batch-delete - Delete multiple files
 
 Version: 1.0.0
 Compatibility: Python 3.12.3
@@ -47,17 +54,18 @@ License: MIT
 Status: Production
 """
 # Standard library imports
+import hashlib
 import os
+import re
+import shutil
 import sys
 import tempfile
-import shutil
-import uuid
-import hashlib
-import time
 import threading
-from pathlib import Path
+import time
+import uuid
 from datetime import datetime, timedelta
 from functools import wraps
+from pathlib import Path
 from threading import Lock
 from typing import Tuple, Optional, Dict, Any
 
@@ -108,6 +116,9 @@ FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
 # Defining the environment (default is development)
 FLASK_ENV = os.getenv('FLASK_ENV', 'development')
 IS_PRODUCTION = FLASK_ENV == 'production'
+
+# Admin authentication (simplified - in production use proper auth)
+ADMIN_API_KEY = os.getenv('ADMIN_API_KEY', 'change-me-in-production')
 
 # Airflow configuration
 AIRFLOW_API_URL = os.getenv('AIRFLOW_API_URL', 'http://airflow-webserver:8080/api/v1')
@@ -300,6 +311,102 @@ limiter = Limiter(
 # ========== CREATING BLUEPRINT ==========
 upload_bp = Blueprint('upload', __name__)
 
+# ========== ADMIN AUTHENTICATION DECORATOR ==========
+def admin_required(f):
+    """
+    Decorator to check if user is admin.
+    In production, this should check session, JWT, or API key.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # For development, check API key in header
+        api_key = request.headers.get('X-API-Key')
+
+        if IS_PRODUCTION:
+            # In production, also check localhost
+            if request.remote_addr in ['127.0.0.1', '::1']:
+                return f(*args, **kwargs)
+
+        if api_key and api_key == ADMIN_API_KEY:
+            return f(*args, **kwargs)
+
+        # Check session (if you implement login)
+        if session.get('is_admin'):
+            return f(*args, **kwargs)
+
+        return jsonify({'error': 'Admin access required'}), 403
+    return decorated_function
+
+
+# ========== QUARANTINE HELPER FUNCTIONS ==========
+def parse_quarantine_filename(filename: str) -> Dict[str, Any]:
+    """
+    Parse quarantine filename to extract metadata.
+    Format: INFECTED_YYYYMMDD_HHMMSS_uniqueid_originalfilename.ext
+    """
+    try:
+        # Pattern: INFECTED_20260226_143015_a1b2c3d4_original.xlsx
+        pattern = r'INFECTED_(\d{8})_(\d{6})_([a-f0-9]{8})_(.+)'
+        match = re.match(pattern, filename)
+
+        if match:
+            date_str, time_str, unique_id, original_name = match.groups()
+            scan_datetime = datetime.strptime(f"{date_str}_{time_str}", '%Y%m%d_%H%M%S')
+
+            return {
+                'scan_date': scan_datetime.isoformat(),
+                'scan_timestamp': scan_datetime.timestamp(),
+                'unique_id': unique_id,
+                'original_filename': original_name,
+                'parsed_successfully': True
+            }
+
+    except (ValueError, AttributeError, re.error) as e:
+        logger.debug("Failed to parse quarantine filename %s: %s", filename, e)
+
+    return {
+        'scan_date': None,
+        'original_filename': filename,
+        'parsed_successfully': False
+    }
+
+
+def get_quarantine_file_info(file_path: Path) -> Dict[str, Any]:
+    """
+    Get detailed information about a quarantine file.
+    """
+    try:
+        stat = file_path.stat()
+        parsed = parse_quarantine_filename(file_path.name)
+
+        # Try to get virus name from ClamAV logs or metadata
+        # For now, we'll use a placeholder
+        virus_name = "Unknown"  # In production, you might store this in a separate metadata file
+
+        return {
+            'id': file_path.name,  # Using filename as ID for simplicity
+            'filename': file_path.name,
+            'size': stat.st_size,
+            'size_formatted': f"{stat.st_size / 1024:.2f} KB" if stat.st_size < 1024*1024 else f"{stat.st_size / (1024*1024):.2f} MB",
+            'created': datetime.fromtimestamp(stat.st_ctime).isoformat(),
+            'created_timestamp': stat.st_ctime,
+            'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            'virus_name': virus_name,
+            'original_filename': parsed.get('original_filename', file_path.name),
+            'scan_date': parsed.get('scan_date'),
+            'scan_timestamp': parsed.get('scan_timestamp'),
+            'parsed_successfully': parsed.get('parsed_successfully', False)
+        }
+    except (OSError, PermissionError, FileNotFoundError) as e:
+        logger.error("Error accessing quarantine file %s: %s", file_path, e)
+        return {
+            'id': file_path.name,
+            'filename': file_path.name,
+            'error': f"Cannot access file: {str(e)}",
+            'parsed_successfully': False
+        }
+
+
 # ========== EXCEL VALIDATION FUNCTIONS ==========
 def _validate_xlsx(file_path: Path, file_info: Dict) -> Tuple[bool, str, Optional[Dict]]:
     """
@@ -399,6 +506,7 @@ def _validate_xlsx(file_path: Path, file_info: Dict) -> Tuple[bool, str, Optiona
     finally:
         if wb:
             wb.close()
+
 
 def _validate_xls(file_path: Path, file_info: Dict) -> Tuple[bool, str, Optional[Dict]]:
     """
@@ -522,6 +630,7 @@ def _validate_xls(file_path: Path, file_info: Dict) -> Tuple[bool, str, Optional
             except (AttributeError, RuntimeError, IOError) as e:
                 logger.debug("Error closing vba_parser: %s", e)
 
+
 def validate_excel_content(file_path: Path) -> Tuple[bool, str, Optional[Dict]]:
     """
     Main entry point for Excel file content validation.
@@ -583,6 +692,7 @@ def validate_excel_content(file_path: Path) -> Tuple[bool, str, Optional[Dict]]:
     except Exception as unexpected_error:
         logger.error("Excel validation error: %s", str(unexpected_error), exc_info=True)
         return False, f"Excel validation failed: {str(unexpected_error)}", None
+
 
 def validate_file(file) -> Tuple[bool, str, Optional[Dict], int]:
     """
@@ -667,6 +777,7 @@ def validate_file(file) -> Tuple[bool, str, Optional[Dict], int]:
 
     return True, "", {'extension': file_ext, 'original_filename': file.filename}, 200
 
+
 def generate_unique_filename(original_filename: str) -> tuple[str, str, str]:
     """
     Generate a unique, sanitized filename with timestamp and UUID.
@@ -701,6 +812,7 @@ def generate_unique_filename(original_filename: str) -> tuple[str, str, str]:
 
     return safe_filename, timestamp, unique_id
 
+
 def save_file_with_backup(file_content: bytes, file_path: Path) -> bool:
     """
     Save file with automatic backup creation if file already exists.
@@ -732,6 +844,7 @@ def save_file_with_backup(file_content: bytes, file_path: Path) -> bool:
     except (IOError, OSError, PermissionError) as e:
         logger.error("Failed to save file %s: %s", file_path, e)
         return False
+
 
 def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]]:
     """
@@ -813,6 +926,7 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
         logger.error("Unexpected error triggering DAG: %s", unexpected_error, exc_info=True)
         return False, {'error': f'Unexpected error: {str(unexpected_error)}'}
 
+
 def cleanup_old_files(target_dir: Path, hours: int) -> int:
     """
     Delete files in target directory older than specified hours.
@@ -853,6 +967,7 @@ def cleanup_old_files(target_dir: Path, hours: int) -> int:
         logger.error("Cleanup error in %s: %s", target_dir, unexpected_error)
         return 0
 
+
 # ========== RATE LIMITING DECORATOR ==========
 def rate_limit(limit_string: Optional[str] = None):
     """
@@ -879,6 +994,7 @@ def rate_limit(limit_string: Optional[str] = None):
         return wrapped
     return decorator
 
+
 # ========== API ENDPOINTS ==========
 @upload_bp.route('/health', methods=['GET'])
 def health_check():
@@ -904,7 +1020,9 @@ def health_check():
         'upload_dir_writable': os.access(UPLOAD_DIR, os.W_OK) if UPLOAD_DIR.exists() else False
     }), 200
 
+
 @upload_bp.route('/stats', methods=['GET'])
+@admin_required
 def get_stats():
     """
     Get detailed upload statistics (admin only endpoint).
@@ -934,6 +1052,11 @@ def get_stats():
             'exists': UPLOAD_DIR.exists(),
             'writable': os.access(UPLOAD_DIR, os.W_OK) if UPLOAD_DIR.exists() else False
         },
+        'quarantine': {
+            'directory': str(QUARANTINE_DIR),
+            'exists': QUARANTINE_DIR.exists(),
+            'writable': os.access(QUARANTINE_DIR, os.W_OK) if QUARANTINE_DIR.exists() else False
+        },
         'retention_hours': FILE_RETENTION_DAYS * 24,
         'max_file_size_mb': MAX_FILE_SIZE_MB,
         'rate_limit': RATE_LIMIT
@@ -944,12 +1067,18 @@ def get_stats():
             files = list(UPLOAD_DIR.glob('*'))
             stats['uploads']['file_count'] = len([f for f in files if f.is_file()])
 
+        if QUARANTINE_DIR.exists():
+            files = list(QUARANTINE_DIR.glob('*'))
+            stats['quarantine']['file_count'] = len([f for f in files if f.is_file()])
+
     except Exception as e:
         stats['uploads']['error'] = str(e)
 
     return jsonify(stats), 200
 
+
 @upload_bp.route('/cleanup', methods=['POST'])
+@admin_required
 def manual_cleanup():
     """
     Manually trigger cleanup of old files (admin only endpoint).
@@ -987,6 +1116,7 @@ def manual_cleanup():
         'deleted': results,
         'hours': hours
     }), 200
+
 
 @upload_bp.route('/upload-mft-excel', methods=['POST'])
 @rate_limit()
@@ -1072,6 +1202,9 @@ def upload_mft_excel():
                 try:
                     quarantine_path.write_bytes(file_content)
                     logger.info("Infected file saved to quarantine: %s", quarantine_path)
+
+                    # Log with virus name
+                    logger.warning("Quarantine: %s | Virus: %s", quarantine_filename, scan_result)
 
                 except (IOError, OSError, PermissionError) as e:
                     logger.error(
@@ -1214,6 +1347,7 @@ def upload_mft_excel():
                     temp_path, unexpected_error, exc_info=True
                 )
 
+
 @upload_bp.route('/file/<file_id>', methods=['GET'])
 def get_file_info(file_id: str):
     """
@@ -1233,6 +1367,7 @@ def get_file_info(file_id: str):
     if metadata:
         return jsonify({'file': metadata}), 200
     return jsonify({'error': 'File not found or expired'}), 404
+
 
 @upload_bp.route('/file/<file_id>/status', methods=['GET'])
 def get_file_status(file_id: str):
@@ -1267,6 +1402,437 @@ def get_file_status(file_id: str):
         'metadata': metadata if exists else None
     }), 200
 
+
+# ========== ADMIN QUARANTINE MANAGEMENT ENDPOINTS ==========
+@upload_bp.route('/admin/quarantine/files', methods=['GET'])
+@admin_required
+def list_quarantine_files():
+    """
+    List all files in quarantine directory with metadata.
+    Returns paginated results for web interface.
+    
+    Query Parameters:
+        page (int): Page number (default: 1)
+        per_page (int): Items per page (default: 20, max: 100)
+        sort_by (str): Sort field (created, size, filename) (default: created)
+        sort_order (str): asc or desc (default: desc)
+        search (str): Search in filename
+        
+    Returns:
+        Response: JSON with:
+            - files: List of file metadata
+            - total: Total number of files
+            - page: Current page
+            - per_page: Items per page
+            - pages: Total number of pages
+    """
+    try:
+        # Get query parameters
+        try:
+            page = request.args.get('page', 1, type=int)
+            per_page = min(request.args.get('per_page', 20, type=int), 100)
+            sort_by = request.args.get('sort_by', 'created')
+            sort_order = request.args.get('sort_order', 'desc')
+            search = request.args.get('search', '')
+        except (TypeError, ValueError) as e:
+            logger.warning("Invalid query parameters: %s", e)
+            page, per_page, sort_by, sort_order, search = 1, 20, 'created', 'desc', ''
+
+        # Get all files
+        all_files = []
+
+        try:
+            for file_path in QUARANTINE_DIR.glob('*'):
+                if file_path.is_file():
+                    file_info = get_quarantine_file_info(file_path)
+                    all_files.append(file_info)
+        except (OSError, PermissionError) as e:
+            logger.error("Error reading quarantine directory: %s", e)
+            return jsonify({'error': 'Failed to read quarantine directory'}), 500
+
+        # Apply search filter
+        if search:
+            try:
+                all_files = [f for f in all_files if search.lower() in f['filename'].lower()]
+            except (AttributeError, KeyError) as e:
+                logger.warning("Error applying search filter: %s", e)
+
+        # Apply sorting
+        try:
+            reverse = sort_order == 'desc'
+            if sort_by == 'created':
+                all_files.sort(key=lambda x: x.get('created_timestamp', 0), reverse=reverse)
+            elif sort_by == 'size':
+                all_files.sort(key=lambda x: x['size'], reverse=reverse)
+            elif sort_by == 'filename':
+                all_files.sort(key=lambda x: x['filename'].lower(), reverse=reverse)
+        except (KeyError, AttributeError, TypeError) as e:
+            logger.warning("Error applying sorting: %s", e)
+
+        # Paginate
+        try:
+            total = len(all_files)
+            pages = (total + per_page - 1) // per_page
+            start = (page - 1) * per_page
+            end = start + per_page
+            paginated_files = all_files[start:end]
+        except (ValueError, TypeError) as e:
+            logger.error("Error paginating results: %s", e)
+            return jsonify({'error': 'Invalid pagination parameters'}), 400
+
+        return jsonify({
+            'files': paginated_files,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pages,
+            'has_next': page < pages,
+            'has_prev': page > 1
+        }), 200
+
+    except Exception as unexpected_error:
+        logger.error(
+            "Unexpected error listing quarantine files: %s",
+            unexpected_error, exc_info=True
+        )
+        return jsonify({'error': 'Failed to list quarantine files'}), 500
+
+
+@upload_bp.route('/admin/quarantine/files/<path:filename>', methods=['GET'])
+@admin_required
+def get_quarantine_file_detail(filename):
+    """
+    Get detailed information about a specific quarantine file.
+
+    Args:
+        filename: Name of the file in quarantine
+
+    Returns:
+        Response: JSON with detailed file metadata
+    """
+    try:
+        # Security: prevent directory traversal
+        if '..' in filename or '/' in filename or '\\' in filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+
+        file_path = QUARANTINE_DIR / filename
+
+        if not file_path.exists() or not file_path.is_file():
+            return jsonify({'error': 'File not found'}), 404
+
+        file_info = get_quarantine_file_info(file_path)
+
+        # Add more details for single file view
+        try:
+            file_info.update({
+                'path': str(file_path),
+                'absolute_path': str(file_path.absolute()),
+                'permissions': oct(file_path.stat().st_mode)[-3:],
+                'inode': file_path.stat().st_ino,
+            })
+
+            # Only hash if file is small enough
+            if file_path.stat().st_size < 10 * 1024 * 1024:
+                try:
+                    file_info['file_hash'] = hashlib.sha256(file_path.read_bytes()).hexdigest()
+                except (IOError, OSError, MemoryError) as e:
+                    logger.warning("Could not hash file %s: %s", filename, e)
+                    file_info['file_hash'] = None
+
+        except (OSError, PermissionError) as e:
+            logger.warning("Could not get additional file details: %s", e)
+
+        return jsonify(file_info), 200
+
+    except PermissionError:
+        return jsonify({'error': 'Permission denied'}), 403
+
+    except FileNotFoundError:
+        return jsonify({'error': 'File not found'}), 404
+
+    except OSError as e:
+        logger.error("OS error accessing file: %s", e)
+        return jsonify({'error': 'File system error'}), 500
+
+    except Exception as unexpected_error:
+        logger.error(
+            "Unexpected error getting quarantine file details: %s",
+            unexpected_error, exc_info=True
+        )
+        return jsonify({'error': 'Failed to get file details'}), 500
+
+
+@upload_bp.route('/admin/quarantine/files/<path:filename>', methods=['DELETE'])
+@admin_required
+def delete_quarantine_file(filename):
+    """
+    Delete a specific file from quarantine.
+    
+    Args:
+        filename: Name of the file to delete
+        
+    Returns:
+        Response: JSON with deletion status
+    """
+    try:
+        # Security: prevent directory traversal
+        if '..' in filename or '/' in filename or '\\' in filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+
+        file_path = QUARANTINE_DIR / filename
+
+        if not file_path.exists() or not file_path.is_file():
+            return jsonify({'error': 'File not found'}), 404
+
+        # Get file info for logging
+        try:
+            file_size = file_path.stat().st_size
+        except (OSError, PermissionError) as e:
+            logger.error("Could not get file size: %s", e)
+            file_size = 0
+
+        # Delete the file
+        try:
+            file_path.unlink()
+
+        except PermissionError as e:
+            logger.error("Permission denied deleting file: %s", e)
+            return jsonify({'error': 'Permission denied'}), 403
+
+        except OSError as e:
+            logger.error("OS error deleting file: %s", e)
+            return jsonify({'error': f'File system error: {str(e)}'}), 500
+
+        # Log the action
+        logger.warning("Admin deleted quarantine file: %s (size: %d bytes)", filename, file_size)
+
+        return jsonify({
+            'message': 'File deleted successfully',
+            'deleted_file': {
+                'filename': filename,
+                'size': file_size,
+                'deleted_at': datetime.now().isoformat()
+            }
+        }), 200
+
+    except Exception as unexpected_error:
+        logger.error(
+            "Unexpected error deleting quarantine file: %s",
+            unexpected_error, exc_info=True
+        )
+        return jsonify({'error': 'Failed to delete file'}), 500
+
+
+@upload_bp.route('/admin/quarantine/files/batch-delete', methods=['POST'])
+@admin_required
+def batch_delete_quarantine_files():
+    """
+    Delete multiple files from quarantine in one operation.
+
+    Request Body:
+        {
+            "files": ["file1.xlsx", "file2.xlsx"],
+            "confirm": true
+        }
+
+    Returns:
+        Response: JSON with:
+            - message: Summary message
+            - results: List of deleted and failed files
+            - total_deleted: Count of successfully deleted files
+            - total_failed: Count of failed deletions
+    """
+    try:
+        # Parse request data
+        data = request.json
+
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        filenames = data.get('files', [])
+        confirm = data.get('confirm', False)
+
+        if not filenames:
+            return jsonify({'error': 'No files specified'}), 400
+
+        if not isinstance(filenames, list):
+            return jsonify({'error': 'Files must be a list'}), 400
+
+        if not confirm:
+            return jsonify({
+                'error': 'Confirmation required',
+                'message': 'Set "confirm": true to proceed with deletion'
+            }), 400
+
+        # Security: validate all filenames first
+        for filename in filenames:
+            if '..' in filename or '/' in filename or '\\' in filename:
+                return jsonify({'error': f'Invalid filename: {filename}'}), 400
+
+        results = {
+            'deleted': [],
+            'failed': []
+        }
+
+        for filename in filenames:
+            file_path = QUARANTINE_DIR / filename
+            try:
+                if file_path.exists() and file_path.is_file():
+                    try:
+                        file_size = file_path.stat().st_size
+                        file_path.unlink()
+                        results['deleted'].append({
+                            'filename': filename,
+                            'size': file_size
+                        })
+                        logger.warning("Admin deleted quarantine file: %s", filename)
+
+                    except PermissionError:
+                        results['failed'].append({
+                            'filename': filename,
+                            'reason': 'Permission denied'
+                        })
+
+                    except OSError as e:
+                        results['failed'].append({
+                            'filename': filename,
+                            'reason': f'File system error: {str(e)}'
+                        })
+
+                else:
+                    results['failed'].append({
+                        'filename': filename,
+                        'reason': 'File not found'
+                    })
+
+            except Exception as e:
+                results['failed'].append({
+                    'filename': filename,
+                    'reason': str(e)
+                })
+
+        return jsonify({
+            'message': f'Deleted {len(results["deleted"])} files, {len(results["failed"])} failed',
+            'results': results,
+            'total_deleted': len(results['deleted']),
+            'total_failed': len(results['failed'])
+        }), 200
+
+    except Exception as unexpected_error:
+        logger.error(
+            "Error in batch delete: %s",
+            unexpected_error, exc_info=True
+        )
+        return jsonify({'error': 'Batch delete failed'}), 500
+
+@upload_bp.route('/admin/quarantine/stats', methods=['GET'])
+@admin_required
+def quarantine_stats():
+    """
+    Get statistics about quarantine directory.
+    
+    Returns:
+        Response: JSON with:
+            - total_files: Total number of files
+            - total_size: Total size in bytes
+            - oldest_file: Oldest file date
+            - newest_file: Newest file date
+            - files_by_date: Files grouped by date
+            - files_by_size: Size distribution
+    """
+    try:
+        files = []
+        total_size = 0
+
+        try:
+            for file_path in QUARANTINE_DIR.glob('*'):
+                if file_path.is_file():
+                    try:
+                        stat = file_path.stat()
+                        file_info = {
+                            'filename': file_path.name,
+                            'size': stat.st_size,
+                            'created': datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                            'created_date': datetime.fromtimestamp(stat.st_ctime).date().isoformat()
+                        }
+                        files.append(file_info)
+                        total_size += stat.st_size
+
+                    except (OSError, PermissionError) as e:
+                        logger.warning("Could not access file %s: %s", file_path, e)
+                        continue
+
+        except (OSError, PermissionError) as e:
+            logger.error("Error reading quarantine directory: %s", e)
+            return jsonify({'error': 'Failed to read quarantine directory'}), 500
+
+        if not files:
+            return jsonify({
+                'total_files': 0,
+                'total_size': 0,
+                'total_size_formatted': '0 B',
+                'oldest_file': None,
+                'newest_file': None,
+                'files_by_date': {},
+                'files_by_size': {
+                    'small': 0,  # < 1MB
+                    'medium': 0, # 1-10MB
+                    'large': 0   # > 10MB
+                }
+            }), 200
+
+        # Sort by created date
+        try:
+            files.sort(key=lambda x: x['created'])
+        except (KeyError, TypeError) as e:
+            logger.warning("Error sorting files: %s", e)
+
+        # Group by date
+        files_by_date = {}
+        for f in files:
+            try:
+                date = f['created_date']
+                if date:
+                    files_by_date[date] = files_by_date.get(date, 0) + 1
+
+            except (AttributeError, KeyError) as e:
+                logger.warning("Error processing file date: %s", e)
+                continue
+
+        # Size distribution
+        size_dist = {'small': 0, 'medium': 0, 'large': 0}
+        for f in files:
+            try:
+                size = f.get('size', 0)
+                if size < 1024 * 1024:
+                    size_dist['small'] += 1
+                elif size < 10 * 1024 * 1024:
+                    size_dist['medium'] += 1
+                else:
+                    size_dist['large'] += 1
+
+            except (AttributeError, TypeError, KeyError) as e:
+                logger.warning("Error processing file size: %s", e)
+                continue
+
+        return jsonify({
+            'total_files': len(files),
+            'total_size': total_size,
+            'total_size_formatted': f"{total_size / (1024*1024):.2f} MB" if total_size > 0 else '0 B',
+            'oldest_file': files[0]['created'] if files else None,
+            'newest_file': files[-1]['created'] if files else None,
+            'files_by_date': files_by_date,
+            'files_by_size': size_dist
+        }), 200
+
+    except Exception as unexpected_error:
+        logger.error(
+            "Unexpected error getting quarantine stats: %s",
+            unexpected_error, exc_info=True
+        )
+        return jsonify({'error': 'Failed to get quarantine statistics'}), 500
+
+
 # ========== BACKGROUND CLEANUP TASK ==========
 def start_background_cleanup():
     """
@@ -1294,22 +1860,28 @@ def start_background_cleanup():
                 # Cleanup with error isolation
                 try:
                     deleted_uploads = cleanup_old_files(UPLOAD_DIR, hours)
+
                 except (OSError, PermissionError, FileNotFoundError) as e:
                     logger.error("Uploads cleanup failed: %s", e)
+
                 except Exception as unexpected_error:
                     logger.error("Unexpected uploads error: %s", unexpected_error, exc_info=True)
 
                 try:
                     deleted_backups = cleanup_old_files(BACKUP_DIR, hours)
+
                 except (OSError, PermissionError, FileNotFoundError) as e:
                     logger.error("Backups cleanup failed: %s", e)
+
                 except Exception as unexpected_error:
                     logger.error("Unexpected backups error: %s", unexpected_error, exc_info=True)
 
                 try:
                     expired_metadata = file_metadata_store.cleanup_expired()
+
                 except (KeyError, ValueError, AttributeError) as e:
                     logger.error("Metadata cleanup failed: %s", e)
+
                 except Exception as unexpected_error:
                     logger.error("Unexpected metadata error: %s", unexpected_error, exc_info=True)
 
@@ -1334,6 +1906,7 @@ def start_background_cleanup():
     thread = threading.Thread(target=cleanup_worker, daemon=True)
     thread.start()
     logger.info("Background cleanup thread started")
+
 
 # ========== FLASK APP SETUP ==========
 def create_app():
