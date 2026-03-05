@@ -1,6 +1,7 @@
 # Web framework and security
 Flask==2.2.5
 Flask-Limiter==3.12
+flask-cors==6.0.2
 clamd==1.0.2
 
 # Production server uncomment before production
@@ -14,6 +15,7 @@ oletools==0.60.2
 
 # Database
 SQLAlchemy==1.4.54
+SQLAlchemy-Utils==0.42.0
 psycopg2-binary==2.9.11
 
 # Data processing
