@@ -29,7 +29,10 @@ from typing import Dict, Any, Optional
 from functools import wraps
 
 # Third-party imports
-from flask import Blueprint, request, jsonify, current_app, send_file
+from flask import Blueprint, Flask, request, jsonify, current_app, send_file
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker, joinedload, selectinload
 from sqlalchemy.exc import (
@@ -63,10 +66,68 @@ from database.database import (
 # Logger setup
 logger = get_logger(__name__)
 
-# ============================================================================
-# FUNCTIONS FOR CASE NORMALIZATION
-# ============================================================================
+# ========== CONFIGURATION ==========
 
+# Flask/Upload API configuration
+FLASK_SECRET_KEY = os.getenv('FLASK_SECRET_KEY')
+if not FLASK_SECRET_KEY:
+    raise RuntimeError("FLASK_SECRET_KEY must be set in .env file")
+
+FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
+FLASK_PORT = int(os.getenv('FLASK_PORT', '5003'))
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+
+# Defining the environment (default is development)
+FLASK_ENV = os.getenv('FLASK_ENV', 'development')
+IS_PRODUCTION = FLASK_ENV == 'production'
+
+# CORS configuration
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
+
+# Rate limiting settings
+RATE_LIMIT = os.getenv('RATE_LIMIT', '10 per minute')
+RATE_LIMIT_STORAGE_URL = os.getenv('RATE_LIMIT_STORAGE_URL', 'memory://')
+
+# ========== CREATING BLUEPRINT ==========
+display_bp = Blueprint('display', __name__)
+
+# ========== RATE LIMITING SETUP ==========
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=RATE_LIMIT_STORAGE_URL,
+    default_limits=["200 per day", "50 per hour"],
+    strategy="fixed-window"
+)
+
+
+# ========== RATE LIMITING DECORATOR ==========
+def rate_limit(limit_string: Optional[str] = None):
+    """
+    Decorator factory for applying rate limits to endpoints.
+    
+    Wraps Flask routes with Flask-Limiter's rate limiting functionality.
+    
+    Args:
+        limit_string (Optional[str]): Rate limit string (e.g., "10 per minute").
+                                     If None, uses default RATE_LIMIT setting.
+                                     
+    Returns:
+        Callable: Decorated function with rate limiting applied
+        
+    Example:
+        >>> @rate_limit("5 per minute")
+        ... def my_endpoint():
+        ...     return jsonify({"message": "ok"})
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            return limiter.limit(limit_string or RATE_LIMIT)(f)(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+# ========== FUNCTIONS FOR CASE NORMALIZATION ==========
 def to_uppercase(value: Any) -> Any:
     """Convert to uppercase string if not None."""
     if value is None:
@@ -132,10 +193,7 @@ def normalize_output(
         return value
 
 
-# ============================================================================
-# DATABASE API CLASS
-# ============================================================================
-
+# ========== DATABASE API CLASS ==========
 class DatabaseAPI:
     """
     Main API class for database operations.
@@ -255,10 +313,6 @@ class DatabaseAPI:
             }
         finally:
             session.close()
-
-    # ============================================================================
-    # UNIVERSAL SEARCH (WITH CASE-INSENSITIVE FILTERING AND RANGES)
-    # ============================================================================
 
     def universal_search(
             self,
@@ -689,10 +743,6 @@ class DatabaseAPI:
 
         return row
 
-    # ============================================================================
-    # EXPORT TO EXCEL USING POLARS
-    # ============================================================================
-
     def export_to_excel(
             self,
             filters: Dict[str, Any],
@@ -801,14 +851,7 @@ class DatabaseAPI:
             }
 
 
-# ============================================================================
-# FLASK ENDPOINTS
-# ============================================================================
-
-# Create blueprint
-display_api_bp = Blueprint('display_api', __name__, url_prefix='/api')
-
-
+# ========== FLASK ENDPOINTS ==========
 def get_db_api() -> Optional[DatabaseAPI]:
     """
     Get DatabaseAPI instance from Flask application context.
@@ -955,11 +998,9 @@ def handle_api_response(func):
     return wrapper
 
 
-# ============================================================================
-# UNIVERSAL SEARCH ENDPOINT
-# ============================================================================
-
-@display_api_bp.route('/search', methods=['GET', 'POST'])
+# ========== UNIVERSAL SEARCH ENDPOINT ==========
+@display_bp.route('/search', methods=['GET', 'POST'])
+@rate_limit()
 @handle_api_response
 def universal_search_endpoint():
     """
@@ -1024,11 +1065,10 @@ def universal_search_endpoint():
     return api.universal_search(processed_filters)
 
 
-# ============================================================================
-# EXPORT TO EXCEL ENDPOINT
-# ============================================================================
 
-@display_api_bp.route('/export', methods=['POST'])
+# ========== EXPORT TO EXCEL ENDPOINT ==========
+@display_bp.route('/export', methods=['POST'])
+@rate_limit()
 @handle_api_response
 def export_to_excel_endpoint():
     """
@@ -1137,11 +1177,9 @@ def export_to_excel_endpoint():
                 logger.warning("OS error when cleaning up %s: %s", result['file_path'], e2)
         raise
 
-# ============================================================================
-# SPECIALIZED ENDPOINTS
-# ============================================================================
-
-@display_api_bp.route('/part/<path:part_number>', methods=['GET'])
+# ========== SPECIALIZED ENDPOINTS ==========
+@display_bp.route('/part/<path:part_number>', methods=['GET'])
+@rate_limit()
 @handle_api_response
 def get_part_by_number_endpoint(part_number):
     """
@@ -1163,7 +1201,8 @@ def get_part_by_number_endpoint(part_number):
     return api.universal_search(filters)
 
 
-@display_api_bp.route('/line/<path:line_identifier>/parts', methods=['GET'])
+@display_bp.route('/line/<path:line_identifier>/parts', methods=['GET'])
+@rate_limit()
 @handle_api_response
 def get_parts_by_line_endpoint(line_identifier):
     """
@@ -1203,7 +1242,8 @@ def get_parts_by_line_endpoint(line_identifier):
     return api.universal_search(filters)
 
 
-@display_api_bp.route('/workshop/<path:workshop_identifier>/parts', methods=['GET'])
+@display_bp.route('/workshop/<path:workshop_identifier>/parts', methods=['GET'])
+@rate_limit()
 @handle_api_response
 def get_parts_by_workshop_endpoint(workshop_identifier):
     """
@@ -1243,11 +1283,8 @@ def get_parts_by_workshop_endpoint(workshop_identifier):
     return api.universal_search(filters)
 
 
-# ============================================================================
-# ENDPOINTS FOR REFERENCE INFORMATION
-# ============================================================================
-
-@display_api_bp.route('/info/columns', methods=['GET'])
+# ========== ENDPOINTS FOR REFERENCE INFORMATION ==========
+@display_bp.route('/info/columns', methods=['GET'])
 def get_available_columns():
     """GET /api/info/columns - Get list of all available filter columns with range support."""
     return jsonify({
@@ -1331,15 +1368,34 @@ def get_available_columns():
     })
 
 
-@display_api_bp.route('/health', methods=['GET'])
+@display_bp.route('/health', methods=['GET'])
 def health_check():
     """GET /api/health - Health check endpoint."""
     try:
         api = get_db_api()
+
+        # Test database connection
+        db_status = 'disconnected'
+        if api:
+            try:
+                session = api._get_session()
+                session.execute('SELECT 1').scalar()
+                session.close()
+                db_status = 'connected'
+
+            except Exception as e:
+                db_status = f'error: {str(e)}'
+
         return jsonify({
             'status': 'healthy',
             'service': 'Display API',
+            'timestamp': datetime.now().isoformat(),
+            'environment': FLASK_ENV,
+            'cors_mode': 'restricted' if ALLOWED_ORIGINS != '*' else 'open',
+            'cors_origins': ALLOWED_ORIGINS if ALLOWED_ORIGINS != '*' else 'all',
+            'rate_limit': RATE_LIMIT,
             'database_connected': api is not None,
+            'database_status': db_status,
             'features': {
                 'case_insensitive_search': True,
                 'output_normalization': True,
@@ -1347,6 +1403,7 @@ def health_check():
                 'excel_export': True
             }
         })
+
     except Exception as e:
         logger.error("Health check failed: %s", e)
         return jsonify({
@@ -1356,7 +1413,7 @@ def health_check():
         }), 500
 
 
-@display_api_bp.route('/', methods=['GET'])
+@display_bp.route('/', methods=['GET'])
 def api_documentation():
     """GET /api/ - API documentation."""
     return jsonify({
@@ -1442,49 +1499,63 @@ def api_documentation():
     })
 
 
-# ============================================================================
-# INITIALIZATION FUNCTION
-# ============================================================================
-
-def init_display_api(app):
+# ========== FLASK APP SETUP ==========
+def create_app():
     """
-    Initialize Display API with Flask app.
+    Create and configure the Flask application instance.
     
-    This function:
-    1. Creates DatabaseAPI instance
-    2. Stores it in app.extensions['db_api']
-    3. Registers the blueprint
-    
-    Args:
-        app: Flask application instance
-    
+    Sets up:
+    - Secret key for sessions
+    - CORS for Browser Security Policy
+    - Security headers
+    - Blueprint registration
+    - Rate limiter initialization
+    - Database connection
+
     Returns:
-        Flask app with registered blueprint
-        
-    Raises:
-        TypeError: If app is not a Flask application instance
-        ValueError: If app is None
+        Flask: Configured Flask application instance
     """
-    if app is None:
-        raise ValueError("Flask application instance cannot be None")
+    app = Flask(__name__)
+    app.secret_key = FLASK_SECRET_KEY
 
-    if not hasattr(app, 'extensions'):
-        raise TypeError("Invalid Flask application instance")
+    # ========== CORS CONFIGURATION ==========
+    if ALLOWED_ORIGINS == "*":
+        CORS(app)
+        logger.debug("CORS: Allowing all origins (development mode)")
+    else:
+        allowed_origins_list = [origin.strip() for origin in ALLOWED_ORIGINS.split(',')]
+        CORS(app, origins=allowed_origins_list, supports_credentials=True)
+        logger.info("CORS: Restricted to %d origins", len(allowed_origins_list))
 
-    # Initialize database connection
+    # ========== SECURITY HEADERS ==========
+    @app.after_request
+    def add_security_headers(response):
+        if IS_PRODUCTION:
+            response.headers.add('X-Content-Type-Options', 'nosniff')
+            response.headers.add('X-Frame-Options', 'DENY')
+            response.headers.add('X-XSS-Protection', '1; mode=block')
+        return response
+
+    # ========== REGISTER BLUEPRINT ==========
+    app.register_blueprint(display_bp)
+
+    # ========== RATE LIMITING ==========
+    limiter.init_app(app)
+
+    # ========== DATABASE CONNECTION ==========
     try:
         engine = initialize_database(create_tables=False)
 
         if engine:
-            # Create DatabaseAPI instance
             try:
                 db_api = DatabaseAPI(engine)
-                # Store in app.extensions (Flask's extension storage)
                 app.extensions['db_api'] = db_api
                 logger.info("DatabaseAPI initialized and stored in app.extensions")
+
             except (ValueError, SQLAlchemyError) as e:
                 logger.error("Failed to create DatabaseAPI instance: %s", e)
                 app.extensions['db_api'] = None
+
         else:
             logger.error("Failed to initialize database connection (engine is None)")
             app.extensions['db_api'] = None
@@ -1497,18 +1568,38 @@ def init_display_api(app):
         logger.error("Unexpected error during database initialization: %s", e, exc_info=True)
         app.extensions['db_api'] = None
 
-    # Register blueprint
-    try:
-        app.register_blueprint(display_api_bp)
-
-    except (ValueError, TypeError, RuntimeError) as e:
-        logger.error("Failed to register blueprint: %s", e)
-        raise
-
-    # Log registered routes
+    # ========== LOG REGISTERED ROUTES ==========
     logger.info("Display API endpoints registered:")
     for rule in app.url_map.iter_rules():
-        if rule.endpoint and rule.endpoint.startswith('display_api'):
-            logger.info("  %s -> %s", rule, rule.endpoint)
+        if rule.endpoint and rule.endpoint.startswith('display'):
+            if rule.methods:
+                methods = sorted([m for m in rule.methods if m not in {'HEAD', 'OPTIONS'}])
+                methods_str = ','.join(methods) if methods else 'NONE'
+            else:
+                methods_str = 'NONE'
+
+            logger.info("  %-50s %s -> [%s]", rule, rule.endpoint, methods_str)
 
     return app
+
+# ========== CREATE APP INSTANCE ==========
+app = create_app()
+
+
+# ========== MAIN ENTRY POINT ==========
+if __name__ == '__main__':
+    logger.info("="*60)
+    logger.info("Starting Display API on %s:%s", FLASK_HOST, FLASK_PORT)
+    logger.info("Environment: %s", FLASK_ENV)
+    logger.info("CORS mode: %s", 'restricted' if ALLOWED_ORIGINS != '*' else 'open')
+    logger.info("CORS origins: %s", ALLOWED_ORIGINS)
+    logger.info("Rate limit: %s", RATE_LIMIT)
+    logger.info("Debug mode: %s", FLASK_DEBUG)
+    logger.info("="*60)
+
+    app.run(
+        host=FLASK_HOST,
+        port=FLASK_PORT,
+        debug=FLASK_DEBUG,
+        threaded=True
+    )
