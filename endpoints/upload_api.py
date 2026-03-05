@@ -75,6 +75,7 @@ import xlrd
 import openpyxl
 from oletools.olevba import VBA_Parser
 from flask import Blueprint, Flask, jsonify, request, session
+from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
@@ -116,6 +117,9 @@ FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
 # Defining the environment (default is development)
 FLASK_ENV = os.getenv('FLASK_ENV', 'development')
 IS_PRODUCTION = FLASK_ENV == 'production'
+
+# CORS configuration
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
 
 # Admin authentication (simplified - in production use proper auth)
 ADMIN_API_KEY = os.getenv('ADMIN_API_KEY', 'change-me-in-production')
@@ -300,6 +304,9 @@ else:
     if 'temp_stats' in clamav_stats:
         logger.info("Temp files: %s", clamav_stats['temp_stats'].get('files_count', 0))
 
+# ========== CREATING BLUEPRINT ==========
+upload_bp = Blueprint('upload', __name__)
+
 # ========== RATE LIMITING SETUP ==========
 limiter = Limiter(
     key_func=get_remote_address,
@@ -308,8 +315,33 @@ limiter = Limiter(
     strategy="fixed-window"
 )
 
-# ========== CREATING BLUEPRINT ==========
-upload_bp = Blueprint('upload', __name__)
+
+# ========== RATE LIMITING DECORATOR ==========
+def rate_limit(limit_string: Optional[str] = None):
+    """
+    Decorator factory for applying rate limits to endpoints.
+    
+    Wraps Flask routes with Flask-Limiter's rate limiting functionality.
+    
+    Args:
+        limit_string (Optional[str]): Rate limit string (e.g., "10 per minute").
+                                     If None, uses default RATE_LIMIT setting.
+                                     
+    Returns:
+        Callable: Decorated function with rate limiting applied
+        
+    Example:
+        >>> @rate_limit("5 per minute")
+        ... def my_endpoint():
+        ...     return jsonify({"message": "ok"})
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            return limiter.limit(limit_string or RATE_LIMIT)(f)(*args, **kwargs)
+        return wrapped
+    return decorator
+
 
 # ========== ADMIN AUTHENTICATION DECORATOR ==========
 def admin_required(f):
@@ -968,33 +1000,6 @@ def cleanup_old_files(target_dir: Path, hours: int) -> int:
         return 0
 
 
-# ========== RATE LIMITING DECORATOR ==========
-def rate_limit(limit_string: Optional[str] = None):
-    """
-    Decorator factory for applying rate limits to endpoints.
-    
-    Wraps Flask routes with Flask-Limiter's rate limiting functionality.
-    
-    Args:
-        limit_string (Optional[str]): Rate limit string (e.g., "10 per minute").
-                                     If None, uses default RATE_LIMIT setting.
-                                     
-    Returns:
-        Callable: Decorated function with rate limiting applied
-        
-    Example:
-        >>> @rate_limit("5 per minute")
-        ... def my_endpoint():
-        ...     return jsonify({"message": "ok"})
-    """
-    def decorator(f):
-        @wraps(f)
-        def wrapped(*args, **kwargs):
-            return limiter.limit(limit_string or RATE_LIMIT)(f)(*args, **kwargs)
-        return wrapped
-    return decorator
-
-
 # ========== API ENDPOINTS ==========
 @upload_bp.route('/health', methods=['GET'])
 def health_check():
@@ -1015,6 +1020,8 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
+        'environment': FLASK_ENV,
+        'cors_mode': 'restricted' if IS_PRODUCTION and ALLOWED_ORIGINS != '*' else 'open',
         'clamav_available': clamav_scanner.is_available(),
         'upload_dir_exists': UPLOAD_DIR.exists(),
         'upload_dir_writable': os.access(UPLOAD_DIR, os.W_OK) if UPLOAD_DIR.exists() else False
@@ -1917,6 +1924,7 @@ def create_app():
     - Secret key for sessions
     - Maximum content length
     - Upload folder configuration
+    - CORS for Browser Security Policy
     - Blueprint registration
     - Rate limiter initialization
     - Background cleanup thread
@@ -1926,22 +1934,65 @@ def create_app():
     """
     app = Flask(__name__)
     app.secret_key = FLASK_SECRET_KEY
+
+    # ========== CORS CONFIGURATION ==========
+    if ALLOWED_ORIGINS == "*":
+        CORS(app)
+        logger.debug("CORS: Allowing all origins (development mode)")
+    else:
+        allowed_origins_list = [origin.strip() for origin in ALLOWED_ORIGINS.split(',')]
+        CORS(app, origins=allowed_origins_list, supports_credentials=True)
+        logger.info("CORS: Restricted to %d origins", len(allowed_origins_list))
+
     app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
     app.config['UPLOAD_FOLDER'] = str(UPLOAD_DIR)
 
+    # ========== SECURITY HEADERS ==========
+    @app.after_request
+    def add_security_headers(response):
+        if IS_PRODUCTION:
+            response.headers.add('X-Content-Type-Options', 'nosniff')
+            response.headers.add('X-Frame-Options', 'DENY')
+            response.headers.add('X-XSS-Protection', '1; mode=block')
+        return response
+
+    # ========== REGISTER BLUEPRINT ==========
     app.register_blueprint(upload_bp)
+
+    # ========== RATE LIMITING ==========
     limiter.init_app(app)
+
     start_background_cleanup()
+
+    # ========== LOG REGISTERED ROUTES ==========
+    logger.info("Upload API endpoints registered:")
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint and rule.endpoint.startswith('upload'):
+            if rule.methods:
+                methods = sorted([m for m in rule.methods if m not in {'HEAD', 'OPTIONS'}])
+                methods_str = ','.join(methods) if methods else 'NONE'
+            else:
+                methods_str = 'NONE'
+
+            logger.info("  %-50s %s -> [%s]", rule, rule.endpoint, methods_str)
 
     return app
 
+# ========== CREATE APP INSTANCE ==========
 app = create_app()
 
+
+# ========== MAIN ENTRY POINT ==========
 if __name__ == '__main__':
+    logger.info("="*60)
     logger.info("Starting Upload API on %s:%s", FLASK_HOST, FLASK_PORT)
     logger.info("Environment: %s", FLASK_ENV)
-    logger.info("Max file size: %d MB", MAX_FILE_SIZE_MB)
+    logger.info("CORS mode: %s", 'restricted' if ALLOWED_ORIGINS != '*' else 'open')
+    logger.info("CORS origins: %s", ALLOWED_ORIGINS)
     logger.info("Rate limit: %s", RATE_LIMIT)
+    logger.info("Debug mode: %s", FLASK_DEBUG)
+    logger.info("Max file size: %d MB", MAX_FILE_SIZE_MB)
+    logger.info("="*60)
 
     app.run(
         host=FLASK_HOST,
