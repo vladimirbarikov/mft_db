@@ -51,7 +51,6 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
-    # - ${AIRFLOW_PROJ_DIR:-.}/endpoints:/opt/airflow/endpoints will be mounted after all endpoints are written
   user: "${AIRFLOW_UID:-1000}:${AIRFLOW_GID:-0}"
   depends_on:
     &airflow-common-depends-on
@@ -78,6 +77,14 @@ x-api-common:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-}
       FLASK_DEBUG: ${FLASK_DEBUG:-false}
       FLASK_ENV: ${FLASK_ENV:-development}
+      # CORS (Cross-Origin Resource Sharing) settings
+      # Controls which websites can access this API from browsers
+      # Development: "*" (allow all - localhost, 127.0.0.1)
+      # Production: comma-separated list of allowed domains (e.g., https://app.company.com)
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      # Rate limiting settings
+      RATE_LIMIT: ${RATE_LIMIT:-10 per minute}          # Global rate limit for all endpoints
+      RATE_LIMIT_STORAGE_URL: ${RATE_LIMIT_STORAGE_URL:-memory://}
       # Airflow connection
       AIRFLOW_API_URL: http://airflow-webserver:8080/api/v1
       AIRFLOW_USER: ${AIRFLOW_USER:-admin}
@@ -118,14 +125,14 @@ services:
     image: postgres:13
     container_name: airflow_db
     environment:
-      POSTGRES_USER: ${AIRFLOW_USER:-airflow}
+      POSTGRES_USER: ${AIRFLOW_USER:-admin}
       POSTGRES_PASSWORD: ${AIRFLOW_PASSWORD:-airflow}
       POSTGRES_DB: ${AIRFLOW_DB:-airflow}
       TZ: 'Europe/Moscow'
     volumes:
       - airflow_db_volume:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${AIRFLOW_USER:-airflow}"]
+      test: ["CMD", "pg_isready", "-U", "${AIRFLOW_USER:-admin}"]
       interval: 10s
       retries: 5
       start_period: 5s
