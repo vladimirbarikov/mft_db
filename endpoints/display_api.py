@@ -303,11 +303,11 @@ class DatabaseAPI:
                 "status": "database_error",
                 "success": False
             }
-        except Exception as e:
+        except Exception as unexpected_error:
             session.rollback()
-            logger.error("Unexpected error in database query: %s", e, exc_info=True)
+            logger.error("Unexpected error in database query: %s", unexpected_error, exc_info=True)
             return {
-                "error": f"Unexpected error: {str(e)}",
+                "error": f"Unexpected error: {str(unexpected_error)}",
                 "status": "unexpected_error",
                 "success": False
             }
@@ -850,35 +850,128 @@ class DatabaseAPI:
                 "status": "export_error"
             }
 
+    def check_connection(self) -> bool:
+        """
+        Check if database connection is alive.
+        
+        Returns:
+            bool: True if connection is working, False otherwise
+        """
+        def _check(session):
+            try:
+                session.execute('SELECT 1').scalar()
+                return True
+            except Exception:
+                return False
+
+        result = self._safe_query(_check)
+        return result is True
+
 
 # ========== FLASK ENDPOINTS ==========
 def get_db_api() -> Optional[DatabaseAPI]:
     """
     Get DatabaseAPI instance from Flask application context.
+    If not initialized or connection lost, attempt to reconnect.
     
     Returns:
-        DatabaseAPI instance or None if not initialized
+        DatabaseAPI instance or None if not available
         
-    Raises:
-        RuntimeError: If called outside of application context
+    Note:
+        Attempts to reconnect if connection is lost or was never established.
+        Only logs errors without raising exceptions to keep the API responsive.
     """
     try:
-        if 'db_api' not in current_app.extensions:
-            logger.error("DatabaseAPI not initialized in application context")
+        # Check existing connection
+        if 'db_api' in current_app.extensions and current_app.extensions['db_api'] is not None:
+            # Check if the session is still alive
+            db_api = current_app.extensions['db_api']
+
+            if db_api.check_connection():
+                return db_api
+            else:
+                logger.warning("Database connection check failed, will attempt to reconnect")
+                current_app.extensions['db_api'] = None
+
+        # Try to reconnect (if there is no connection or it has been reset)
+        logger.info("Attempting to (re)connect to database...")
+        engine = initialize_database(create_tables=False)
+
+        if engine:
+            try:
+                db_api = DatabaseAPI(engine)
+                current_app.extensions['db_api'] = db_api
+                logger.info("Successfully (re)connected to database")
+                return db_api
+
+            except ValueError as e:
+                logger.error("Failed to create DatabaseAPI instance: %s", e)
+                current_app.extensions['db_api'] = None
+                return None
+
+            except SQLAlchemyError as e:
+                logger.error("SQLAlchemy error creating DatabaseAPI: %s", e)
+                current_app.extensions['db_api'] = None
+                return None
+
+            except Exception as unexpected_error:
+                logger.error("Unexpected error creating DatabaseAPI: %s", unexpected_error, exc_info=True)
+                current_app.extensions['db_api'] = None
+                return None
+
+        else:
+            logger.debug("Database engine not available (this is normal if DB is starting up)")
+            current_app.extensions['db_api'] = None
             return None
 
-        return current_app.extensions['db_api']
+    except OperationalError as e:
+        logger.debug("Database not ready yet: %s", e)
+        current_app.extensions['db_api'] = None
+        return None
+
+    except ProgrammingError as e:
+        # Check if the error is related to missing tables
+        error_msg = str(e.orig) if e.orig else str(e)
+        if 'does not exist' in error_msg.lower() or ('relation' in error_msg.lower() and 'does not exist' in error_msg.lower()):
+            logger.debug("Tables not yet created")
+        else:
+            logger.warning("Programming error during database initialization: %s", e)
+        current_app.extensions['db_api'] = None
+        return None
+
+    except ConnectionError as e:
+        logger.debug("Connection error to database: %s", e)
+        current_app.extensions['db_api'] = None
+        return None
+
+    except SQLAlchemyError as e:
+        logger.warning("SQLAlchemy error during database initialization: %s", e)
+        current_app.extensions['db_api'] = None
+        return None
+
     except RuntimeError as e:
         logger.error("Called outside of application context: %s", e)
         return None
 
+    except KeyError as e:
+        logger.error("KeyError accessing app.extensions: %s", e)
+        return None
 
-def handle_api_response(func):
+    except AttributeError as e:
+        logger.error("AttributeError accessing current_app: %s", e)
+        return None
+
+    except Exception as unexpected_error:
+        logger.error("Unexpected global error in get_db_api: %s", unexpected_error, exc_info=True)
+        return None
+
+
+def handle_api_response(f):
     """Decorator to handle API responses and errors."""
-    @wraps(func)
+    @wraps(f)
     def wrapper(*args, **kwargs):
         try:
-            result = func(*args, **kwargs)
+            result = f(*args, **kwargs)
 
             if isinstance(result, tuple):
                 return result
@@ -932,12 +1025,24 @@ def handle_api_response(func):
             }), 503
 
         except ProgrammingError as e:
-            logger.error("Programming error in API request: %s", e)
-            return jsonify({
-                'error': 'Database programming error (invalid syntax or object)',
-                'success': False,
-                'status': 'programming_error'
-            }), 500
+            # Check if the error is related to the missing table
+            error_msg = str(e.orig) if e.orig else str(e)
+            if 'does not exist' in error_msg.lower() or ('relation' in error_msg.lower() and 'does not exist' in error_msg.lower()):
+                logger.info("Database tables not yet created, returning empty result")
+                return jsonify({
+                    'success': True,
+                    'found': False,
+                    'message': 'No data available – database tables are not created yet. Please run ETL first.',
+                    'data': []
+                }), 200
+            else:
+                logger.error("Programming error in API request: %s", e)
+                return jsonify({
+                    'error': 'Database programming error',
+                    'detail': error_msg,
+                    'success': False,
+                    'status': 'programming_error'
+                }), 500
 
         except InvalidRequestError as e:
             logger.error("Invalid request error in API request: %s", e)
@@ -987,8 +1092,8 @@ def handle_api_response(func):
                 'status': 'error'
             }), 500
 
-        except Exception as e:
-            logger.error("Unexpected API error: %s", e, exc_info=True)
+        except Exception as unexpected_error:
+            logger.error("Unexpected API error: %s", unexpected_error, exc_info=True)
             return jsonify({
                 'error': 'An unexpected error occurred',
                 'success': False,
@@ -1370,21 +1475,20 @@ def get_available_columns():
 
 @display_bp.route('/health', methods=['GET'])
 def health_check():
-    """GET /api/health - Health check endpoint."""
+    """
+    GET /api/health - Health check endpoint.
+    Health check endpoint – always returns 200, even if DB is not ready.
+    """
     try:
         api = get_db_api()
 
         # Test database connection
         db_status = 'disconnected'
         if api:
-            try:
-                session = api._get_session()
-                session.execute('SELECT 1').scalar()
-                session.close()
+            if api.check_connection():
                 db_status = 'connected'
-
-            except Exception as e:
-                db_status = f'error: {str(e)}'
+            else:
+                db_status = 'connection_failed'
 
         return jsonify({
             'status': 'healthy',
@@ -1394,7 +1498,6 @@ def health_check():
             'cors_mode': 'restricted' if ALLOWED_ORIGINS != '*' else 'open',
             'cors_origins': ALLOWED_ORIGINS if ALLOWED_ORIGINS != '*' else 'all',
             'rate_limit': RATE_LIMIT,
-            'database_connected': api is not None,
             'database_status': db_status,
             'features': {
                 'case_insensitive_search': True,
@@ -1402,15 +1505,15 @@ def health_check():
                 'range_queries': True,
                 'excel_export': True
             }
-        })
+        }), 200
 
     except Exception as e:
         logger.error("Health check failed: %s", e)
         return jsonify({
-            'status': 'unhealthy',
+            'status': 'degraded',
             'service': 'Display API',
             'error': str(e)
-        }), 500
+        }), 200
 
 
 @display_bp.route('/', methods=['GET'])
@@ -1564,8 +1667,8 @@ def create_app():
         logger.error("Database connection error during initialization: %s", e)
         app.extensions['db_api'] = None
 
-    except Exception as e:
-        logger.error("Unexpected error during database initialization: %s", e, exc_info=True)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error during database initialization: %s", unexpected_error, exc_info=True)
         app.extensions['db_api'] = None
 
     # ========== LOG REGISTERED ROUTES ==========
