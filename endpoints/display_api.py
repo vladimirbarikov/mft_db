@@ -14,7 +14,7 @@ Version: 1.0.0
 Compatibility: Python 3.12.3
 Maintainer: PLD Engineering Center
 Created: 2026-03-02
-Last Modified: 2026-03-02
+Last Modified: 2026-03-06
 License: MIT
 Status: Production
 """
@@ -29,17 +29,17 @@ from typing import Dict, Any, Optional
 from functools import wraps
 
 # Third-party imports
+import polars as pl
 from flask import Blueprint, Flask, request, jsonify, current_app, send_file
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import func
+from sqlalchemy import String
 from sqlalchemy.orm import sessionmaker, joinedload, selectinload
 from sqlalchemy.exc import (
     SQLAlchemyError, IntegrityError, DataError, StatementError,
     OperationalError, ProgrammingError, InvalidRequestError
 )
-import polars as pl
 
 # The relative path to the root project directory
 try:
@@ -74,7 +74,7 @@ if not FLASK_SECRET_KEY:
     raise RuntimeError("FLASK_SECRET_KEY must be set in .env file")
 
 FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
-FLASK_PORT = int(os.getenv('FLASK_PORT', '5003'))
+FLASK_PORT = int(os.getenv('FLASK_PORT', '5000'))
 FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
 
 # Defining the environment (default is development)
@@ -203,6 +203,12 @@ class DatabaseAPI:
     Supports range queries for numeric fields.
     """
 
+    # List of ENUM fields
+    ENUM_FIELDS = [
+        'workshop_code', 'workshop_name', 'model_code', 'model_name',
+        'localization', 'box_type', 'pallet_type'
+    ]
+
     def __init__(self, engine):
         """
         Initialize with database engine.
@@ -314,6 +320,31 @@ class DatabaseAPI:
         finally:
             session.close()
 
+    def _apply_filter(self, query, field, value, is_enum=False):
+        """
+        Smart application of the filter, taking into account the type of field.
+        
+        Args:
+            query: SQLAlchemy query object
+            field: A field for filtering
+            value: The value for the search
+            is_enum: Is the ENUM field a type
+            
+        Returns:
+            Modified query
+        """
+        if value is None or value == "":
+            return query
+
+        str_value = str(value)
+
+        if is_enum:
+            # For ENUM fields - exact match (case-insensitive)
+            return query.filter(field.cast(String).ilike(str_value))
+        else:
+            # For non-ENUM fields - partial match
+            return query.filter(field.ilike(f"%{str_value}%"))
+
     def universal_search(
             self,
             filters: Dict[str, Any]
@@ -367,9 +398,9 @@ class DatabaseAPI:
 
                 # ===== PART DATA filters =====
                 if key == "part_number":
-                    query = query.filter(PartData.part_number.ilike(f"%{str_value}%"))
+                    query = self._apply_filter(query, PartData.part_number, value, is_enum=False)
                 elif key == "part_name":
-                    query = query.filter(PartData.part_name.ilike(f"%{str_value}%"))
+                    query = self._apply_filter(query, PartData.part_name, value, is_enum=False)
                 elif key == "part_weight_kg_min":
                     query = query.filter(PartData.part_weight_kg >= float(value))
                 elif key == "part_weight_kg_max":
@@ -384,28 +415,28 @@ class DatabaseAPI:
                         joined_supplier = True
 
                     if key == "supplier_name":
-                        query = query.filter(
-                            SupplierData.supplier_name.ilike(f"%{str_value}%")
+                        query = self._apply_filter(
+                            query, SupplierData.supplier_name, value, is_enum=False
                         )
                     elif key == "location":
-                        query = query.filter(
-                            SupplierData.location.ilike(f"%{str_value}%")
+                        query = self._apply_filter(
+                            query, SupplierData.location, value, is_enum=False
                         )
                     elif key == "city":
-                        query = query.filter(
-                            SupplierData.city.ilike(f"%{str_value}%")
+                        query = self._apply_filter(
+                            query, SupplierData.city, value, is_enum=False
                         )
                     elif key == "street":
-                        query = query.filter(
-                            SupplierData.street.ilike(f"%{str_value}%")
+                        query = self._apply_filter(
+                            query, SupplierData.street, value, is_enum=False
                         )
                     elif key == "building":
-                        query = query.filter(
-                            SupplierData.building.ilike(f"%{str_value}%")
+                        query = self._apply_filter(
+                            query, SupplierData.building, value, is_enum=False
                         )
                     elif key == "localization":
-                        query = query.filter(
-                            func.lower(SupplierData.localization) == str_value.lower()
+                        query = self._apply_filter(
+                            query, SupplierData.localization, value, is_enum=True
                         )
 
                 # ===== MODEL filters =====
@@ -419,13 +450,21 @@ class DatabaseAPI:
                         joined_model = True
 
                     if key == "model_code":
-                        query = query.filter(func.lower(ModelData.model_code) == str_value.lower())
+                        query = self._apply_filter(
+                            query, ModelData.model_code, value, is_enum=True
+                        )
                     elif key == "model_name":
-                        query = query.filter(func.lower(ModelData.model_name) == str_value.lower())
+                        query = self._apply_filter(
+                            query, ModelData.model_name, value, is_enum=True
+                        )
                     elif key == "configuration":
-                        query = query.filter(PartToModel.configuration.ilike(f"%{str_value}%"))
+                        query = self._apply_filter(
+                            query, PartToModel.configuration, value, is_enum=False
+                        )
                     elif key == "part_per_vehicle":
-                        query = query.filter(PartToModel.part_per_vehicle == int(value))
+                        query = query.filter(
+                            PartToModel.part_per_vehicle == int(value)
+                        )
 
                 # ===== LINE & WORKSHOP filters =====
                 elif key in ["line_code", "line_name", "workshop_code", "workshop_name"]:
@@ -445,16 +484,20 @@ class DatabaseAPI:
                         joined_workshop = True
 
                     if key == "line_code":
-                        query = query.filter(func.lower(LineData.line_code) == str_value.lower())
+                        query = self._apply_filter(
+                            query, LineData.line_code, value, is_enum=False
+                        )
                     elif key == "line_name":
-                        query = query.filter(LineData.line_name.ilike(f"%{str_value}%"))
+                        query = self._apply_filter(
+                            query, LineData.line_name, value, is_enum=False
+                        )
                     elif key == "workshop_code":
-                        query = query.filter(
-                            func.lower(WorkshopData.workshop_code) == str_value.lower()
+                        query = self._apply_filter(
+                            query, WorkshopData.workshop_code, value, is_enum=True
                         )
                     elif key == "workshop_name":
-                        query = query.filter(
-                            func.lower(WorkshopData.workshop_name) == str_value.lower()
+                        query = self._apply_filter(
+                            query, WorkshopData.workshop_name, value, is_enum=True
                         )
 
                 # ===== BOX filters =====
@@ -476,45 +519,77 @@ class DatabaseAPI:
                         joined_box = True
 
                     if key == "part_per_box":
-                        query = query.filter(PartToBox.part_per_box == int(value))
+                        query = query.filter(
+                            PartToBox.part_per_box == int(value)
+                        )
                     elif key == "box_type":
-                        query = query.filter(func.lower(BoxData.box_type) == str_value.lower())
+                        query = self._apply_filter(
+                            query, BoxData.box_type, value, is_enum=True
+                        )
 
                     # Box weight ranges
                     elif key == "box_weight_kg_min":
-                        query = query.filter(BoxData.box_weight_kg >= float(value))
+                        query = query.filter(
+                            BoxData.box_weight_kg >= float(value)
+                        )
                     elif key == "box_weight_kg_max":
-                        query = query.filter(BoxData.box_weight_kg <= float(value))
+                        query = query.filter(
+                            BoxData.box_weight_kg <= float(value)
+                        )
 
                     # Box dimension ranges
                     elif key == "box_length_mm_min":
-                        query = query.filter(BoxData.box_length_mm >= int(value))
+                        query = query.filter(
+                            BoxData.box_length_mm >= int(value)
+                        )
                     elif key == "box_length_mm_max":
-                        query = query.filter(BoxData.box_length_mm <= int(value))
+                        query = query.filter(
+                            BoxData.box_length_mm <= int(value)
+                        )
                     elif key == "box_width_mm_min":
-                        query = query.filter(BoxData.box_width_mm >= int(value))
+                        query = query.filter(
+                            BoxData.box_width_mm >= int(value)
+                        )
                     elif key == "box_width_mm_max":
-                        query = query.filter(BoxData.box_width_mm <= int(value))
+                        query = query.filter(
+                            BoxData.box_width_mm <= int(value)
+                        )
                     elif key == "box_height_mm_min":
-                        query = query.filter(BoxData.box_height_mm >= int(value))
+                        query = query.filter(
+                            BoxData.box_height_mm >= int(value)
+                        )
                     elif key == "box_height_mm_max":
-                        query = query.filter(BoxData.box_height_mm <= int(value))
+                        query = query.filter(
+                            BoxData.box_height_mm <= int(value)
+                        )
 
                     # Box volume/area ranges (computed columns)
                     elif key == "box_vol_m3_min":
-                        query = query.filter(BoxData.box_vol_m3 >= float(value))
+                        query = query.filter(
+                            BoxData.box_vol_m3 >= float(value)
+                        )
                     elif key == "box_vol_m3_max":
-                        query = query.filter(BoxData.box_vol_m3 <= float(value))
+                        query = query.filter(
+                            BoxData.box_vol_m3 <= float(value)
+                        )
                     elif key == "box_area_m2_min":
-                        query = query.filter(BoxData.box_area_m2 >= float(value))
+                        query = query.filter(
+                            BoxData.box_area_m2 >= float(value)
+                        )
                     elif key == "box_area_m2_max":
-                        query = query.filter(BoxData.box_area_m2 <= float(value))
+                        query = query.filter(
+                            BoxData.box_area_m2 <= float(value)
+                        )
 
                     # Box stacking ranges
                     elif key == "box_stacking_min":
-                        query = query.filter(BoxData.box_stacking >= int(value))
+                        query = query.filter(
+                            BoxData.box_stacking >= int(value)
+                        )
                     elif key == "box_stacking_max":
-                        query = query.filter(BoxData.box_stacking <= int(value))
+                        query = query.filter(
+                            BoxData.box_stacking <= int(value)
+                        )
 
                 # ===== PALLET filters =====
                 elif key in ["box_per_pallet", "pallet_type",
@@ -543,47 +618,77 @@ class DatabaseAPI:
                         joined_pallet = True
 
                     if key == "box_per_pallet":
-                        query = query.filter(BoxToPallet.box_per_pallet == int(value))
-                    elif key == "pallet_type":
                         query = query.filter(
-                            func.lower(PalletData.pallet_type) == str_value.lower()
+                            BoxToPallet.box_per_pallet == int(value)
+                        )
+                    elif key == "pallet_type":
+                        query = self._apply_filter(
+                            query, PalletData.pallet_type, value, is_enum=True
                         )
 
                     # Pallet weight ranges
                     elif key == "pallet_weight_kg_min":
-                        query = query.filter(PalletData.pallet_weight_kg >= float(value))
+                        query = query.filter(
+                            PalletData.pallet_weight_kg >= float(value)
+                        )
                     elif key == "pallet_weight_kg_max":
-                        query = query.filter(PalletData.pallet_weight_kg <= float(value))
+                        query = query.filter(
+                            PalletData.pallet_weight_kg <= float(value)
+                        )
 
                     # Pallet dimension ranges
                     elif key == "pallet_length_mm_min":
-                        query = query.filter(PalletData.pallet_length_mm >= int(value))
+                        query = query.filter(
+                            PalletData.pallet_length_mm >= int(value)
+                        )
                     elif key == "pallet_length_mm_max":
-                        query = query.filter(PalletData.pallet_length_mm <= int(value))
+                        query = query.filter(
+                            PalletData.pallet_length_mm <= int(value)
+                        )
                     elif key == "pallet_width_mm_min":
-                        query = query.filter(PalletData.pallet_width_mm >= int(value))
+                        query = query.filter(
+                            PalletData.pallet_width_mm >= int(value)
+                        )
                     elif key == "pallet_width_mm_max":
-                        query = query.filter(PalletData.pallet_width_mm <= int(value))
+                        query = query.filter(
+                            PalletData.pallet_width_mm <= int(value)
+                        )
                     elif key == "pallet_height_mm_min":
-                        query = query.filter(PalletData.pallet_height_mm >= int(value))
+                        query = query.filter(
+                            PalletData.pallet_height_mm >= int(value)
+                        )
                     elif key == "pallet_height_mm_max":
-                        query = query.filter(PalletData.pallet_height_mm <= int(value))
+                        query = query.filter(
+                            PalletData.pallet_height_mm <= int(value)
+                        )
 
                     # Pallet volume/area ranges (computed columns)
                     elif key == "pallet_vol_m3_min":
-                        query = query.filter(PalletData.pallet_vol_m3 >= float(value))
+                        query = query.filter(
+                            PalletData.pallet_vol_m3 >= float(value)
+                        )
                     elif key == "pallet_vol_m3_max":
-                        query = query.filter(PalletData.pallet_vol_m3 <= float(value))
+                        query = query.filter(
+                            PalletData.pallet_vol_m3 <= float(value)
+                        )
                     elif key == "pallet_area_m2_min":
-                        query = query.filter(PalletData.pallet_area_m2 >= float(value))
+                        query = query.filter(
+                            PalletData.pallet_area_m2 >= float(value)
+                        )
                     elif key == "pallet_area_m2_max":
-                        query = query.filter(PalletData.pallet_area_m2 <= float(value))
+                        query = query.filter(
+                            PalletData.pallet_area_m2 <= float(value)
+                        )
 
                     # Pallet stacking ranges
                     elif key == "pallet_stacking_min":
-                        query = query.filter(PalletData.pallet_stacking >= int(value))
+                        query = query.filter(
+                            PalletData.pallet_stacking >= int(value)
+                        )
                     elif key == "pallet_stacking_max":
-                        query = query.filter(PalletData.pallet_stacking <= int(value))
+                        query = query.filter(
+                            PalletData.pallet_stacking <= int(value)
+                        )
 
             # Execute query with all necessary eager loading
             parts = query.options(
@@ -1170,7 +1275,6 @@ def universal_search_endpoint():
     return api.universal_search(processed_filters)
 
 
-
 # ========== EXPORT TO EXCEL ENDPOINT ==========
 @display_bp.route('/export', methods=['POST'])
 @rate_limit()
@@ -1281,111 +1385,6 @@ def export_to_excel_endpoint():
             except OSError as e2:
                 logger.warning("OS error when cleaning up %s: %s", result['file_path'], e2)
         raise
-
-# ========== SPECIALIZED ENDPOINTS ==========
-@display_bp.route('/part/<path:part_number>', methods=['GET'])
-@rate_limit()
-@handle_api_response
-def get_part_by_number_endpoint(part_number):
-    """
-    GET /api/part/{part_number}
-    Shortcut for searching by part number (case-insensitive).
-    """
-    api = get_db_api()
-    if not api:
-        return jsonify({
-            'error': 'Database connection not available',
-            'success': False,
-            'status': 'service_unavailable'
-        }), 503
-
-    if not part_number or not isinstance(part_number, str):
-        raise ValueError("Part number must be a non-empty string")
-
-    filters = {'part_number': part_number}
-    return api.universal_search(filters)
-
-
-@display_bp.route('/line/<path:line_identifier>/parts', methods=['GET'])
-@rate_limit()
-@handle_api_response
-def get_parts_by_line_endpoint(line_identifier):
-    """
-    GET /api/line/{line_identifier}/parts?localization=yes|no&weight_min=1&weight_max=3
-    Shortcut for searching by line (case-insensitive) with optional ranges.
-    """
-    api = get_db_api()
-    if not api:
-        return jsonify({
-            'error': 'Database connection not available',
-            'success': False,
-            'status': 'service_unavailable'
-        }), 503
-
-    if not line_identifier or not isinstance(line_identifier, str):
-        raise ValueError("Line identifier must be a non-empty string")
-
-    filters = {}
-
-    # Try to interpret as line code or name (search both)
-    filters['line_code'] = line_identifier
-    filters['line_name'] = line_identifier
-
-    # Add optional filters
-    optional_filters = [
-        'localization', 'part_weight_kg_min', 'part_weight_kg_max',
-        'box_length_mm_min', 'box_length_mm_max', 'box_width_mm_min',
-        'box_width_mm_max', 'box_height_mm_min', 'box_height_mm_max',
-        'box_vol_m3_min', 'box_vol_m3_max', 'box_area_m2_min', 'box_area_m2_max'
-    ]
-
-    for opt in optional_filters:
-        value = request.args.get(opt)
-        if value:
-            filters[opt] = value
-
-    return api.universal_search(filters)
-
-
-@display_bp.route('/workshop/<path:workshop_identifier>/parts', methods=['GET'])
-@rate_limit()
-@handle_api_response
-def get_parts_by_workshop_endpoint(workshop_identifier):
-    """
-    GET /api/workshop/{workshop_identifier}/parts?localization=yes|no&weight_min=1&weight_max=3
-    Shortcut for searching by workshop (case-insensitive) with optional ranges.
-    """
-    api = get_db_api()
-    if not api:
-        return jsonify({
-            'error': 'Database connection not available',
-            'success': False,
-            'status': 'service_unavailable'
-        }), 503
-
-    if not workshop_identifier or not isinstance(workshop_identifier, str):
-        raise ValueError("Workshop identifier must be a non-empty string")
-
-    filters = {}
-
-    # Try to interpret as workshop code or name (search both)
-    filters['workshop_code'] = workshop_identifier
-    filters['workshop_name'] = workshop_identifier
-
-    # Add optional filters
-    optional_filters = [
-        'localization', 'part_weight_kg_min', 'part_weight_kg_max',
-        'box_length_mm_min', 'box_length_mm_max', 'box_width_mm_min',
-        'box_width_mm_max', 'box_height_mm_min', 'box_height_mm_max',
-        'box_vol_m3_min', 'box_vol_m3_max', 'box_area_m2_min', 'box_area_m2_max'
-    ]
-
-    for opt in optional_filters:
-        value = request.args.get(opt)
-        if value:
-            filters[opt] = value
-
-    return api.universal_search(filters)
 
 
 # ========== ENDPOINTS FOR REFERENCE INFORMATION ==========
@@ -1593,12 +1592,7 @@ def api_documentation():
             'PALLET_LENGTH_MM', 'PALLET_WIDTH_MM', 'PALLET_HEIGHT_MM',
             'PALLET_VOL_M3', 'PALLET_AREA_M2', 'PALLET_STACKING',
             'SUPPLIER_NAME', 'LOCATION', 'CITY', 'STREET', 'BUILDING', 'LOCALIZATION'
-        ],
-        'shortcuts': {
-            'GET /api/part/{part_number}': 'Search by part number',
-            'GET /api/line/{line}/parts': 'Search by line (with optional ranges)',
-            'GET /api/workshop/{workshop}/parts': 'Search by workshop (with optional ranges)'
-        }
+        ]
     })
 
 
