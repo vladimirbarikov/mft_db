@@ -635,7 +635,7 @@ services:
       FLASK_PORT: 5003
     command: python /app/endpoints/display_api.py
     ports:
-      - "5003:5003"
+      - "5003:5000"
     depends_on:
       db:
         condition: service_healthy
@@ -650,14 +650,13 @@ services:
     image: clamav/clamav:1.5.1
     container_name: clamav
     command:
-      - /bin/sh
-      - -c
-      - |
-        pkill clamd 2>/dev/null || true
-        rm -f /var/log/clamav/clamd.log 2>/dev/null || true
-        freshclam -d &
-        sleep 1
-        exec clamd --foreground
+      sh -c "
+      echo 'Starting freshclam in background...' &&
+      freshclam -d &&
+      echo 'Waiting for freshclam to initialize...' &&
+      sleep 30 &&
+      echo 'Starting clamd...' &&
+      clamd --foreground"
     restart: unless-stopped
     volumes:
       - clamav_db:/var/lib/clamav
@@ -670,6 +669,7 @@ services:
       # Network settings
       - CLAMD_CONF_TCPAddr=0.0.0.0
       - CLAMD_CONF_TCPSocket=${CLAMAV_PORT:-3310}
+      - CLAMD_CONF_LocalSocket=/tmp/clamd.sock
       - CLAMD_ENABLE=true
       # File size limits
       - CLAMD_CONF_MaxScanSize=${MAX_FILE_SIZE_MB:-5}M
@@ -698,11 +698,11 @@ services:
       - FRESHCLAM_CONF_ConnectTimeout=30
       - FRESHCLAM_CONF_ReceiveTimeout=30
     healthcheck:
-      test: ["CMD", "clamdscan", "--fdpass", "--quiet", "/tmp"]
+      test: ["CMD", "clamdscan", "--version"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 300s
+      start_period: 60s
     logging:
       driver: "json-file"
       options:
