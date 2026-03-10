@@ -162,6 +162,7 @@ class SupplierData(Base):
     street = Column(String(100))
     building = Column(String(10))
     localization = Column(LOCALIZATION_ENUM)
+    # Relationships
     parts = relationship('PartData', back_populates='supplier', lazy='selectin')
 
 
@@ -215,6 +216,7 @@ class PartData(Base):
         nullable=False,
         comment="The supplier cannot be deleted if there are part-numbers!"
     )
+    # Relationships
     supplier = relationship('SupplierData', back_populates='parts', lazy='joined')
     boxes = relationship('PartToBox', back_populates='part', lazy='selectin')
     models = relationship('PartToModel', back_populates='part', lazy='selectin')
@@ -321,6 +323,7 @@ class BoxData(Base):
         ), nullable=True
     )
     box_stacking = Column(SmallInteger)
+    # Relationships
     parts = relationship('PartToBox', back_populates='box', lazy='select')
     pallets = relationship('BoxToPallet', back_populates='box', lazy='select')
 
@@ -421,6 +424,7 @@ class PalletData(Base):
         ), nullable=True
     )
     pallet_stacking = Column(SmallInteger)
+    # Relationships
     boxes = relationship('BoxToPallet', back_populates='pallet', lazy='select')
 
 
@@ -459,6 +463,7 @@ class ModelData(Base):
     )
     model_code = Column(MODEL_CODES_ENUM, unique=True, nullable=False)
     model_name = Column(MODEL_NAMES_ENUM)
+    # Relationships
     parts = relationship('PartToModel', back_populates='model', lazy='select')
 
 
@@ -497,6 +502,7 @@ class WorkshopData(Base):
     )
     workshop_code = Column(WORKSHOP_CODES_ENUM, unique=True, nullable=False)
     workshop_name = Column(WORKSHOP_NAMES_ENUM)
+    # Relationships
     lines = relationship('LineData', back_populates='workshop', lazy='joined')
 
 
@@ -544,6 +550,7 @@ class LineData(Base):
         nullable=False,
         comment="The production workshop cannot be deleted if there are lines!"
         )
+    # Relationships
     workshop = relationship('WorkshopData', back_populates='lines', lazy='joined')
     parts = relationship('PartToLine', back_populates='line', lazy='select')
 
@@ -586,6 +593,7 @@ class BreakpointData(Base):
     input_date = Column(DateTime(), server_default=func.now())
     breakpoint_number = Column(String(10), unique=True, nullable=False)
     breakpoint_date = Column(DateTime())
+    # Relationships
     parts = relationship('PartToBreakpoint', back_populates='breakpoint', lazy='select')
 
 
@@ -628,6 +636,7 @@ class PartToBox(Base):
         comment="The box cannot be removed if it is used by parts!"
     )
     part_per_box = Column(Integer)
+    # Relationships
     part = relationship('PartData', back_populates='boxes')
     box = relationship('BoxData', back_populates='parts')
 
@@ -669,6 +678,7 @@ class BoxToPallet(Base):
         comment="The pallet cannot be removed if it is used by boxes!"
     )
     box_per_pallet = Column(SmallInteger)
+    # Relationships
     box = relationship('BoxData', back_populates='pallets')
     pallet = relationship('PalletData', back_populates='boxes')
 
@@ -712,6 +722,7 @@ class PartToModel(Base):
     )
     configuration = Column(String(20))
     part_per_vehicle = Column(SmallInteger)
+    # Relationships
     part = relationship('PartData', back_populates='models')
     model = relationship('ModelData', back_populates='parts')
 
@@ -751,6 +762,7 @@ class PartToLine(Base):
         primary_key=True,
         comment="The line cannot be deleted if parts are installed on it!"
     )
+    # Relationships
     part = relationship('PartData', back_populates='lines')
     line = relationship('LineData', back_populates='parts')
 
@@ -797,5 +809,6 @@ class PartToBreakpoint(Base):
     supplier_name_before_change = Column(String(200))
     localization_before_change = Column(LOCALIZATION_ENUM)
     line_name_before_change = Column(String(50))
+    # Relationships
     part = relationship('PartData', back_populates='breakpoints')
     breakpoint = relationship('BreakpointData', back_populates='parts')
