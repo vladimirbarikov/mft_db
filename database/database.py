@@ -1,24 +1,33 @@
 """
 Database Models Module for Material Flow Table Database with SQLAlchemy ORM.
 
-DATABASE MODELS AND TABLES:
+DATABASE ENUM TYPES, MODELS AND TABLES:
+1. ENUM TYPES:
+    - LOCALIZATION_ENUM: yes/no - Local or foreign supplier
+    - PACKAGING_TYPE_ENUM: returnable/non-returnable - Packaging type
+    - MODEL_CODES_ENUM: a01, a08, b02, b04, b06, b16 - Platform codes
+    - MODEL_NAMES_ENUM: jolion, h3, f7, f7x, dargo, h7 - Model names
+    - WORKSHOP_CODES_ENUM: as, comp, paint, weld, stamp, en - Workshop codes
+    - WORKSHOP_NAMES_ENUM: assembly, component, painting, welding, stamping, engine
+    - CONFIGURATION_ENUM: comfort, elite, tech_plus, premium - Vehicle trim levels
 
-1. CORE ENTITY TABLES:
-   - supplier_data      - Information about component suppliers
-   - part_data          - Data about automotive components (parts)
-   - box_data           - Packaging box specifications
-   - pallet_data        - Pallet (platform) specifications
-   - model_data         - Vehicle models
-   - workshop_data      - Production workshops
-   - line_data          - Production lines
-   - breakpoint_data    - Technical changes (breakpoints)
+2. CORE ENTITY TABLES:
+    - supplier_data      - Information about component suppliers
+    - part_data          - Data about automotive components (parts)
+    - box_data           - Packaging box specifications
+    - pallet_data        - Pallet (platform) specifications
+    - model_data         - Vehicle models
+    - configuration_data - Vehicle configuration types (Comfort, Elite, etc.)
+    - workshop_data      - Production workshops
+    - line_data          - Production lines
+    - breakpoint_data    - Technical changes (breakpoints)
 
-2. JUNCTION TABLES (MANY-TO-MANY RELATIONSHIPS):
-   - part_to_box        - Relationship between parts and packaging boxes
-   - box_to_pallet      - Relationship between boxes and pallets
-   - part_to_model      - Relationship between parts and vehicle models
-   - part_to_line       - Relationship between parts and production lines
-   - part_to_breakpoint - Part change history (before/after breakpoint)
+3. JUNCTION TABLES:
+    - part_to_box        - Relationship between parts and packaging boxes
+    - box_to_pallet      - Relationship between parts, boxes and pallets
+    - part_to_model      - Relationship between parts, vehicle models and configurations
+    - part_to_line       - Relationship between parts and production lines
+    - part_to_breakpoint - Part change history (before/after breakpoint)
 
 STORED INFORMATION:
 
@@ -41,12 +50,12 @@ STORED INFORMATION:
    - Real-time calculation via database triggers
 
 4. PRODUCTION (workshop_data, line_data):
-   - Workshops: code (AS, COMP, PAINT, etc.) and name
+   - Workshops: code (as, comp, paint, etc.) and name
    - Lines: code, name, workshop affiliation
 
 5. VEHICLE MODELS (model_data):
-   - Model codes: A01, A08, B02, etc.
-   - Model names: Jolion, H3, F7, etc.
+   - Model codes: a01, a08, b02, etc.
+   - Model names: jolion, h3, f7, etc.
 
 6. TECHNICAL CHANGES (breakpoint_data):
    - Breakpoint number and date
@@ -54,28 +63,29 @@ STORED INFORMATION:
    - Part change history
 
 IMPLEMENTATION FEATURES:
-- UUID format: 32 hexadecimal characters + 4 hyphens = 36 characters total
-- Automatic ID generation with prefixes (SUP_, PRT_, BOX_, etc.)
-- All ID fields use format: 
-    PREFIX_ + UUID = 40 characters total (e.g., SUP_f47ac10b-58cc-4372-a567-0e02b2c3d479)
-- Business rule validation through CheckConstraint
-- Context-aware default values for packaging numbers
-- Enum type support for categorized data
-- Complete relationship mapping with back references (back_populates)
-- Real-time calculation of packaging volume/area via SQLAlchemy event handlers
-- Automatic calculation and number generation via SQLAlchemy event handlers
+    - UUID format: 32 hexadecimal characters + 4 hyphens = 36 characters total
+    - Automatic ID generation with prefixes: SUP_, PRT_, BOX_, PLT_, MDL_, CFG_, WSP_, LNE_, BPT_
+    - All ID fields use format: PREFIX_ + UUID = 40 characters total
+    - Business rule validation through CheckConstraint
+    - Enum type support for categorized data
+    - Unique constraints for dimension combinations (box/pallet)
+    - Complete relationship mapping with back references (back_populates)
+    - Real-time calculation of packaging volume/area via SQLAlchemy Computed fields
+    - Automatic packaging number generation via SQLAlchemy Computed expressions
+    - Composite foreign keys with RESTRICT/CASCADE rules
 
 RELATIONSHIP STRUCTURE:
-   Supplier (1) ↔ (N) Part (N) ↔ (N) Box (N) ↔ (N) Pallet
-   Part (N) ↔ (N) Model
-   Part (N) ↔ (N) Line (N) ↔ (1) Workshop
-   Part (N) ↔ (N) Breakpoint (change history)
+    Supplier (1) ↔ (N) Part (N) ↔ (N) Box (N) ↔ (N) Pallet
+    Part (N) ↔ (N) Model (with Configuration)
+    Part (N) ↔ (N) Line (N) ↔ (1) Workshop
+    Part (N) ↔ (N) Breakpoint (change history)
+    Configuration (1) ↔ (N) PartToModel (N) ↔ (1) Model
 
-Version: 1.1.0
+Version: 1.0.0
 Compatibility: Python 3.12.3, SQLAlchemy 1.4.54, PostgreSQL 12+
 Maintainer: PLD Engineering Center
 Created: 2026-01-16
-Last Modified: 2026-02-11
+Last Modified: 2026-03-11
 License: MIT
 Status: Production
 """
@@ -103,19 +113,23 @@ PACKAGING_TYPE_ENUM = SqlEnum(
 )
 
 MODEL_CODES_ENUM = SqlEnum(
-    'A01', 'A08', 'B02', 'B04', 'B06', 'B16', name='model_codes'
+    'a01', 'a08', 'b02', 'b04', 'b06', 'b16', name='model_codes'
 )
 
 MODEL_NAMES_ENUM = SqlEnum(
-    'Jolion', 'H3', 'F7', 'F7x', 'Dargo', 'H7', name='model_names'
+    'jolion', 'h3', 'f7', 'f7x', 'dargo', 'h7', name='model_names'
 )
 
 WORKSHOP_CODES_ENUM = SqlEnum(
-    'AS', 'COMP', 'PAINT', 'WELD', 'STAMP', 'EN', name='workshop_codes'
+    'as', 'comp', 'paint', 'weld', 'stamp', 'en', name='workshop_codes'
 )
 
 WORKSHOP_NAMES_ENUM = SqlEnum(
-    'Assembly', 'Component', 'Painting', 'Welding', 'Stamping', 'Engine', name='workshop_names'
+    'assembly', 'component', 'painting', 'welding', 'stamping', 'engine', name='workshop_names'
+)
+
+CONFIGURATION_ENUM = SqlEnum(
+    'comfort', 'elite', 'tech_plus', 'premium', name='configuration_types'
 )
 
 
@@ -126,9 +140,9 @@ class SupplierData(Base):
     '''
     __tablename__ = 'supplier_data'
     __table_args__ = (
-        Index('idx_supplier_name', 'supplier_name'),            # Search by supplier name
-        Index('idx_supplier_city', 'city'),                     # Filter by city
-        Index('idx_supplier_localization', 'localization'),     # Local/foreign filter
+        Index('idx_supplier_name', 'supplier_name'),
+        Index('idx_supplier_city', 'city'),
+        Index('idx_supplier_localization', 'localization'),
         {
             'comment': """
             PURPOSE: Automotive component suppliers master data
@@ -172,10 +186,10 @@ class PartData(Base):
     '''
     __tablename__ = 'part_data'
     __table_args__ = (
-        Index('idx_part_number', 'part_number'),            # Search by part number
-        Index('idx_part_name', 'part_name'),                # Search by part name
-        Index('idx_part_weight', 'part_weight_kg'),         # Weight range
-        Index('idx_part_supplier_id', 'supplier_id'),       # Foreign Key
+        Index('idx_part_number', 'part_number'),
+        Index('idx_part_name', 'part_name'),
+        Index('idx_part_weight', 'part_weight_kg'),
+        Index('idx_part_supplier_id', 'supplier_id'),
         {
             'comment': """
             PURPOSE: Automotive component master data
@@ -221,6 +235,7 @@ class PartData(Base):
     boxes = relationship('PartToBox', back_populates='part', lazy='selectin')
     models = relationship('PartToModel', back_populates='part', lazy='selectin')
     lines = relationship('PartToLine', back_populates='part', lazy='select')
+    box_pallet_combinations = relationship('BoxToPallet', back_populates='part', lazy='selectin')
     breakpoints = relationship('PartToBreakpoint', back_populates='part', lazy='select')
 
 
@@ -230,9 +245,9 @@ class BoxData(Base):
     '''
     __tablename__ = 'box_data'
     __table_args__ = (
-        Index('idx_box_number', 'box_number'),          # Search by box number
-        Index('idx_box_type', 'box_type'),              # Returnable/non-returnable filter
-        Index('idx_box_dimensions',                     # Composite index for searching by box dimensions
+        Index('idx_box_number', 'box_number'),
+        Index('idx_box_type', 'box_type'),
+        Index('idx_box_dimensions',
               'box_length_mm', 'box_width_mm', 'box_height_mm'),
         UniqueConstraint('box_type', 'box_length_mm', 'box_width_mm', 'box_height_mm',
                          name='unique_box_dimensions'),
@@ -334,9 +349,9 @@ class PalletData(Base):
     '''
     __tablename__ = 'pallet_data'
     __table_args__ = (
-        Index('idx_pallet_number', 'pallet_number'),            # Search by pallet number
-        Index('idx_pallet_type', 'pallet_type'),                # Returnable/non-returnable filter
-        Index('idx_pallet_dimensions',                          # Composite index for searching by pallet dimensions
+        Index('idx_pallet_number', 'pallet_number'),
+        Index('idx_pallet_type', 'pallet_type'),
+        Index('idx_pallet_dimensions',
               'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm'),
         UniqueConstraint('pallet_type', 'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm',
                          name='unique_pallet_dimensions'),
@@ -434,8 +449,8 @@ class ModelData(Base):
     '''
     __tablename__ = 'model_data'
     __table_args__ = (
-        Index('idx_model_code', 'model_code'),          # Search by model code
-        Index('idx_model_name', 'model_name'),          # Search by model name
+        Index('idx_model_code', 'model_code'),
+        Index('idx_model_name', 'model_name'),
         {
             'comment': """
             PURPOSE: Vehicle model master data
@@ -467,14 +482,54 @@ class ModelData(Base):
     parts = relationship('PartToModel', back_populates='model', lazy='select')
 
 
+class ConfigurationData(Base):
+    '''
+    Model defines a table for storing configuration types.
+    '''
+    __tablename__ = 'configuration_data'
+    __table_args__ = (
+        Index('idx_configuration_name', 'configuration_name'),
+        {
+            'comment': """
+            PURPOSE: Configuration types master data
+            ---
+            COLUMN DESCRIPTION:
+            - configuration_id: Unique system identifier (CFG_ + 36-character UUID)
+            - configuration_name: Configuration name (comfort, elite, tech_plus, premium)
+            - description: Optional description of the configuration
+            ---
+            BUSINESS RULES:
+            - Configuration names are unique
+            - Used across all vehicle models
+            - Affects part consumption per vehicle
+            """
+        },
+    )
+    configuration_id = Column(
+        String(40),
+        primary_key=True,
+        default=lambda: f"CFG_{uuid.uuid4()}",
+        unique=True,
+        nullable=False
+    )
+    configuration = Column(
+        CONFIGURATION_ENUM,
+        unique=True,
+        nullable=False
+    )
+    description = Column(String(100), nullable=True)
+    # Relationships
+    part_models = relationship('PartToModel', back_populates='configuration')
+
+
 class WorkshopData(Base):
     '''
     Model defines a table for storing workshop's information.
     '''
     __tablename__ = 'workshop_data'
     __table_args__ = (
-        Index('idx_workshop_code', 'workshop_code'),            # Search by workshop code
-        Index('idx_workshop_name', 'workshop_name'),            # Search by workshop name
+        Index('idx_workshop_code', 'workshop_code'),
+        Index('idx_workshop_name', 'workshop_name'),
         {
             'comment': """
             PURPOSE: Production workshop organization
@@ -512,9 +567,9 @@ class LineData(Base):
     '''
     __tablename__ = 'line_data'
     __table_args__ = (
-        Index('idx_line_code', 'line_code'),            # Search by line code
-        Index('idx_line_name', 'line_name'),            # Search by line name
-        Index('idx_line_workshop_id', 'workshop_id'),   # Foreign Key
+        Index('idx_line_code', 'line_code'),
+        Index('idx_line_name', 'line_name'),
+        Index('idx_line_workshop_id', 'workshop_id'),
         {
             'comment': """
             PURPOSE: Production line specifications
@@ -561,9 +616,9 @@ class BreakpointData(Base):
     '''
     __tablename__ = 'breakpoint_data'
     __table_args__ = (
-        Index('idx_breakpoint_number', 'breakpoint_number'),    # Search by breakpoint number
-        Index('idx_breakpoint_date', 'breakpoint_date'),        # Date range
-        Index('idx_input_date', 'input_date'),                  # Sorting by input date
+        Index('idx_breakpoint_number', 'breakpoint_number'),
+        Index('idx_breakpoint_date', 'breakpoint_date'),
+        Index('idx_input_date', 'input_date'),
         {
             'comment': """
             PURPOSE: Technical change management (breakpoints)
@@ -606,9 +661,9 @@ class PartToBox(Base):
     '''
     __tablename__ = 'part_to_box'
     __table_args__ = (
-        Index('idx_ptb_part_id', 'part_id'),                # Foreign Key
-        Index('idx_ptb_box_id', 'box_id'),                  # Foreign Key
-        Index('idx_ptb_composite', 'part_id', 'box_id'),    # Composite for JOIN
+        Index('idx_ptb_part_id', 'part_id'),
+        Index('idx_ptb_box_id', 'box_id'),
+        Index('idx_ptb_composite', 'part_id', 'box_id'),
         {
             'comment': """
             PURPOSE: Many-to-many relationship: Parts ↔ Boxes
@@ -644,27 +699,34 @@ class PartToBox(Base):
 class BoxToPallet(Base):
     '''
     Junction table used to organize many-to-many relationships
-    between two main entities: BoxData and PalletData.
+    between main entities: PartData, BoxData and PalletData.
     '''
     __tablename__ = 'box_to_pallet'
     __table_args__ = (
-        Index('idx_btp_box_id', 'box_id'),                  # Foreign Key
-        Index('idx_btp_pallet_id', 'pallet_id'),            # Foreign Key
-        Index('idx_btp_composite', 'box_id', 'pallet_id'),  # Composite for JOIN
+        Index('idx_btp_box_id', 'box_id'),
+        Index('idx_btp_pallet_id', 'pallet_id'),
+        Index('idx_btp_part_id', 'part_id'),
+        Index('idx_btp_composite', 'box_id', 'pallet_id', 'part_id'),
         {
             'comment': """
-            PURPOSE: Many-to-many relationship: Boxes ↔ Pallets
+            PURPOSE: Many-to-many relationship: Boxes ↔ Pallets with Part association
             ---
             COLUMN DESCRIPTION:
+            - part_id: References part_data (which part uses this box-pallet combination)
             - box_id: References box_data
             - pallet_id: References pallet_data
             - box_per_pallet: Quantity of boxes per pallet
             ---
             BUSINESS RULES:
             - Defines pallet loading configuration
-            - Optimizes transportation space utilization
+            - Optimizes transportation and warehouse space utilization
             """
         },
+    )
+    part_id = Column(
+        String(40),
+        ForeignKey('part_data.part_id', ondelete='CASCADE'),
+        primary_key=True
     )
     box_id = Column(
         String(40),
@@ -679,6 +741,7 @@ class BoxToPallet(Base):
     )
     box_per_pallet = Column(SmallInteger)
     # Relationships
+    part = relationship('PartData', back_populates='box_pallet_combinations')
     box = relationship('BoxData', back_populates='pallets')
     pallet = relationship('PalletData', back_populates='boxes')
 
@@ -690,21 +753,23 @@ class PartToModel(Base):
     '''
     __tablename__ = 'part_to_model'
     __table_args__ = (
-        Index('idx_ptm_part_id', 'part_id'),                # Foreign Key
-        Index('idx_ptm_model_id', 'model_id'),              # Foreign Key
-        Index('idx_ptm_composite', 'part_id', 'model_id'),  # Composite for JOIN
+        Index('idx_ptm_part_id', 'part_id'),
+        Index('idx_ptm_model_id', 'model_id'),
+        Index('idx_ptm_configuration_id', 'configuration_id'),
+        Index('idx_ptm_composite', 'part_id', 'model_id'),
         {
             'comment': """
-            PURPOSE: Many-to-many relationship: Parts ↔ Vehicle Models
+            PURPOSE: Many-to-many relationship: Parts ↔ Vehicle Models with configuration
             ---
             COLUMN DESCRIPTION:
             - part_id: References part_data
             - model_id: References model_data
-            - configuration: Variant code (Comfort, Elite, Premium, Tech Plus)
-            - part_per_vehicle: Quantity used per vehicle
+            - configuration_id: References configuration_data
+            - part_per_vehicle: Quantity used per vehicle for this configuration
             ---
             BUSINESS RULES:
-            - Defines which parts go into which vehicle models
+            - Defines which parts go into which vehicle models with specific configuration
+            - Different configurations may use different quantities of the same part
             - Used for BOM configuration and costing
             """
         },
@@ -717,14 +782,18 @@ class PartToModel(Base):
     model_id = Column(
         String(40),
         ForeignKey('model_data.model_id', ondelete='RESTRICT'),
-        primary_key=True,
-        comment="The model cannot be deleted if it uses parts!"
+        primary_key=True
     )
-    configuration = Column(String(20))
+    configuration_id = Column(
+        String(40),
+        ForeignKey('configuration_data.configuration_id', ondelete='RESTRICT'),
+        primary_key=True
+    )
     part_per_vehicle = Column(SmallInteger)
     # Relationships
     part = relationship('PartData', back_populates='models')
     model = relationship('ModelData', back_populates='parts')
+    configuration = relationship('ConfigurationData', back_populates='part_models')
 
 
 class PartToLine(Base):
@@ -734,9 +803,9 @@ class PartToLine(Base):
     '''
     __tablename__ = 'part_to_line'
     __table_args__ = (
-        Index('idx_ptl_part_id', 'part_id'),                # Foreign Key
-        Index('idx_ptl_line_id', 'line_id'),                # Foreign Key
-        Index('idx_ptl_composite', 'part_id', 'line_id'),   # Composite for JOIN
+        Index('idx_ptl_part_id', 'part_id'),
+        Index('idx_ptl_line_id', 'line_id'),
+        Index('idx_ptl_composite', 'part_id', 'line_id'),
         {
             'comment': """
             PURPOSE: Many-to-many relationship: Parts ↔ Production Lines
@@ -774,9 +843,11 @@ class PartToBreakpoint(Base):
     '''
     __tablename__ = 'part_to_breakpoint'
     __table_args__ = (
-        Index('idx_ptbkp_part_id', 'part_id'),                      # Foreign Key
-        Index('idx_ptbkp_breakpoint_id', 'breakpoint_id'),          # Foreign Key
-        Index('idx_ptbkp_composite', 'part_id', 'breakpoint_id'),   # Composite for JOIN
+        Index('idx_ptbkp_part_id', 'part_id'),
+        Index('idx_ptbkp_breakpoint_id', 'breakpoint_id'),
+        Index('idx_ptbkp_supplier_id', 'supplier_id'),
+        Index('idx_ptbkp_line_id', 'line_id'),
+        Index('idx_ptbkp_composite', 'part_id', 'breakpoint_id'),
         {
             'comment': """
             PURPOSE: Part change history across breakpoints
@@ -784,6 +855,8 @@ class PartToBreakpoint(Base):
             COLUMN DESCRIPTION:
             - part_id: References part_data
             - breakpoint_id: References breakpoint_data
+            - supplier_id: References supplier_data
+            - line_id: References line_data
             - *_before_change: Values before engineering change
             ---
             BUSINESS RULES:
@@ -805,6 +878,16 @@ class PartToBreakpoint(Base):
         primary_key=True,
         comment="The breakpoint cannot be deleted as it is included in the revision history!"
     )
+    supplier_id = Column(
+        String(40),
+        ForeignKey('supplier_data.supplier_id'),
+        nullable=True
+    )
+    line_id = Column(
+        String(40),
+        ForeignKey('line_data.line_id'),
+        nullable=True
+    )
     part_number_before_change = Column(String(50))
     supplier_name_before_change = Column(String(200))
     localization_before_change = Column(LOCALIZATION_ENUM)
@@ -812,3 +895,5 @@ class PartToBreakpoint(Base):
     # Relationships
     part = relationship('PartData', back_populates='breakpoints')
     breakpoint = relationship('BreakpointData', back_populates='parts')
+    supplier = relationship('SupplierData', foreign_keys=[supplier_id])
+    line = relationship('LineData', foreign_keys=[line_id])
