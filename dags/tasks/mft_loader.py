@@ -49,9 +49,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # Local imports
 from config import get_logger
-from config.columns_config import TABLE_REQUIREMENTS
+from config.columns_config import MFT_TABLE_REQUIREMENTS
 from dags.tasks.connector import initialize_database
-from dags.tasks.mapper import create_mapper
+from dags.tasks.mft_mapper import create_mapper
 from database.database import (
     # Entity tables
     SupplierData, PartData, BoxData, PalletData,
@@ -142,8 +142,8 @@ def _bulk_insert_dataframe(
 
     # Checking required columns for core entity tables only
     if required_columns_check:
-        if table_name in TABLE_REQUIREMENTS:
-            required_cols = TABLE_REQUIREMENTS[table_name]
+        if table_name in MFT_TABLE_REQUIREMENTS:
+            required_cols = MFT_TABLE_REQUIREMENTS[table_name]
             missing_cols = [col for col in required_cols if col not in df.columns]
 
             if missing_cols:
