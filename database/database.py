@@ -10,6 +10,7 @@ DATABASE ENUM TYPES, MODELS AND TABLES:
     - WORKSHOP_CODES_ENUM: as, comp, paint, weld, stamp, en - Workshop codes
     - WORKSHOP_NAMES_ENUM: assembly, component, painting, welding, stamping, engine
     - CONFIGURATION_ENUM: comfort, elite, tech_plus, premium - Vehicle trim levels
+    - BREAKPOINT_ACTION_ENUM: replace, delete, add, update - Types of technical changes
 
 2. CORE ENTITY TABLES:
     - supplier_data      - Information about component suppliers
@@ -17,7 +18,7 @@ DATABASE ENUM TYPES, MODELS AND TABLES:
     - box_data           - Packaging box specifications
     - pallet_data        - Pallet (platform) specifications
     - model_data         - Vehicle models
-    - configuration_data - Vehicle configuration types (Comfort, Elite, etc.)
+    - configuration_data - Vehicle configuration types (comfort, elite, etc.)
     - workshop_data      - Production workshops
     - line_data          - Production lines
     - breakpoint_data    - Technical changes (breakpoints)
@@ -27,7 +28,7 @@ DATABASE ENUM TYPES, MODELS AND TABLES:
     - box_to_pallet      - Relationship between parts, boxes and pallets
     - part_to_model      - Relationship between parts, vehicle models and configurations
     - part_to_line       - Relationship between parts and production lines
-    - part_to_breakpoint - Part change history (before/after breakpoint)
+    - part_to_breakpoint - Part change history with before/after values and action type
 
 STORED INFORMATION:
 
@@ -60,42 +61,61 @@ STORED INFORMATION:
 6. TECHNICAL CHANGES (breakpoint_data):
    - Breakpoint number and date
    - Entry date into the system
-   - Part change history
+   - Batch information
+   - Description of change
+
+7. CHANGE HISTORY (part_to_breakpoint):
+   - Links parts to breakpoints with model specificity
+   - Action type: replace, delete, add, update
+   - Before-change values (snapshot from Excel)
+   - After-change references to current master data
+   - Tracks model-specific part changes
 
 IMPLEMENTATION FEATURES:
     - UUID format: 32 hexadecimal characters + 4 hyphens = 36 characters total
     - Automatic ID generation with prefixes: SUP_, PRT_, BOX_, PLT_, MDL_, CFG_, WSP_, LNE_, BPT_
     - All ID fields use format: PREFIX_ + UUID = 40 characters total
     - Business rule validation through CheckConstraint
-    - Enum type support for categorized data
+    - Enum type support for categorized data (including breakpoint actions)
     - Unique constraints for dimension combinations (box/pallet)
-    - Complete relationship mapping with back references (back_populates)
+    - Complete bidirectional relationship mapping with back_populates
     - Real-time calculation of packaging volume/area via SQLAlchemy Computed fields
     - Automatic packaging number generation via SQLAlchemy Computed expressions
     - Composite foreign keys with RESTRICT/CASCADE rules
+    - Comprehensive indexing strategy including GIN for text search
 
 RELATIONSHIP STRUCTURE:
-    Supplier (1) ↔ (N) Part (N) ↔ (N) Box (N) ↔ (N) Pallet
-    Part (N) ↔ (N) Model (with Configuration)
-    Part (N) ↔ (N) Line (N) ↔ (1) Workshop
-    Part (N) ↔ (N) Breakpoint (change history)
-    Configuration (1) ↔ (N) PartToModel (N) ↔ (1) Model
+    - Supplier (1) ↔ (N) Part (N) ↔ (N) Box (N) ↔ (N) Pallet
+    - Part (N) ↔ (N) Model (with Configuration)
+    - Part (N) ↔ (N) Line (N) ↔ (1) Workshop
+    - Part (N) ↔ (N) Breakpoint (change history) with Action type
+    - Configuration (1) ↔ (N) PartToModel (N) ↔ (1) Model
+    - Model (1) ↔ (N) PartToBreakpoint (N) ↔ (1) Part (model-specific changes)
+    - Supplier (1) ↔ (N) PartToBreakpoint (supplier change history)
+    - Line (1) ↔ (N) PartToBreakpoint (line change history)
+
+CHANGE TRACKING (PartToBreakpoint):
+    - Composite PK: (part_id, breakpoint_id, model_id)
+    - Action field: replace/delete/add/update
+    - Before values: part_number, supplier_name, localization, line_name
+    - After references: supplier_id, line_id (current master data)
+    - Enables complete audit trail of part evolution per model
 
 Version: 1.0.0
 Compatibility: Python 3.12.3, SQLAlchemy 1.4.54, PostgreSQL 12+
 Maintainer: PLD Engineering Center
 Created: 2026-01-16
-Last Modified: 2026-03-11
+Last Modified: 2026-03-12
 License: MIT
 Status: Production
 """
-import uuid
+# import uuid
 from sqlalchemy import (
     CheckConstraint, Column, Computed, DateTime, Enum as SqlEnum,
-    ForeignKey, func, Index, UniqueConstraint
+    ForeignKey, func, Index, text, UniqueConstraint
 )
 from sqlalchemy.types import (
-    Integer, Numeric, String, SmallInteger
+    Integer, Numeric, String, SmallInteger, Text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
@@ -132,6 +152,9 @@ CONFIGURATION_ENUM = SqlEnum(
     'comfort', 'elite', 'tech_plus', 'premium', name='configuration_types'
 )
 
+BREAKPOINT_ACTION_ENUM = SqlEnum(
+    'replace', 'delete', 'add', 'update', name='breakpoint_action'
+)
 
 # ========== CORE ENTITY TABLES ==========
 class SupplierData(Base):
@@ -166,7 +189,7 @@ class SupplierData(Base):
     supplier_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"SUP_{uuid.uuid4()}",
+        server_default=text("'SUP_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
@@ -178,7 +201,12 @@ class SupplierData(Base):
     localization = Column(LOCALIZATION_ENUM)
     # Relationships
     parts = relationship('PartData', back_populates='supplier', lazy='selectin')
-
+    breakpoint_changes = relationship(
+        'PartToBreakpoint',
+        foreign_keys='PartToBreakpoint.supplier_id',
+        back_populates='supplier',
+        lazy='select'
+    )
 
 class PartData(Base):
     '''
@@ -215,7 +243,7 @@ class PartData(Base):
     part_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"PRT_{uuid.uuid4()}",
+        server_default=text("'PRT_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
@@ -282,7 +310,7 @@ class BoxData(Base):
     box_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"BOX_{uuid.uuid4()}",
+        server_default=text("'BOX_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
@@ -383,7 +411,7 @@ class PalletData(Base):
     pallet_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"PLT_{uuid.uuid4()}",
+        server_default=text("'PLT_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
@@ -472,7 +500,7 @@ class ModelData(Base):
     model_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"MDL_{uuid.uuid4()}",
+        server_default=text("'MDL_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
@@ -480,6 +508,12 @@ class ModelData(Base):
     model_name = Column(MODEL_NAMES_ENUM)
     # Relationships
     parts = relationship('PartToModel', back_populates='model', lazy='select')
+    breakpoint_changes = relationship(
+        'PartToBreakpoint',
+        foreign_keys='PartToBreakpoint.model_id',
+        back_populates='model',
+        lazy='select'
+    )
 
 
 class ConfigurationData(Base):
@@ -508,7 +542,7 @@ class ConfigurationData(Base):
     configuration_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"CFG_{uuid.uuid4()}",
+        server_default=text("'CFG_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
@@ -551,7 +585,7 @@ class WorkshopData(Base):
     workshop_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"WSP_{uuid.uuid4()}",
+        server_default=text("'WSP_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
@@ -593,7 +627,7 @@ class LineData(Base):
     line_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"LNE_{uuid.uuid4()}",
+        server_default=text("'LNE_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
@@ -608,6 +642,12 @@ class LineData(Base):
     # Relationships
     workshop = relationship('WorkshopData', back_populates='lines', lazy='joined')
     parts = relationship('PartToLine', back_populates='line', lazy='select')
+    breakpoint_changes = relationship(
+        'PartToBreakpoint',
+        foreign_keys='PartToBreakpoint.line_id',
+        back_populates='line',
+        lazy='select'
+    )
 
 
 class BreakpointData(Base):
@@ -619,6 +659,10 @@ class BreakpointData(Base):
         Index('idx_breakpoint_number', 'breakpoint_number'),
         Index('idx_breakpoint_date', 'breakpoint_date'),
         Index('idx_input_date', 'input_date'),
+        Index('idx_breakpoint_batch', 'batch'),
+        Index('idx_breakpoint_composite_date_number', 
+              'breakpoint_date', 'breakpoint_number'),
+        Index('idx_description_gin', 'description', postgresql_using='gin'),
         {
             'comment': """
             PURPOSE: Technical change management (breakpoints)
@@ -628,6 +672,8 @@ class BreakpointData(Base):
             - input_date: When record was created
             - breakpoint_number: Engineering change identifier
             - breakpoint_date: When change takes effect
+            - batch: Number of batch the technical change occurred
+            - description: Cause and solution of the technical change
             ---
             RELATIONSHIPS:
             - Many-to-Many with: PartData (via part_to_breakpoint)
@@ -641,13 +687,15 @@ class BreakpointData(Base):
     breakpoint_id = Column(
         String(40),
         primary_key=True,
-        default=lambda: f"BPT_{uuid.uuid4()}",
+        server_default=text("'BPT_' || gen_random_uuid()::text"),
         unique=True,
         nullable=False
     )
     input_date = Column(DateTime(), server_default=func.now())
     breakpoint_number = Column(String(10), unique=True, nullable=False)
     breakpoint_date = Column(DateTime())
+    batch = Column(String(10), nullable=True)
+    description = Column(Text, nullable=True)
     # Relationships
     parts = relationship('PartToBreakpoint', back_populates='breakpoint', lazy='select')
 
@@ -847,22 +895,32 @@ class PartToBreakpoint(Base):
         Index('idx_ptbkp_breakpoint_id', 'breakpoint_id'),
         Index('idx_ptbkp_supplier_id', 'supplier_id'),
         Index('idx_ptbkp_line_id', 'line_id'),
+        Index('idx_ptbkp_model_id', 'model_id'),
+        Index('idx_ptbkp_action', 'action'),
         Index('idx_ptbkp_composite', 'part_id', 'breakpoint_id'),
         {
             'comment': """
             PURPOSE: Part change history across breakpoints
             ---
             COLUMN DESCRIPTION:
-            - part_id: References part_data
-            - breakpoint_id: References breakpoint_data
-            - supplier_id: References supplier_data
-            - line_id: References line_data
-            - *_before_change: Values before engineering change
+                - part_id: References part_data (the part being changed)
+                - breakpoint_id: References breakpoint_data (the change event)
+                - model_id: References model_data (which model this change applies to)
+                - action: Type of change (replace, delete, add, update)
+                - supplier_id: References supplier_data (new/current supplier)
+                - line_id: References line_data (new/current line)
+                - *_before_change: Values before engineering change
             ---
             BUSINESS RULES:
-            - Tracks part evolution over time
-            - Enables traceability and version control
-            - Critical for quality and recall management
+                - Tracks part evolution over time per model
+                - The same part may have different changes for different models
+                - BEFORE values are snapshots from Excel at time of change
+                - AFTER values are references to current master data
+                - ACTION determines how to process the change:
+                    * replace: Old part replaced by new part number
+                    * delete: Part removed from production
+                    * add: New part introduced
+                    * update: Part attributes changed without part number change
             """
         },
     )
@@ -878,22 +936,35 @@ class PartToBreakpoint(Base):
         primary_key=True,
         comment="The breakpoint cannot be deleted as it is included in the revision history!"
     )
+    model_id = Column(
+        String(40),
+        ForeignKey('model_data.model_id', ondelete='RESTRICT'),
+        primary_key=True,
+        comment="The model cannot be deleted as it is included in the revision history!"
+    )
     supplier_id = Column(
         String(40),
         ForeignKey('supplier_data.supplier_id'),
-        nullable=True
+        nullable=False
     )
     line_id = Column(
         String(40),
         ForeignKey('line_data.line_id'),
-        nullable=True
+        nullable=False
+    )
+    action = Column(
+        BREAKPOINT_ACTION_ENUM,
+        nullable=False
     )
     part_number_before_change = Column(String(50))
     supplier_name_before_change = Column(String(200))
-    localization_before_change = Column(LOCALIZATION_ENUM)
+    localization_before_change = Column(
+        LOCALIZATION_ENUM,
+        nullable=False)
     line_name_before_change = Column(String(50))
     # Relationships
     part = relationship('PartData', back_populates='breakpoints')
     breakpoint = relationship('BreakpointData', back_populates='parts')
-    supplier = relationship('SupplierData', foreign_keys=[supplier_id])
-    line = relationship('LineData', foreign_keys=[line_id])
+    model = relationship('ModelData', foreign_keys=[model_id], back_populates='breakpoint_changes')
+    supplier = relationship('SupplierData', foreign_keys=[supplier_id], back_populates='breakpoint_changes')
+    line = relationship('LineData', foreign_keys=[line_id], back_populates='breakpoint_changes')
