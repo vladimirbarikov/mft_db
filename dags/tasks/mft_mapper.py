@@ -657,7 +657,7 @@ class MFTObjectMapper:
         Map box_to_pallet junction record with composite keys.
         
         Args:
-            record: Dict with box_type, box_length_mm, box_width_mm, box_height_mm,
+            record: Dict with part_number, box_type, box_length_mm, box_width_mm, box_height_mm,
                    pallet_type, pallet_length_mm, pallet_width_mm, pallet_height_mm,
                    box_per_pallet (optional)
         
@@ -674,6 +674,15 @@ class MFTObjectMapper:
                         col
                     )
                     return None
+
+            # Mapping part_number → part_id
+            part_id = self.get_id('part_number', record['part_number'])
+            if not part_id:
+                logger.debug(
+                    "No part_id found for part_number: %s",
+                    record['part_number']
+                )
+                return None
 
             # Mapping composite box → box_id
             box_composite = {
@@ -709,6 +718,7 @@ class MFTObjectMapper:
 
             # Create result
             result = {
+                'part_id': part_id,
                 'box_id': box_id,
                 'pallet_id': pallet_id
             }
