@@ -148,7 +148,7 @@ from config.columns_config import (
 from dags.tasks.connector import initialize_database
 from database.database import (
     SupplierData, PartData, BoxData, PalletData,
-    ModelData, WorkshopData, LineData
+    ConfigurationData, ModelData, WorkshopData, LineData
 )
 
 # Logger setup
@@ -194,6 +194,10 @@ class MFTObjectMapper:
         # Model mappings
         'model_code': (ModelData, 'model_code', 'model_id'),
         'model_id': (ModelData, 'model_id', 'model_id'),
+
+        # Configuration mappings
+        'configuration': (ConfigurationData, 'configuration', 'configuration_id'),
+        'configuration_id': (ConfigurationData, 'configuration_id', 'configuration_id'),
 
         # Workshop mappings
         'workshop_code': (WorkshopData, 'workshop_code', 'workshop_id'),
@@ -730,14 +734,16 @@ class MFTObjectMapper:
 
     def _map_part_to_model(self, record: dict[str, Any]) -> Optional[dict[str, Any]]:
         """
-        Map part_to_model junction record.
+        Map part_to_model junction record with required configuration.
         
         Args:
-            record: Dict with part_number, model_code, 
-                   configuration (optional), part_per_vehicle (optional)
+            record: Dict with with required fields:
+                    part_number, model_code, configuration
+                    Optional: part_per_vehicle
         
         Returns:
-            Dict with part_id, model_id, configuration, part_per_vehicle or None
+            Dict with part_id, model_id, configuration_id[, part_per_vehicle]
+            or None if mapping fails
         """
         try:
             # Check for all required columns
@@ -768,10 +774,20 @@ class MFTObjectMapper:
                 )
                 return None
 
+            # Mapping configuration → configuration_id
+            configuration_id = self.get_id('configuration', record['configuration'])
+            if not configuration_id:
+                logger.debug(
+                    "No configuration_id found for configuration: %s",
+                    record['configuration']
+                )
+                return None
+
             # Create result
             result = {
                 'part_id': part_id,
-                'model_id': model_id
+                'model_id': model_id,
+                'configuration_id': configuration_id
             }
 
             # Add optional fields
@@ -886,6 +902,13 @@ class MFTObjectMapper:
         cache_key = "ModelData_model_code"
         if cache_key not in self._cached_mappings:
             self._load_mapping(ModelData, 'model_code', 'model_id', cache_key)
+        return self._cached_mappings[cache_key]
+
+    def get_configuration_mapping(self) -> dict[str, Any]:
+        """Get configuration → configuration_id mapping."""
+        cache_key = "ConfigurationData_configuration"
+        if cache_key not in self._cached_mappings:
+            self._load_mapping(ConfigurationData, 'configuration', 'configuration_id', cache_key)
         return self._cached_mappings[cache_key]
 
     def get_workshop_mapping(self) -> dict[str, Any]:
