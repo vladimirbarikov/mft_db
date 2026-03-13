@@ -219,9 +219,6 @@ from dags.tasks.mft_loader import (
 # Logger setup
 logger = get_logger(__name__)
 
-# Get the file path from the root project directory
-# file_path = PROJECT_ROOT / 'data/mft.xlsx'
-
 # Timezone setup
 moscow_tz = pytz.timezone('Europe/Moscow')
 
