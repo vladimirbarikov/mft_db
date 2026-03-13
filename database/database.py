@@ -9,7 +9,7 @@ DATABASE ENUM TYPES, MODELS AND TABLES:
     - MODEL_NAMES_ENUM: jolion, h3, f7, f7x, dargo, h7 - Model names
     - WORKSHOP_CODES_ENUM: as, comp, paint, weld, stamp, en - Workshop codes
     - WORKSHOP_NAMES_ENUM: assembly, component, painting, welding, stamping, engine
-    - CONFIGURATION_ENUM: comfort, elite, tech_plus, premium - Vehicle trim levels
+    - CONFIGURATION_ENUM: comfort, elite, tech-plus, premium - Vehicle trim levels
     - BREAKPOINT_ACTION_ENUM: replace, delete, add, update - Types of technical changes
 
 2. CORE ENTITY TABLES:
@@ -149,7 +149,7 @@ WORKSHOP_NAMES_ENUM = SqlEnum(
 )
 
 CONFIGURATION_ENUM = SqlEnum(
-    'comfort', 'elite', 'tech_plus', 'premium', name='configuration_types'
+    'comfort', 'elite', 'tech-plus', 'premium', name='configuration_types'
 )
 
 BREAKPOINT_ACTION_ENUM = SqlEnum(
@@ -660,7 +660,7 @@ class BreakpointData(Base):
         Index('idx_breakpoint_date', 'breakpoint_date'),
         Index('idx_input_date', 'input_date'),
         Index('idx_breakpoint_batch', 'batch'),
-        Index('idx_breakpoint_composite_date_number', 
+        Index('idx_breakpoint_composite_date_number',
               'breakpoint_date', 'breakpoint_number'),
         Index('idx_description_gin', 'description', postgresql_using='gin'),
         {
