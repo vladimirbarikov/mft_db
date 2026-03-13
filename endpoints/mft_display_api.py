@@ -58,7 +58,7 @@ from dags.tasks.connector import initialize_database
 from database.database import (
     # Entity tables
     SupplierData, PartData, BoxData, PalletData,
-    ModelData, WorkshopData, LineData,
+    ModelData, ConfigurationData, WorkshopData, LineData,
     # Junction tables
     PartToBox, BoxToPallet, PartToModel, PartToLine
 )
@@ -82,6 +82,7 @@ FLASK_ENV = os.getenv('FLASK_ENV', 'development')
 IS_PRODUCTION = FLASK_ENV == 'production'
 
 # CORS configuration
+# For production, replace "*" with actual domains
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
 
 # Rate limiting settings
@@ -164,7 +165,7 @@ def normalize_output(
     Rules:
     - UPPERCASE: PART_NUMBER, CONFIGURATION, MODEL_CODE, LINE_CODE, WORKSHOP_CODE, BUILDING
     - Sentence case: PART_NAME, MODEL_NAME, LINE_NAME, WORKSHOP_NAME,
-                     BOX_TYPE, PALLET_TYPE, SUPPLIER_NAME, LOCALIZATION
+                     BOX_TYPE, PALLET_TYPE, SUPPLIER_NAME, LOCALIZATION, DESCRIPTION
     - Title case: LOCATION, CITY, STREET
     """
     if value is None:
@@ -176,8 +177,8 @@ def normalize_output(
     ]
 
     sentence_case_columns = [
-        'PART_NAME', 'MODEL_NAME', 'LINE_NAME', 'WORKSHOP_NAME',
-        'BOX_TYPE', 'PALLET_TYPE', 'SUPPLIER_NAME', 'LOCALIZATION'
+        'PART_NAME', 'MODEL_NAME', 'LINE_NAME', 'WORKSHOP_NAME', 'BOX_TYPE',
+        'PALLET_TYPE', 'SUPPLIER_NAME', 'LOCALIZATION', 'DESCRIPTION'
     ]
 
     title_case_columns = ['LOCATION', 'CITY', 'STREET']
@@ -206,7 +207,7 @@ class DatabaseAPI:
     # List of ENUM fields
     ENUM_FIELDS = [
         'workshop_code', 'workshop_name', 'model_code', 'model_name',
-        'localization', 'box_type', 'pallet_type'
+        'localization', 'box_type', 'pallet_type', 'configuration'
     ]
 
     def __init__(self, engine):
@@ -374,7 +375,7 @@ class DatabaseAPI:
                 PartData.part_weight_kg,
 
                 PartToModel.part_per_vehicle,
-                PartToModel.configuration,
+                ConfigurationData.configuration,
                 ModelData.model_code,
                 ModelData.model_name,
 
@@ -389,6 +390,8 @@ class DatabaseAPI:
                 BoxData.box_length_mm,
                 BoxData.box_width_mm,
                 BoxData.box_height_mm,
+                BoxData.box_vol_m3,
+                BoxData.box_area_m2,
                 BoxData.box_stacking,
 
                 BoxToPallet.box_per_pallet,
@@ -397,6 +400,8 @@ class DatabaseAPI:
                 PalletData.pallet_length_mm,
                 PalletData.pallet_width_mm,
                 PalletData.pallet_height_mm,
+                PalletData.pallet_vol_m3,
+                PalletData.pallet_area_m2,
                 PalletData.pallet_stacking,
 
                 SupplierData.supplier_name,
@@ -412,12 +417,22 @@ class DatabaseAPI:
             query = query.join(PartData, PartData.part_id == PartToBox.part_id)
             query = query.join(SupplierData, SupplierData.supplier_id == PartData.supplier_id)
             query = query.join(BoxData, BoxData.box_id == PartToBox.box_id)
+
+            # Join PartToModel and related tables
             query = query.join(PartToModel, PartData.part_id == PartToModel.part_id)
             query = query.join(ModelData, ModelData.model_id == PartToModel.model_id)
+            query = query.join(ConfigurationData, ConfigurationData.configuration_id == PartToModel.configuration_id)
+
+            # Join PartToLine and related tables
             query = query.join(PartToLine, PartData.part_id == PartToLine.part_id)
             query = query.join(LineData, LineData.line_id == PartToLine.line_id)
             query = query.join(WorkshopData, WorkshopData.workshop_id == LineData.workshop_id)
-            query = query.outerjoin(BoxToPallet, BoxData.box_id == BoxToPallet.box_id)
+
+            # Outer joins for optional relationships
+            query = query.outerjoin(BoxToPallet, and_(
+                BoxData.box_id == BoxToPallet.box_id,
+                PartData.part_id == BoxToPallet.part_id
+            ))
             query = query.outerjoin(PalletData, PalletData.pallet_id == BoxToPallet.pallet_id)
 
             # Building WHERE conditions based on filled filters
@@ -435,13 +450,33 @@ class DatabaseAPI:
                 elif key == "PART_NAME":
                     conditions.append(PartData.part_name.ilike(f"%{str_value}%"))
                 elif key == "PART_WEIGHT_KG":
-                    conditions.append(PartData.part_weight_kg == float(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PartData.part_weight_kg >= float(value['min']))
+                        if 'max' in value:
+                            conditions.append(PartData.part_weight_kg <= float(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PartData.part_weight_kg == float(value))
+                            except (TypeError, ValueError):
+                                pass
 
                 # ===== MODEL =====
                 elif key == "PART_PER_VEHICLE":
-                    conditions.append(PartToModel.part_per_vehicle == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PartToModel.part_per_vehicle >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(PartToModel.part_per_vehicle <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PartToModel.part_per_vehicle == int(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "CONFIGURATION":
-                    conditions.append(PartToModel.configuration.ilike(f"%{str_value}%"))
+                    conditions.append(ConfigurationData.configuration.cast(String).ilike(str_value))
                 elif key == "MODEL_CODE":
                     conditions.append(ModelData.model_code.cast(String).ilike(str_value))
                 elif key == "MODEL_NAME":
@@ -459,35 +494,203 @@ class DatabaseAPI:
 
                 # ===== BOX =====
                 elif key == "PART_PER_BOX":
-                    conditions.append(PartToBox.part_per_box == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PartToBox.part_per_box >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(PartToBox.part_per_box <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PartToBox.part_per_box == int(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "BOX_TYPE":
                     conditions.append(BoxData.box_type.cast(String).ilike(str_value))
                 elif key == "BOX_WEIGHT_KG":
-                    conditions.append(BoxData.box_weight_kg == float(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(BoxData.box_weight_kg >= float(value['min']))
+                        if 'max' in value:
+                            conditions.append(BoxData.box_weight_kg <= float(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(BoxData.box_weight_kg == float(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "BOX_LENGTH_MM":
-                    conditions.append(BoxData.box_length_mm == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(BoxData.box_length_mm >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(BoxData.box_length_mm <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(BoxData.box_length_mm == int(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "BOX_WIDTH_MM":
-                    conditions.append(BoxData.box_width_mm == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(BoxData.box_width_mm >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(BoxData.box_width_mm <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(BoxData.box_width_mm == int(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "BOX_HEIGHT_MM":
-                    conditions.append(BoxData.box_height_mm == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(BoxData.box_height_mm >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(BoxData.box_height_mm <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(BoxData.box_height_mm == int(value))
+                            except (TypeError, ValueError):
+                                pass
+                elif key == "BOX_VOL_M3":
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(BoxData.box_vol_m3 >= float(value['min']))
+                        if 'max' in value:
+                            conditions.append(BoxData.box_vol_m3 <= float(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(BoxData.box_vol_m3 == float(value))
+                            except (TypeError, ValueError):
+                                pass
+                elif key == "BOX_AREA_M2":
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(BoxData.box_area_m2 >= float(value['min']))
+                        if 'max' in value:
+                            conditions.append(BoxData.box_area_m2 <= float(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(BoxData.box_area_m2 == float(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "BOX_STACKING":
-                    conditions.append(BoxData.box_stacking == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(BoxData.box_stacking >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(BoxData.box_stacking <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(BoxData.box_stacking == int(value))
+                            except (TypeError, ValueError):
+                                pass
 
                 # ===== PALLET =====
                 elif key == "BOX_PER_PALLET":
-                    conditions.append(BoxToPallet.box_per_pallet == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(BoxToPallet.box_per_pallet >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(BoxToPallet.box_per_pallet <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(BoxToPallet.box_per_pallet == int(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "PALLET_TYPE":
                     conditions.append(PalletData.pallet_type.cast(String).ilike(str_value))
                 elif key == "PALLET_WEIGHT_KG":
-                    conditions.append(PalletData.pallet_weight_kg == float(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PalletData.pallet_weight_kg >= float(value['min']))
+                        if 'max' in value:
+                            conditions.append(PalletData.pallet_weight_kg <= float(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PalletData.pallet_weight_kg == float(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "PALLET_LENGTH_MM":
-                    conditions.append(PalletData.pallet_length_mm == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PalletData.pallet_length_mm >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(PalletData.pallet_length_mm <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PalletData.pallet_length_mm == int(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "PALLET_WIDTH_MM":
-                    conditions.append(PalletData.pallet_width_mm == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PalletData.pallet_width_mm >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(PalletData.pallet_width_mm <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PalletData.pallet_width_mm == int(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "PALLET_HEIGHT_MM":
-                    conditions.append(PalletData.pallet_height_mm == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PalletData.pallet_height_mm >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(PalletData.pallet_height_mm <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PalletData.pallet_height_mm == int(value))
+                            except (TypeError, ValueError):
+                                pass
+                elif key == "PALLET_VOL_M3":
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PalletData.pallet_vol_m3 >= float(value['min']))
+                        if 'max' in value:
+                            conditions.append(PalletData.pallet_vol_m3 <= float(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PalletData.pallet_vol_m3 == float(value))
+                            except (TypeError, ValueError):
+                                pass
+                elif key == "PALLET_AREA_M2":
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PalletData.pallet_area_m2 >= float(value['min']))
+                        if 'max' in value:
+                            conditions.append(PalletData.pallet_area_m2 <= float(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PalletData.pallet_area_m2 == float(value))
+                            except (TypeError, ValueError):
+                                pass
                 elif key == "PALLET_STACKING":
-                    conditions.append(PalletData.pallet_stacking == int(value))
+                    if isinstance(value, dict) and ('min' in value or 'max' in value):
+                        if 'min' in value:
+                            conditions.append(PalletData.pallet_stacking >= int(value['min']))
+                        if 'max' in value:
+                            conditions.append(PalletData.pallet_stacking <= int(value['max']))
+                    else:
+                        if not isinstance(value, dict):
+                            try:
+                                conditions.append(PalletData.pallet_stacking == int(value))
+                            except (TypeError, ValueError):
+                                pass
 
                 # ===== SUPPLIER =====
                 elif key == "SUPPLIER_NAME":
@@ -550,6 +753,10 @@ class DatabaseAPI:
             ptm, ptl, ptb, box
         ):
         """Create a flat result row with all information and normalized output."""
+        # Get configuration from part_to_model if available
+        configuration = None
+        if ptm and ptm.configuration:
+            configuration = ptm.configuration.configuration
 
         # Basic part info with normalization
         row = {
@@ -560,9 +767,7 @@ class DatabaseAPI:
 
             # Model information (if available)
             "PART_PER_VEHICLE": ptm.part_per_vehicle if ptm else None,
-            "CONFIGURATION": normalize_output(
-                "CONFIGURATION", ptm.configuration if ptm else None
-            ),
+            "CONFIGURATION": normalize_output("CONFIGURATION", configuration),
             "MODEL_CODE": normalize_output(
                 "MODEL_CODE", ptm.model.model_code if ptm and ptm.model else None
             ),
@@ -597,7 +802,7 @@ class DatabaseAPI:
             "BOX_AREA_M2": float(box.box_area_m2) if box and box.box_area_m2 else None,
             "BOX_STACKING": box.box_stacking if box else None,
 
-            # Pallet information (if available) - take first pallet if multiple
+            # Pallet information (if available)
             "BOX_PER_PALLET": None,
             "PALLET_TYPE": None,
             "PALLET_WEIGHT_KG": None,
@@ -609,21 +814,23 @@ class DatabaseAPI:
             "PALLET_STACKING": None
         }
 
-        # Add pallet information if box has pallets
+        # Add pallet information if box has pallets and the pallet combination matches this part
         if box and box.pallets:
-            # Get the first pallet relationship (or handle multiple appropriately)
-            btp = box.pallets[0] if box.pallets else None
-            if btp and btp.pallet:
-                pallet = btp.pallet
-                row["BOX_PER_PALLET"] = btp.box_per_pallet
-                row["PALLET_TYPE"] = normalize_output("PALLET_TYPE", pallet.pallet_type)
-                row["PALLET_WEIGHT_KG"] = float(pallet.pallet_weight_kg) if pallet.pallet_weight_kg else None
-                row["PALLET_LENGTH_MM"] = pallet.pallet_length_mm
-                row["PALLET_WIDTH_MM"] = pallet.pallet_width_mm
-                row["PALLET_HEIGHT_MM"] = pallet.pallet_height_mm
-                row["PALLET_VOL_M3"] = float(pallet.pallet_vol_m3) if pallet.pallet_vol_m3 else None
-                row["PALLET_AREA_M2"] = float(pallet.pallet_area_m2) if pallet.pallet_area_m2 else None
-                row["PALLET_STACKING"] = pallet.pallet_stacking
+            # Find pallet combinations that match this part
+            matching_pallets = [btp for btp in box.pallets if btp.part_id == part.part_id]
+            if matching_pallets:
+                btp = matching_pallets[0]
+                if btp and btp.pallet:
+                    pallet = btp.pallet
+                    row["BOX_PER_PALLET"] = btp.box_per_pallet
+                    row["PALLET_TYPE"] = normalize_output("PALLET_TYPE", pallet.pallet_type)
+                    row["PALLET_WEIGHT_KG"] = float(pallet.pallet_weight_kg) if pallet.pallet_weight_kg else None
+                    row["PALLET_LENGTH_MM"] = pallet.pallet_length_mm
+                    row["PALLET_WIDTH_MM"] = pallet.pallet_width_mm
+                    row["PALLET_HEIGHT_MM"] = pallet.pallet_height_mm
+                    row["PALLET_VOL_M3"] = float(pallet.pallet_vol_m3) if pallet.pallet_vol_m3 else None
+                    row["PALLET_AREA_M2"] = float(pallet.pallet_area_m2) if pallet.pallet_area_m2 else None
+                    row["PALLET_STACKING"] = pallet.pallet_stacking
 
         # Supplier information with normalization
         row.update({
@@ -700,7 +907,17 @@ class DatabaseAPI:
                 if value:
                     # Clean key for filename
                     clean_key = key.replace('_', '').replace('-', '')
-                    filter_desc.append(f"{clean_key}_{value}")
+                    if isinstance(value, dict):
+                        # Handle range filters
+                        range_parts = []
+                        if 'min' in value:
+                            range_parts.append(f"min{value['min']}")
+                        if 'max' in value:
+                            range_parts.append(f"max{value['max']}")
+                        if range_parts:
+                            filter_desc.append(f"{clean_key}_{'_'.join(range_parts)}")
+                    else:
+                        filter_desc.append(f"{clean_key}_{value}")
 
             filter_str = "_".join(filter_desc)[:50]  # Limit length
 
@@ -821,7 +1038,10 @@ def get_db_api() -> Optional[DatabaseAPI]:
                 return None
 
             except Exception as unexpected_error:
-                logger.error("Unexpected error creating DatabaseAPI: %s", unexpected_error, exc_info=True)
+                logger.error(
+                    "Unexpected error creating DatabaseAPI: %s",
+                    unexpected_error, exc_info=True
+                )
                 current_app.extensions['db_api'] = None
                 return None
 
@@ -1044,32 +1264,49 @@ def universal_search_endpoint():
         # Query parameters
         filters = request.args.to_dict()
 
-    # Convert string numbers to appropriate types
+    # Process filters to support range queries with _min and _max suffixes
     processed_filters = {}
+
+    # First, collect all filters
     for key, value in filters.items():
         if value is None or value == "":
             continue
 
-        # Try to convert numeric strings to appropriate types
-        try:
-            # Check if it's a float
-            if isinstance(value, str) and '.' in value:
-                processed_filters[key] = float(value)
-            elif isinstance(value, str):
-                # Try int first
-                try:
-                    processed_filters[key] = int(value)
-                except ValueError:
-                    # Keep as string
-                    processed_filters[key] = value
-            else:
-                # Already a number or other type
-                processed_filters[key] = value
+        # Check if this is a range filter (ends with _min or _max)
+        if key.endswith('_min') or key.endswith('_max'):
+            base_key = key[:-4]  # Remove _min or _max
+            range_type = key[-3:]  # 'min' or 'max'
 
-        except (ValueError, TypeError) as e:
-            logger.warning("Failed to convert filter value '%s' for key '%s': %s", value, key, e)
-            # Keep as string
-            processed_filters[key] = value
+            if base_key not in processed_filters:
+                processed_filters[base_key] = {}
+
+            try:
+                # Try to convert to float or int
+                if '.' in value:
+                    processed_filters[base_key][range_type] = float(value)
+                else:
+                    processed_filters[base_key][range_type] = int(value)
+            except (ValueError, TypeError):
+                processed_filters[base_key][range_type] = value
+        else:
+            # Regular filter
+            try:
+                # Try to convert numeric strings to appropriate types
+                if isinstance(value, str) and '.' in value:
+                    processed_filters[key] = float(value)
+                elif isinstance(value, str):
+                    try:
+                        processed_filters[key] = int(value)
+                    except ValueError:
+                        processed_filters[key] = value
+                else:
+                    processed_filters[key] = value
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    "Failed to convert filter value '%s' for key '%s': %s",
+                    value, key, e
+                )
+                processed_filters[key] = value
 
     logger.info("Universal search with filters: %s", processed_filters)
 
@@ -1130,18 +1367,37 @@ def export_to_excel_endpoint():
         if value is None or value == "":
             continue
 
-        try:
-            if isinstance(value, str) and '.' in value:
-                processed_filters[key] = float(value)
-            elif isinstance(value, str):
-                try:
-                    processed_filters[key] = int(value)
-                except ValueError:
+        if isinstance(value, dict):
+            # Range filter
+            processed_filters[key] = {}
+            for range_key, range_value in value.items():
+                if range_key in ['min', 'max']:
+                    try:
+                        if isinstance(range_value, str) and '.' in range_value:
+                            processed_filters[key][range_key] = float(range_value)
+                        elif isinstance(range_value, str):
+                            try:
+                                processed_filters[key][range_key] = int(range_value)
+                            except ValueError:
+                                processed_filters[key][range_key] = range_value
+                        else:
+                            processed_filters[key][range_key] = range_value
+                    except (ValueError, TypeError):
+                        processed_filters[key][range_key] = range_value
+        else:
+            # Regular filter
+            try:
+                if isinstance(value, str) and '.' in value:
+                    processed_filters[key] = float(value)
+                elif isinstance(value, str):
+                    try:
+                        processed_filters[key] = int(value)
+                    except ValueError:
+                        processed_filters[key] = value
+                else:
                     processed_filters[key] = value
-            else:
+            except (ValueError, TypeError):
                 processed_filters[key] = value
-        except (ValueError, TypeError):
-            processed_filters[key] = value
 
     # Export to Excel
     result = api.export_to_excel(processed_filters, export_path)
@@ -1463,7 +1719,10 @@ def create_app():
         app.extensions['db_api'] = None
 
     except Exception as unexpected_error:
-        logger.error("Unexpected error during database initialization: %s", unexpected_error, exc_info=True)
+        logger.error(
+            "Unexpected error during database initialization: %s",
+            unexpected_error, exc_info=True
+        )
         app.extensions['db_api'] = None
 
     # ========== LOG REGISTERED ROUTES ==========
