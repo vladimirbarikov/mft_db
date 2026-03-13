@@ -752,7 +752,7 @@ def _prepare_junction_dataframes(
     # Deduplication configuration
     deduplication_config = {
         'part_to_box_composite': ['part_id', 'box_id'],
-        'box_to_pallet_composite': ['box_id', 'pallet_id'],
+        'box_to_pallet_composite': ['part_id', 'box_id', 'pallet_id'],
         'part_to_model': ['part_id', 'model_id', 'configuration_id'],
         'part_to_line': ['part_id', 'line_id']
     }
