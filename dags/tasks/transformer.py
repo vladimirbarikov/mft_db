@@ -347,12 +347,11 @@ def basic_clean_text(df: pl.DataFrame, col: str) -> pl.DataFrame:
     and Cyrillic to Latin character mapping for visually similar characters.
     
     Performs the following operations in order:
-        1. Removes all special characters (punctuation, symbols, newlines, tabs)
-        2. Converts text to lowercase
-        3. Maps visually similar Cyrillic characters to Latin equivalents 
+        1. Converts text to lowercase
+        2. Maps visually similar Cyrillic characters to Latin equivalents 
            (e.g., Russian 'а', 'в', 'е', 'к', 'м', 'н', 'о', 'р', 'с', 'т', 'х')
-        4. Normalizes multiple spaces to single space
-        5. Trims leading/trailing spaces
+        3. Normalizes multiple spaces to single space
+        4. Trims leading/trailing spaces
     
     Note:
         - Assumes input text is already a string type
@@ -375,9 +374,7 @@ def basic_clean_text(df: pl.DataFrame, col: str) -> pl.DataFrame:
         >>> import polars as pl        
         >>> # Cleaning user input data
         >>> df = pl.DataFrame({'user_input': [
-        ...     'Hello, World!',               # Latin with punctuation
         ...     'техт',                        # Cyrillic
-        ...     'user@email.com',              # Email format
         ...     '  multiple   spaces  ',       # Extra spaces
         ... ]})
         >>> basic_clean_text(df, 'user_input')
@@ -387,9 +384,7 @@ def basic_clean_text(df: pl.DataFrame, col: str) -> pl.DataFrame:
         │ ---             │
         │ str             │
         ╞═════════════════╡
-        │ hello world     │  # Punctuation removed
         │ text            │  # Cyrillic mapped
-        │ user email com  │  # Special chars removed
         │ multiple spaces │  # Spaces normalized and trimmed
         └─────────────────┘
     """
@@ -397,9 +392,6 @@ def basic_clean_text(df: pl.DataFrame, col: str) -> pl.DataFrame:
         if col not in df.columns:
             logger.warning("Column '%s' not found in DataFrame", col)
             return df
-
-        # Define special characters to remove
-        special_chars = re.escape(r"-)(][.,;:_/\|+*&^%$#@!~`\"'<>?{}")
 
         # Mapping for lowercase Cyrillic to lowercase Latin
         # Assumes text will be lowercase before applying this mapping
@@ -422,8 +414,6 @@ def basic_clean_text(df: pl.DataFrame, col: str) -> pl.DataFrame:
 
         df = df.with_columns(
             pl.col(col)
-            # Remove all special characters
-            .str.replace_all(f"[{special_chars}\n\t]", " ")
             # Convert text to lowercase for consistent mapping
             .str.to_lowercase()
             # Map Cyrillic characters to visually similar Latin ones
