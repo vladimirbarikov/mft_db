@@ -20,10 +20,10 @@ Dependencies:
     - config.columns_config for table requirements validation
 
 Maintainer: PLD Engineering Center
-Version: 1.1.0
+Version: 1.0.0
 Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
 Created: 2026-01-12
-Last Modified: 2025-02-16
+Last Modified: 2025-03-13
 License: MIT
 Status: Production
 """
@@ -55,7 +55,7 @@ from dags.tasks.mft_mapper import create_mapper
 from database.database import (
     # Entity tables
     SupplierData, PartData, BoxData, PalletData,
-    ModelData, WorkshopData, LineData,
+    ModelData, ConfigurationData, WorkshopData, LineData,
     # Junction tables
     PartToBox, BoxToPallet, PartToModel, PartToLine
 )
@@ -188,6 +188,7 @@ def _bulk_insert_dataframe(
             'supplier_data': ['supplier_name'],
             'part_data': ['part_number'],
             'model_data': ['model_code'],
+            'configuration_data': ['configuration'],
             'workshop_data': ['workshop_code'],
             'line_data': ['line_code'],
             # For box_data and pallet_data, we use a composite constraint
@@ -463,8 +464,8 @@ def load_core_entity_tables(
     results = {}
 
     try:
-        # PHASE 1: Load independent tables (no foreign keys)
-        logger.info("Phase 1: Loading independent tables...")
+        # Load independent tables (no foreign keys)
+        logger.info("Loading independent tables...")
 
         independent_tables = [
             (
@@ -492,6 +493,12 @@ def load_core_entity_tables(
                 'model_code'
             ),
             (
+                'transformed_configuration_df',
+                ConfigurationData,
+                'configuration_data',
+                'configuration'
+            ),
+            (
                 'transformed_workshop_df',
                 WorkshopData,
                 'workshop_data',
@@ -505,6 +512,7 @@ def load_core_entity_tables(
             'box_data': ['box_type', 'box_length_mm', 'box_width_mm', 'box_height_mm'],
             'pallet_data': ['pallet_type', 'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm'],
             'model_data': ['model_code'],
+            'configuration_data': ['configuration'],
             'workshop_data': ['workshop_code']
         }
 
@@ -545,18 +553,18 @@ def load_core_entity_tables(
             )
             results[table_name] = records_loaded
 
-        # Commit Phase 1 so mapper can see the data
-        logger.info("Committing Phase 1 transactions...")
+        # Commit loading independent tables so mapper can see the data
+        logger.info("Committing loading independent tables transactions...")
         with engine.begin() as connection:
             connection.execute(text("COMMIT"))
 
         enable_foreign_keys(engine)
 
-        # PHASE 2: Load dependent tables (with foreign keys) using mapper
+        # Load dependent tables (with foreign keys) using mapper
         if resolve_foreign_keys:
-            logger.info("Phase 2: Loading dependent tables with foreign keys...")
+            logger.info("Loading dependent tables with foreign keys...")
 
-            # Create mapper AFTER Phase 1 commit
+            # Create mapper AFTER loading independent tables commit
             mapper = None
             try:
                 mapper = create_mapper(engine)
@@ -745,7 +753,7 @@ def _prepare_junction_dataframes(
     deduplication_config = {
         'part_to_box_composite': ['part_id', 'box_id'],
         'box_to_pallet_composite': ['box_id', 'pallet_id'],
-        'part_to_model': ['part_id', 'model_id'],
+        'part_to_model': ['part_id', 'model_id', 'configuration_id'],
         'part_to_line': ['part_id', 'line_id']
     }
 
@@ -937,6 +945,7 @@ def load_junction_tables(
             ('boxes', mapper.get_box_mapping),
             ('pallets', mapper.get_pallet_mapping),
             ('models', mapper.get_model_mapping),
+            ('configurations', mapper.get_configuration_mapping),
             ('workshops', mapper.get_workshop_mapping),
             ('lines', mapper.get_line_mapping)
         ]
