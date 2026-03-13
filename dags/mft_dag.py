@@ -154,7 +154,7 @@ Maintainer: PLD Engineering Center
 Version: 1.0.0
 Compatibility: Python 3.12.3+
 Created: 2025-01-19
-Last Modified: 2026-02-07
+Last Modified: 2026-03-13
 Status: Production
 License: MIT
 """
@@ -188,7 +188,7 @@ from config import get_logger
 from config.columns_config import (
     # CORE ENTITY TABLES COLUMNS
     SUPPLIER_COLS, PART_COLS, BOX_COLS, PALLET_COLS,
-    MODEL_COLS, WORKSHOP_COLS, LINE_COLS,
+    MODEL_COLS, CONFIGURATION_COLS, WORKSHOP_COLS, LINE_COLS,
     # JUNCTION TABLES COLUMNS
     PART_TO_BOX_COMPOSITE_COLS, BOX_TO_PALLET_COMPOSITE_COLS,
     PART_TO_MODEL_COLS, PART_TO_LINE_COLS
@@ -208,9 +208,10 @@ from dags.tasks.transformer import (
     convert_to_string,
     convert_to_float,
     basic_clean_text,
-    advanced_clean_text
+    advanced_clean_text,
+    pinyin_conversion
 )
-from dags.tasks.loader import (
+from dags.tasks.mft_loader import (
     load_core_entity_tables,
     load_junction_tables
 )
@@ -240,6 +241,7 @@ moscow_tz = pytz.timezone('Europe/Moscow')
     },
     tags=['etl', 'manufacturing', 'postgres', 'triggered']
 )
+
 
 def mft_etl_pipeline():
     """
@@ -345,6 +347,7 @@ def mft_etl_pipeline():
 
         return serialized_main_df
 
+
     # Extract data for core entity tables.
     @task(task_id="extract_supplier_data")
     def extract_supplier_data(
@@ -378,6 +381,7 @@ def mft_etl_pipeline():
 
         return serialized_raw_supplier_df
 
+
     @task(task_id="extract_part_data")
     def extract_part_data(
         serialized_main_df: bytes
@@ -409,6 +413,7 @@ def mft_etl_pipeline():
         )
 
         return serialized_raw_part_df
+
 
     @task(task_id="extract_box_data")
     def extract_box_data(
@@ -442,6 +447,7 @@ def mft_etl_pipeline():
 
         return serialized_raw_box_df
 
+
     @task(task_id="extract_pallet_data")
     def extract_pallet_data(
         serialized_main_df: bytes
@@ -473,6 +479,7 @@ def mft_etl_pipeline():
         )
 
         return serialized_raw_pallet_df
+
 
     @task(task_id="extract_model_data")
     def extract_model_data(
@@ -506,6 +513,39 @@ def mft_etl_pipeline():
 
         return serialized_raw_model_df
 
+    @task(task_id="extract_configuration_data")
+    def extract_configuration_data(
+        serialized_main_df: bytes
+    ) -> bytes:
+        """Task extracts raw configuration-specific data"""
+        logger.info(
+            "Extracting configuration data..."
+        )
+
+        # Deserialize the DataFrame from bytes
+        main_df = deserialize_df(serialized_main_df)
+
+        raw_configuration_df = create_specialized_df(main_df, CONFIGURATION_COLS)
+
+        logger.info(
+            "Successfully extracted configuration data.\n"
+            "Shape: %d rows, %d columns.\n"
+            "Columns: %s.",
+            raw_configuration_df.height,
+            raw_configuration_df.width,
+            ', '.join(raw_configuration_df.columns),
+        )
+
+        # Serializing the DataFrame to bytes
+        serialized_raw_configuration_df = serialize_df(raw_configuration_df)
+        logger.debug(
+            "Serialized configuration data to %d bytes.",
+            len(serialized_raw_configuration_df)
+        )
+
+        return serialized_raw_configuration_df
+
+
     @task(task_id="extract_workshop_data")
     def extract_workshop_data(
         serialized_main_df: bytes
@@ -538,6 +578,7 @@ def mft_etl_pipeline():
 
         return serialized_raw_workshop_df
 
+
     @task(task_id="extract_line_data")
     def extract_line_data(
         serialized_main_df: bytes
@@ -569,6 +610,7 @@ def mft_etl_pipeline():
         )
 
         return serialized_raw_line_df
+
 
     # Extract data for junction tables (many-to-many relationships)
     @task(task_id="extract_junction_data")
@@ -613,6 +655,7 @@ def mft_etl_pipeline():
 
         return raw_junction_dict
 
+
     # ========== TRANSFORM PHASE ==========
 
     # Transform data for core entity tables.
@@ -635,6 +678,7 @@ def mft_etl_pipeline():
         for col in ['SUPPLIER_NAME', 'LOCATION', 'CITY', 'STREET', 'BUILDING']:
             supplier_df = convert_to_string(supplier_df, col)
             supplier_df = advanced_clean_text(supplier_df, col)
+            supplier_df = pinyin_conversion(supplier_df, col)
 
         # Apply converting and basic cleaning text to LOCALIZATION as it is ENUM ('yes', 'no')
         supplier_df = convert_to_string(supplier_df, 'LOCALIZATION')
@@ -664,6 +708,7 @@ def mft_etl_pipeline():
 
         return serialized_transformed_supplier_df
 
+
     @task(task_id="transform_part_data")
     def transform_part_data(
         serialized_raw_part_df: bytes
@@ -688,6 +733,7 @@ def mft_etl_pipeline():
         for col in text_cols:
             part_df = convert_to_string(part_df, col)
             part_df = advanced_clean_text(part_df, col)
+            part_df = pinyin_conversion(part_df, col)
 
         # Converting weight to float with 2 decimal places
         part_df = convert_to_float(part_df, 'PART_WEIGHT_KG')
@@ -716,6 +762,7 @@ def mft_etl_pipeline():
 
         return serialized_transformed_part_df
 
+
     @task(task_id="transform_box_data")
     def transform_box_data(
         serialized_raw_box_df: bytes
@@ -732,13 +779,8 @@ def mft_etl_pipeline():
         box_df = box_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting and cleaninig text
-        str_cols = [
-            'BOX_TYPE'
-        ]
-
-        for col in str_cols:
-            box_df = convert_to_string(box_df, col)
-            box_df = basic_clean_text(box_df, col)
+        box_df = convert_to_string(box_df, 'BOX_TYPE')
+        box_df = basic_clean_text(box_df, 'BOX_TYPE')
 
         # Apply converting to Int64
         int_cols = [
@@ -752,12 +794,7 @@ def mft_etl_pipeline():
             box_df = convert_to_int64(box_df, col)
 
         # Apply converting to float
-        float_cols = [
-            'BOX_WEIGHT_KG'
-        ]
-
-        for col in float_cols:
-            box_df = convert_to_float(box_df, col)
+        box_df = convert_to_float(box_df, 'BOX_WEIGHT_KG')
 
         # Removing duplicates across all BOX_COLS
         transformed_box_df = box_df.unique(subset=BOX_COLS, keep='first')
@@ -783,6 +820,7 @@ def mft_etl_pipeline():
 
         return serialized_transformed_box_df
 
+
     @task(task_id="transform_pallet_data")
     def transform_pallet_data(
         serialized_raw_pallet_df: bytes
@@ -799,13 +837,8 @@ def mft_etl_pipeline():
         pallet_df = pallet_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting and cleaninig text
-        str_cols = [
-            'PALLET_TYPE'
-        ]
-
-        for col in str_cols:
-            pallet_df = convert_to_string(pallet_df, col)
-            pallet_df = basic_clean_text(pallet_df, col)
+        pallet_df = convert_to_string(pallet_df, 'PALLET_TYPE')
+        pallet_df = basic_clean_text(pallet_df, 'PALLET_TYPE')
 
         # Apply converting to Int64
         int_cols = [
@@ -819,12 +852,7 @@ def mft_etl_pipeline():
             pallet_df = convert_to_int64(pallet_df, col)
 
         # Apply converting to float
-        float_cols = [
-            'PALLET_WEIGHT_KG'
-        ]
-
-        for col in float_cols:
-            pallet_df = convert_to_float(pallet_df, col)
+        pallet_df = convert_to_float(pallet_df, 'PALLET_WEIGHT_KG')
 
         # Removing duplicates across all PALLET_COLS
         transformed_pallet_df = pallet_df.unique(subset=PALLET_COLS, keep='first')
@@ -849,6 +877,7 @@ def mft_etl_pipeline():
         )
 
         return serialized_transformed_pallet_df
+
 
     @task(task_id="transform_model_data")
     def transform_model_data(
@@ -894,6 +923,56 @@ def mft_etl_pipeline():
 
         return serialized_transformed_model_df
 
+
+    @task(task_id="transform_configuration_data")
+    def transform_configuration_data(
+        serialized_raw_configuration_df: bytes
+    ) -> bytes:
+        """Transform model data with text cleaning, type conversion and removing duplicates."""
+        logger.info(
+            "Transforming model data..."
+        )
+
+        # Deserialize the DataFrame from bytes
+        configuration_df = deserialize_df(serialized_raw_configuration_df)
+
+        # Deleting lines if all values are Null/Nan
+        configuration_df = configuration_df.filter(pl.any_horizontal(pl.all().is_not_null()))
+
+        # Apply converting text
+        for col in CONFIGURATION_COLS:
+            configuration_df = convert_to_string(configuration_df, col)
+
+        # Apply cleaning text
+        configuration_df = basic_clean_text(configuration_df, 'CONFIGURATION')
+        configuration_df = advanced_clean_text(configuration_df, 'DESCRIPTION')
+        configuration_df = pinyin_conversion(configuration_df, 'DESCRIPTION')
+
+        # Removing duplicates across all MODEL_COLS
+        transformed_configuration_df = configuration_df.unique(subset=MODEL_COLS, keep='first')
+
+        # Convert all column names to lowercase
+        transformed_configuration_df = columns_to_lowercase(transformed_configuration_df)
+
+        logger.info(
+            "Successfully transformed configuration data.\n"
+            "Shape: %d rows, %d columns.\n"
+            "Columns: %s.",
+            transformed_configuration_df.height,
+            transformed_configuration_df.width,
+            ', '.join(transformed_configuration_df.columns),
+        )
+
+        # Serializing the DataFrame to bytes
+        serialized_transformed_configuration_df = serialize_df(transformed_configuration_df)
+        logger.debug(
+            "Serialized model data to %d bytes.",
+            len(serialized_transformed_configuration_df)
+        )
+
+        return serialized_transformed_configuration_df
+
+
     @task(task_id="transform_workshop_data")
     def transform_workshop_data(
         serialized_raw_workshop_df: bytes
@@ -938,6 +1017,7 @@ def mft_etl_pipeline():
 
         return serialized_transformed_workshop_df
 
+
     @task(task_id="transform_line_data")
     def transform_line_data(
         serialized_raw_line_df: bytes
@@ -981,6 +1061,7 @@ def mft_etl_pipeline():
         )
 
         return serialized_transformed_line_df
+
 
     # Transform data for junction tables
     @task(task_id="transform_junction_data")
@@ -1127,13 +1208,16 @@ def mft_etl_pipeline():
 
         return transformed_junction_dict
 
+
     # ========== LOADING PHASE ==========
+
     # Separate tasks of loading core entity and junction tables in correct sequence
     @task(task_id="load_core_entity_tables")
     def load_core_tables_task(
         serialized_transformed_supplier_df: bytes,
         serialized_transformed_workshop_df: bytes,
         serialized_transformed_model_df: bytes,
+        serialized_transformed_configuration_df: bytes,
         serialized_transformed_box_df: bytes,
         serialized_transformed_pallet_df: bytes,
         serialized_transformed_line_df: bytes,
@@ -1148,8 +1232,9 @@ def mft_etl_pipeline():
         3. Boxes (independent)
         4. Pallets (independent)
         5. Models (independent)
-        6. Workshops (independent)
-        7. Lines (depending on Workshops) - but it will be postponed due to Foregn Key
+        6. Configuration (independent)
+        7. Workshops (independent)
+        8. Lines (depending on Workshops) - but it will be postponed due to Foregn Key
         """
         logger.info(
             "Loading all core entity tables in correct dependency sequence..."
@@ -1161,6 +1246,7 @@ def mft_etl_pipeline():
             'transformed_box_df': deserialize_df(serialized_transformed_box_df),
             'transformed_pallet_df': deserialize_df(serialized_transformed_pallet_df),
             'transformed_model_df': deserialize_df(serialized_transformed_model_df),
+            'transformed_configuration_df': deserialize_df(serialized_transformed_configuration_df),
             'transformed_workshop_df': deserialize_df(serialized_transformed_workshop_df),
             'transformed_line_df': deserialize_df(serialized_transformed_line_df),
             'transformed_part_df': deserialize_df(serialized_transformed_part_df)
@@ -1198,6 +1284,7 @@ def mft_etl_pipeline():
             "- Suppliers: %d\n"
             "- Workshops: %d\n"
             "- Models: %d\n"
+            "- Configurations: %d\n"
             "- Boxes: %d\n"
             "- Pallets: %d\n"
             "- Lines: %d\n"
@@ -1206,6 +1293,7 @@ def mft_etl_pipeline():
             results.get('supplier_data', 0),
             results.get('workshop_data', 0),
             results.get('model_data', 0),
+            results.get('configuration_data', 0),
             results.get('box_data', 0),
             results.get('pallet_data', 0),
             results.get('line_data', 0),
@@ -1213,6 +1301,7 @@ def mft_etl_pipeline():
         )
 
         return results
+
 
     @task(task_id="load_junction_tables")
     def load_junction_tables_task(
@@ -1280,6 +1369,7 @@ def mft_etl_pipeline():
 
         return results
 
+
     @task(task_id="validate_data_integrity", trigger_rule="all_done")
     def validate_data_integrity(
         core_entities_results: dict[str, int],
@@ -1314,6 +1404,7 @@ def mft_etl_pipeline():
                 "- Suppliers: %d\n"
                 "- Workshops: %d\n"
                 "- Models: %d\n"
+                "- Configurations: %d\n"
                 "- Lines: %d\n"
                 "- Boxes: %d\n"
                 "- Pallets: %d\n"
@@ -1321,6 +1412,7 @@ def mft_etl_pipeline():
                 core_entities_results.get('supplier_data', 0),
                 core_entities_results.get('workshop_data', 0),
                 core_entities_results.get('model_data', 0),
+                core_entities_results.get('configuration_data', 0),
                 core_entities_results.get('box_data', 0),
                 core_entities_results.get('pallet_data', 0),
                 core_entities_results.get('line_data', 0),
@@ -1373,6 +1465,7 @@ def mft_etl_pipeline():
                         ', '.join(empty_junctions)
                     )
 
+
     # ========== PIPELINE ORCHESTRATION ==========
     # EXTRACT PHASE
     # All tasks of extract phase depend on main_data
@@ -1384,6 +1477,7 @@ def mft_etl_pipeline():
     extract_box_task = extract_box_data(main_task)  # type: ignore
     extract_pallet_task = extract_pallet_data(main_task)  # type: ignore
     extract_model_task = extract_model_data(main_task)  # type: ignore
+    extract_configuration_task = extract_configuration_data(main_task)  # type: ignore
     extract_workshop_task = extract_workshop_data(main_task)  # type: ignore
     extract_line_task = extract_line_data(main_task)  # type: ignore
     extract_junction_task = extract_junction_data(main_task)  # type: ignore
@@ -1395,6 +1489,7 @@ def mft_etl_pipeline():
     transform_box_task = transform_box_data(extract_box_task)  # type: ignore
     transform_pallet_task = transform_pallet_data(extract_pallet_task)  # type: ignore
     transform_model_task = transform_model_data(extract_model_task)  # type: ignore
+    transform_configuration_task = transform_configuration_data(extract_configuration_task)  # type: ignore
     transform_workshop_task = transform_workshop_data(extract_workshop_task)  # type: ignore
     transform_line_task = transform_line_data(extract_line_task)  # type: ignore
     transform_junction_task = transform_junction_data(extract_junction_task)  # type: ignore
@@ -1402,13 +1497,14 @@ def mft_etl_pipeline():
     # LOADING PHASE
     # Loading all core entity tables in one task in the correct sequence
     load_core_entities_task = load_core_tables_task(
-        serialized_transformed_supplier_df=transform_supplier_task,  # type: ignore
-        serialized_transformed_box_df=transform_box_task,  # type: ignore
-        serialized_transformed_pallet_df=transform_pallet_task,  # type: ignore
-        serialized_transformed_model_df=transform_model_task,  # type: ignore
-        serialized_transformed_workshop_df=transform_workshop_task,  # type: ignore
-        serialized_transformed_line_df=transform_line_task,  # type: ignore
-        serialized_transformed_part_df=transform_part_task  # type: ignore
+        serialized_transformed_supplier_df = transform_supplier_task,  # type: ignore
+        serialized_transformed_box_df = transform_box_task,  # type: ignore
+        serialized_transformed_pallet_df = transform_pallet_task,  # type: ignore
+        serialized_transformed_model_df = transform_model_task,  # type: ignore
+        serialized_transformed_configuration_df = transform_configuration_task,  # type: ignore
+        serialized_transformed_workshop_df = transform_workshop_task,  # type: ignore
+        serialized_transformed_line_df = transform_line_task,  # type: ignore
+        serialized_transformed_part_df = transform_part_task  # type: ignore
     )
 
     # Loading all the junction tables (depending on core entities)
