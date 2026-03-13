@@ -34,8 +34,8 @@ from flask import Blueprint, Flask, request, jsonify, current_app, send_file
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from sqlalchemy import String
-from sqlalchemy.orm import sessionmaker, joinedload, selectinload
+from sqlalchemy import String, and_
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import (
     SQLAlchemyError, IntegrityError, DataError, StatementError,
     OperationalError, ProgrammingError, InvalidRequestError
@@ -345,360 +345,176 @@ class DatabaseAPI:
             # For non-ENUM fields - partial match
             return query.filter(field.ilike(f"%{str_value}%"))
 
-    def universal_search(
-            self,
-            filters: Dict[str, Any]
-        ) -> Dict[str, Any]:
+    def universal_search(self, filters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Universal search - accepts any filters and returns complete part information.
-        All text searches are case-insensitive.
-        Numeric fields support range queries with _min and _max suffixes.
+        Universal search - returns ONLY rows that match ALL provided filters.
+        Each column in result contains ONLY values that satisfy the filters.
+        Filters are combined with AND logic - each additional filter narrows the search.
         
         Args:
-            filters: Dictionary with filter parameters (any column from any table)
-                    Example: {
-                        "part_number": "999",
-                        "localization": "yes",
-                        "workshop_code": "as",
-                        "supplier_name": "bosch",
-                        "part_weight_kg_min": 1.0,
-                        "part_weight_kg_max": 3.0,
-                        "box_length_mm_min": 500,
-                        "box_length_mm_max": 1200,
-                        "box_vol_m3_min": 1.0,
-                        "box_vol_m3_max": 5.0
-                    }
+        filters: Dictionary with filter parameters (any column from any table)
+                Example: {
+                    "PART_NUMBER": "6804100XKN01A8P",
+                    "MODEL_NAME": "Jolion",
+                    "LINE_CODE": "HZZ102",
+                    "LOCATION": "China",
+                    "BOX_TYPE": "Non-returnable"
+                }
         
         Returns:
             Dictionary with complete information for all matching parts
         """
         def query(session):
-            # Start with PartData
-            query = session.query(PartData).distinct()
 
-            # Track which joins we've already made to avoid duplicates
-            joined_supplier = False
-            joined_part_to_model = False
-            joined_model = False
-            joined_part_to_line = False
-            joined_line = False
-            joined_workshop = False
-            joined_part_to_box = False
-            joined_box = False
-            joined_box_to_pallet = False
-            joined_pallet = False
+            # Base query - start from the most granular level to get all combinations
+            # This ensures that each row is a real combination.
+            query = session.query(
+                PartData.part_number,
+                PartData.part_name,
+                PartData.part_weight_kg,
 
-            # Apply filters dynamically (case-insensitive and range support)
+                PartToModel.part_per_vehicle,
+                PartToModel.configuration,
+                ModelData.model_code,
+                ModelData.model_name,
+
+                LineData.line_code,
+                LineData.line_name,
+                WorkshopData.workshop_code,
+                WorkshopData.workshop_name,
+
+                PartToBox.part_per_box,
+                BoxData.box_type,
+                BoxData.box_weight_kg,
+                BoxData.box_length_mm,
+                BoxData.box_width_mm,
+                BoxData.box_height_mm,
+                BoxData.box_stacking,
+
+                BoxToPallet.box_per_pallet,
+                PalletData.pallet_type,
+                PalletData.pallet_weight_kg,
+                PalletData.pallet_length_mm,
+                PalletData.pallet_width_mm,
+                PalletData.pallet_height_mm,
+                PalletData.pallet_stacking,
+
+                SupplierData.supplier_name,
+                SupplierData.location,
+                SupplierData.city,
+                SupplierData.street,
+                SupplierData.building,
+                SupplierData.localization
+
+            ).select_from(PartToBox)
+
+            # Add all joins sequentially
+            query = query.join(PartData, PartData.part_id == PartToBox.part_id)
+            query = query.join(SupplierData, SupplierData.supplier_id == PartData.supplier_id)
+            query = query.join(BoxData, BoxData.box_id == PartToBox.box_id)
+            query = query.join(PartToModel, PartData.part_id == PartToModel.part_id)
+            query = query.join(ModelData, ModelData.model_id == PartToModel.model_id)
+            query = query.join(PartToLine, PartData.part_id == PartToLine.part_id)
+            query = query.join(LineData, LineData.line_id == PartToLine.line_id)
+            query = query.join(WorkshopData, WorkshopData.workshop_id == LineData.workshop_id)
+            query = query.outerjoin(BoxToPallet, BoxData.box_id == BoxToPallet.box_id)
+            query = query.outerjoin(PalletData, PalletData.pallet_id == BoxToPallet.pallet_id)
+
+            # Building WHERE conditions based on filled filters
+            conditions = []
+
             for key, value in filters.items():
                 if value is None or value == "":
                     continue
 
-                # Convert value to string for case-insensitive comparison where needed
                 str_value = str(value)
 
-                # ===== PART DATA filters =====
-                if key == "part_number":
-                    query = self._apply_filter(query, PartData.part_number, value, is_enum=False)
-                elif key == "part_name":
-                    query = self._apply_filter(query, PartData.part_name, value, is_enum=False)
-                elif key == "part_weight_kg_min":
-                    query = query.filter(PartData.part_weight_kg >= float(value))
-                elif key == "part_weight_kg_max":
-                    query = query.filter(PartData.part_weight_kg <= float(value))
+                # ===== PART =====
+                if key == "PART_NUMBER":
+                    conditions.append(PartData.part_number.ilike(f"%{str_value}%"))
+                elif key == "PART_NAME":
+                    conditions.append(PartData.part_name.ilike(f"%{str_value}%"))
+                elif key == "PART_WEIGHT_KG":
+                    conditions.append(PartData.part_weight_kg == float(value))
 
-                # ===== SUPPLIER filters =====
-                elif key in [
-                    "supplier_name", "location", "city", "street", "building", "localization"
-                ]:
-                    if not joined_supplier:
-                        query = query.join(PartData.supplier)
-                        joined_supplier = True
+                # ===== MODEL =====
+                elif key == "PART_PER_VEHICLE":
+                    conditions.append(PartToModel.part_per_vehicle == int(value))
+                elif key == "CONFIGURATION":
+                    conditions.append(PartToModel.configuration.ilike(f"%{str_value}%"))
+                elif key == "MODEL_CODE":
+                    conditions.append(ModelData.model_code.cast(String).ilike(str_value))
+                elif key == "MODEL_NAME":
+                    conditions.append(ModelData.model_name.cast(String).ilike(str_value))
 
-                    if key == "supplier_name":
-                        query = self._apply_filter(
-                            query, SupplierData.supplier_name, value, is_enum=False
-                        )
-                    elif key == "location":
-                        query = self._apply_filter(
-                            query, SupplierData.location, value, is_enum=False
-                        )
-                    elif key == "city":
-                        query = self._apply_filter(
-                            query, SupplierData.city, value, is_enum=False
-                        )
-                    elif key == "street":
-                        query = self._apply_filter(
-                            query, SupplierData.street, value, is_enum=False
-                        )
-                    elif key == "building":
-                        query = self._apply_filter(
-                            query, SupplierData.building, value, is_enum=False
-                        )
-                    elif key == "localization":
-                        query = self._apply_filter(
-                            query, SupplierData.localization, value, is_enum=True
-                        )
+                # ===== LINE & WORKSHOP =====
+                elif key == "LINE_CODE":
+                    conditions.append(LineData.line_code.ilike(f"%{str_value}%"))
+                elif key == "LINE_NAME":
+                    conditions.append(LineData.line_name.ilike(f"%{str_value}%"))
+                elif key == "WORKSHOP_CODE":
+                    conditions.append(WorkshopData.workshop_code.cast(String).ilike(str_value))
+                elif key == "WORKSHOP_NAME":
+                    conditions.append(WorkshopData.workshop_name.cast(String).ilike(str_value))
 
-                # ===== MODEL filters =====
-                elif key in ["model_code", "model_name", "configuration", "part_per_vehicle"]:
-                    if not joined_part_to_model:
-                        query = query.join(PartToModel, PartData.part_id == PartToModel.part_id)
-                        joined_part_to_model = True
+                # ===== BOX =====
+                elif key == "PART_PER_BOX":
+                    conditions.append(PartToBox.part_per_box == int(value))
+                elif key == "BOX_TYPE":
+                    conditions.append(BoxData.box_type.cast(String).ilike(str_value))
+                elif key == "BOX_WEIGHT_KG":
+                    conditions.append(BoxData.box_weight_kg == float(value))
+                elif key == "BOX_LENGTH_MM":
+                    conditions.append(BoxData.box_length_mm == int(value))
+                elif key == "BOX_WIDTH_MM":
+                    conditions.append(BoxData.box_width_mm == int(value))
+                elif key == "BOX_HEIGHT_MM":
+                    conditions.append(BoxData.box_height_mm == int(value))
+                elif key == "BOX_STACKING":
+                    conditions.append(BoxData.box_stacking == int(value))
 
-                    if not joined_model and key in ["model_code", "model_name"]:
-                        query = query.join(PartToModel.model)
-                        joined_model = True
+                # ===== PALLET =====
+                elif key == "BOX_PER_PALLET":
+                    conditions.append(BoxToPallet.box_per_pallet == int(value))
+                elif key == "PALLET_TYPE":
+                    conditions.append(PalletData.pallet_type.cast(String).ilike(str_value))
+                elif key == "PALLET_WEIGHT_KG":
+                    conditions.append(PalletData.pallet_weight_kg == float(value))
+                elif key == "PALLET_LENGTH_MM":
+                    conditions.append(PalletData.pallet_length_mm == int(value))
+                elif key == "PALLET_WIDTH_MM":
+                    conditions.append(PalletData.pallet_width_mm == int(value))
+                elif key == "PALLET_HEIGHT_MM":
+                    conditions.append(PalletData.pallet_height_mm == int(value))
+                elif key == "PALLET_STACKING":
+                    conditions.append(PalletData.pallet_stacking == int(value))
 
-                    if key == "model_code":
-                        query = self._apply_filter(
-                            query, ModelData.model_code, value, is_enum=True
-                        )
-                    elif key == "model_name":
-                        query = self._apply_filter(
-                            query, ModelData.model_name, value, is_enum=True
-                        )
-                    elif key == "configuration":
-                        query = self._apply_filter(
-                            query, PartToModel.configuration, value, is_enum=False
-                        )
-                    elif key == "part_per_vehicle":
-                        query = query.filter(
-                            PartToModel.part_per_vehicle == int(value)
-                        )
+                # ===== SUPPLIER =====
+                elif key == "SUPPLIER_NAME":
+                    conditions.append(SupplierData.supplier_name.ilike(f"%{str_value}%"))
+                elif key == "LOCATION":
+                    conditions.append(SupplierData.location.ilike(f"%{str_value}%"))
+                elif key == "CITY":
+                    conditions.append(SupplierData.city.ilike(f"%{str_value}%"))
+                elif key == "STREET":
+                    conditions.append(SupplierData.street.ilike(f"%{str_value}%"))
+                elif key == "BUILDING":
+                    conditions.append(SupplierData.building.ilike(f"%{str_value}%"))
+                elif key == "LOCALIZATION":
+                    conditions.append(SupplierData.localization.cast(String).ilike(str_value))
 
-                # ===== LINE & WORKSHOP filters =====
-                elif key in ["line_code", "line_name", "workshop_code", "workshop_name"]:
-                    if not joined_part_to_line:
-                        query = query.join(PartToLine, PartData.part_id == PartToLine.part_id)
-                        joined_part_to_line = True
+            # Apply all the conditions with AND
+            if conditions:
+                query = query.filter(and_(*conditions))
 
-                    if not joined_line and key in ["line_code", "line_name"]:
-                        query = query.join(PartToLine.line)
-                        joined_line = True
+            # Removing duplicates
+            query = query.distinct()
 
-                    if not joined_workshop and key in ["workshop_code", "workshop_name"]:
-                        if not joined_line:
-                            query = query.join(PartToLine.line)
-                            joined_line = True
-                        query = query.join(LineData.workshop)
-                        joined_workshop = True
+            # Executing the request
+            results = query.all()
 
-                    if key == "line_code":
-                        query = self._apply_filter(
-                            query, LineData.line_code, value, is_enum=False
-                        )
-                    elif key == "line_name":
-                        query = self._apply_filter(
-                            query, LineData.line_name, value, is_enum=False
-                        )
-                    elif key == "workshop_code":
-                        query = self._apply_filter(
-                            query, WorkshopData.workshop_code, value, is_enum=True
-                        )
-                    elif key == "workshop_name":
-                        query = self._apply_filter(
-                            query, WorkshopData.workshop_name, value, is_enum=True
-                        )
-
-                # ===== BOX filters =====
-                elif key in ["part_per_box", "box_type",
-                           "box_weight_kg_min", "box_weight_kg_max",
-                           "box_length_mm_min", "box_length_mm_max",
-                           "box_width_mm_min", "box_width_mm_max",
-                           "box_height_mm_min", "box_height_mm_max",
-                           "box_vol_m3_min", "box_vol_m3_max",
-                           "box_area_m2_min", "box_area_m2_max",
-                           "box_stacking_min", "box_stacking_max"]:
-
-                    if not joined_part_to_box:
-                        query = query.join(PartToBox, PartData.part_id == PartToBox.part_id)
-                        joined_part_to_box = True
-
-                    if not joined_box:
-                        query = query.join(PartToBox.box)
-                        joined_box = True
-
-                    if key == "part_per_box":
-                        query = query.filter(
-                            PartToBox.part_per_box == int(value)
-                        )
-                    elif key == "box_type":
-                        query = self._apply_filter(
-                            query, BoxData.box_type, value, is_enum=True
-                        )
-
-                    # Box weight ranges
-                    elif key == "box_weight_kg_min":
-                        query = query.filter(
-                            BoxData.box_weight_kg >= float(value)
-                        )
-                    elif key == "box_weight_kg_max":
-                        query = query.filter(
-                            BoxData.box_weight_kg <= float(value)
-                        )
-
-                    # Box dimension ranges
-                    elif key == "box_length_mm_min":
-                        query = query.filter(
-                            BoxData.box_length_mm >= int(value)
-                        )
-                    elif key == "box_length_mm_max":
-                        query = query.filter(
-                            BoxData.box_length_mm <= int(value)
-                        )
-                    elif key == "box_width_mm_min":
-                        query = query.filter(
-                            BoxData.box_width_mm >= int(value)
-                        )
-                    elif key == "box_width_mm_max":
-                        query = query.filter(
-                            BoxData.box_width_mm <= int(value)
-                        )
-                    elif key == "box_height_mm_min":
-                        query = query.filter(
-                            BoxData.box_height_mm >= int(value)
-                        )
-                    elif key == "box_height_mm_max":
-                        query = query.filter(
-                            BoxData.box_height_mm <= int(value)
-                        )
-
-                    # Box volume/area ranges (computed columns)
-                    elif key == "box_vol_m3_min":
-                        query = query.filter(
-                            BoxData.box_vol_m3 >= float(value)
-                        )
-                    elif key == "box_vol_m3_max":
-                        query = query.filter(
-                            BoxData.box_vol_m3 <= float(value)
-                        )
-                    elif key == "box_area_m2_min":
-                        query = query.filter(
-                            BoxData.box_area_m2 >= float(value)
-                        )
-                    elif key == "box_area_m2_max":
-                        query = query.filter(
-                            BoxData.box_area_m2 <= float(value)
-                        )
-
-                    # Box stacking ranges
-                    elif key == "box_stacking_min":
-                        query = query.filter(
-                            BoxData.box_stacking >= int(value)
-                        )
-                    elif key == "box_stacking_max":
-                        query = query.filter(
-                            BoxData.box_stacking <= int(value)
-                        )
-
-                # ===== PALLET filters =====
-                elif key in ["box_per_pallet", "pallet_type",
-                           "pallet_weight_kg_min", "pallet_weight_kg_max",
-                           "pallet_length_mm_min", "pallet_length_mm_max",
-                           "pallet_width_mm_min", "pallet_width_mm_max",
-                           "pallet_height_mm_min", "pallet_height_mm_max",
-                           "pallet_vol_m3_min", "pallet_vol_m3_max",
-                           "pallet_area_m2_min", "pallet_area_m2_max",
-                           "pallet_stacking_min", "pallet_stacking_max"]:
-
-                    if not joined_part_to_box:
-                        query = query.join(PartToBox, PartData.part_id == PartToBox.part_id)
-                        joined_part_to_box = True
-
-                    if not joined_box:
-                        query = query.join(PartToBox.box)
-                        joined_box = True
-
-                    if not joined_box_to_pallet:
-                        query = query.join(BoxToPallet, BoxData.box_id == BoxToPallet.box_id)
-                        joined_box_to_pallet = True
-
-                    if not joined_pallet:
-                        query = query.join(BoxToPallet.pallet)
-                        joined_pallet = True
-
-                    if key == "box_per_pallet":
-                        query = query.filter(
-                            BoxToPallet.box_per_pallet == int(value)
-                        )
-                    elif key == "pallet_type":
-                        query = self._apply_filter(
-                            query, PalletData.pallet_type, value, is_enum=True
-                        )
-
-                    # Pallet weight ranges
-                    elif key == "pallet_weight_kg_min":
-                        query = query.filter(
-                            PalletData.pallet_weight_kg >= float(value)
-                        )
-                    elif key == "pallet_weight_kg_max":
-                        query = query.filter(
-                            PalletData.pallet_weight_kg <= float(value)
-                        )
-
-                    # Pallet dimension ranges
-                    elif key == "pallet_length_mm_min":
-                        query = query.filter(
-                            PalletData.pallet_length_mm >= int(value)
-                        )
-                    elif key == "pallet_length_mm_max":
-                        query = query.filter(
-                            PalletData.pallet_length_mm <= int(value)
-                        )
-                    elif key == "pallet_width_mm_min":
-                        query = query.filter(
-                            PalletData.pallet_width_mm >= int(value)
-                        )
-                    elif key == "pallet_width_mm_max":
-                        query = query.filter(
-                            PalletData.pallet_width_mm <= int(value)
-                        )
-                    elif key == "pallet_height_mm_min":
-                        query = query.filter(
-                            PalletData.pallet_height_mm >= int(value)
-                        )
-                    elif key == "pallet_height_mm_max":
-                        query = query.filter(
-                            PalletData.pallet_height_mm <= int(value)
-                        )
-
-                    # Pallet volume/area ranges (computed columns)
-                    elif key == "pallet_vol_m3_min":
-                        query = query.filter(
-                            PalletData.pallet_vol_m3 >= float(value)
-                        )
-                    elif key == "pallet_vol_m3_max":
-                        query = query.filter(
-                            PalletData.pallet_vol_m3 <= float(value)
-                        )
-                    elif key == "pallet_area_m2_min":
-                        query = query.filter(
-                            PalletData.pallet_area_m2 >= float(value)
-                        )
-                    elif key == "pallet_area_m2_max":
-                        query = query.filter(
-                            PalletData.pallet_area_m2 <= float(value)
-                        )
-
-                    # Pallet stacking ranges
-                    elif key == "pallet_stacking_min":
-                        query = query.filter(
-                            PalletData.pallet_stacking >= int(value)
-                        )
-                    elif key == "pallet_stacking_max":
-                        query = query.filter(
-                            PalletData.pallet_stacking <= int(value)
-                        )
-
-            # Execute query with all necessary eager loading
-            parts = query.options(
-                joinedload(PartData.supplier),
-                selectinload(PartData.models).joinedload(PartToModel.model),
-                selectinload(PartData.lines).joinedload(PartToLine.line).joinedload(LineData.workshop),
-                selectinload(PartData.boxes).joinedload(PartToBox.box).selectinload(BoxData.pallets).joinedload(BoxToPallet.pallet)
-            ).all()
-
-            if not parts:
+            # If nothing is found, return the message
+            if not results:
                 return {
                     "success": True,
                     "found": False,
@@ -706,33 +522,18 @@ class DatabaseAPI:
                     "data": []
                 }
 
-            # Build complete result with all information flattened and normalized
+            # Convert the results to a flat table
             result_data = []
-            for part in parts:
-                # Get part-supplier information
-                supplier = part.supplier
+            for row in results:
+                row_dict = dict(zip(row.keys(), row))
 
-                # For each part, there might be multiple models, lines, boxes
-                # We need to create a row for each unique combination
+                # Normalize the output
+                normalized_row = {}
+                for col_name, value in row_dict.items():
+                    upper_col_name = col_name.upper()
+                    normalized_row[upper_col_name] = normalize_output(upper_col_name, value)
 
-                # If part has no models/lines/boxes, create at least one row
-                if not part.models and not part.lines and not part.boxes:
-                    row = self._create_result_row(part, supplier, None, None, None, None)
-                    result_data.append(row)
-                else:
-                    # Iterate through models
-                    model_combinations = part.models if part.models else [None]
-                    line_combinations = part.lines if part.lines else [None]
-                    box_combinations = part.boxes if part.boxes else [None]
-
-                    for ptm in model_combinations:
-                        for ptl in line_combinations:
-                            for ptb in box_combinations:
-                                row = self._create_result_row(
-                                    part, supplier, ptm, ptl, ptb,
-                                    ptb.box if ptb else None
-                                )
-                                result_data.append(row)
+                result_data.append(normalized_row)
 
             return {
                 "success": True,
