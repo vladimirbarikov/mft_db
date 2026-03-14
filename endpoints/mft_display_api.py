@@ -442,7 +442,20 @@ class DatabaseAPI:
                 if value is None or value == "":
                     continue
 
-                str_value = str(value)
+                # Convert string values to lowercase for case-insensitive search
+                # because database stores everything in lowercase
+                if isinstance(value, str):
+                    str_value = value.lower()
+                elif isinstance(value, dict):
+                    # For range filters, convert string values inside the dict
+                    str_value = {}
+                    for range_key, range_value in value.items():
+                        if isinstance(range_value, str):
+                            str_value[range_key] = range_value.lower()
+                        else:
+                            str_value[range_key] = range_value
+                else:
+                    str_value = value
 
                 # ===== PART =====
                 if key == "PART_NUMBER":
