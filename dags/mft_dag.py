@@ -946,7 +946,7 @@ def mft_etl_pipeline():
         configuration_df = pinyin_conversion(configuration_df, 'DESCRIPTION')
 
         # Removing duplicates across all MODEL_COLS
-        transformed_configuration_df = configuration_df.unique(subset=MODEL_COLS, keep='first')
+        transformed_configuration_df = configuration_df.unique(subset=CONFIGURATION_COLS, keep='first')
 
         # Convert all column names to lowercase
         transformed_configuration_df = columns_to_lowercase(transformed_configuration_df)
