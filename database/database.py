@@ -662,7 +662,6 @@ class BreakpointData(Base):
         Index('idx_breakpoint_batch', 'batch'),
         Index('idx_breakpoint_composite_date_number',
               'breakpoint_date', 'breakpoint_number'),
-        Index('idx_description_gin', 'description', postgresql_using='gin'),
         {
             'comment': """
             PURPOSE: Technical change management (breakpoints)
