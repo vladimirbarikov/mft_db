@@ -11,8 +11,8 @@ x-airflow-common:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_USER:-airflow}:${AIRFLOW_PASSWORD:-airflow}@postgres/${AIRFLOW_DB:-airflow}
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_USER:-airflow}:${AIRFLOW_PASSWORD:-airflow}@postgres/${AIRFLOW_DB:-airflow}
-    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
@@ -342,7 +342,7 @@ services:
     restart: unless-stopped
     environment:
       - REDIS_ADDR=redis:6379
-      # - REDIS_PASSWORD=${REDIS_PASSWORD}  # uncomment if the password would be added in .env
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     ports:
       - "9121:9121"
     depends_on:
@@ -604,13 +604,13 @@ services:
     networks:
       - mft_airflow_network
 
-  upload-api:
+  mft-upload-api:
     <<: *api-common
     container_name: mft_upload_api
     environment:
       <<: *api-env
-      FLASK_PORT: 5002
-    command: python /app/endpoints/upload_api.py
+      FLASK_PORT: ${MFT_UPLOAD_API_PORT:-5002}
+    command: python /app/endpoints/mft_upload_api.py
     ports:
       - "5002:5002"
     depends_on:
@@ -627,15 +627,15 @@ services:
       retries: 3
       start_period: 30s
 
-  display-api:
+  mft-display-api:
     <<: *api-common
     container_name: mft_display_api
     environment:
       <<: *api-env
-      FLASK_PORT: 5003
-    command: python /app/endpoints/display_api.py
+      FLASK_PORT: ${MFT_DISPLAY_API_PORT:-5003}
+    command: python /app/endpoints/mft_display_api.py
     ports:
-      - "5003:5000"
+      - "5003:5003"
     depends_on:
       db:
         condition: service_healthy
