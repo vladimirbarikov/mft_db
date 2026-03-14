@@ -142,10 +142,11 @@ services:
   redis:
     image: redis:7.4.2
     container_name: airflow_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_password}
     expose:
       - 6379
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_password}", "ping"]
       interval: 10s
       timeout: 30s
       retries: 50
