@@ -522,14 +522,14 @@ class ConfigurationData(Base):
     '''
     __tablename__ = 'configuration_data'
     __table_args__ = (
-        Index('idx_configuration_name', 'configuration_name'),
+        Index('idx_configuration', 'configuration'),
         {
             'comment': """
             PURPOSE: Configuration types master data
             ---
             COLUMN DESCRIPTION:
             - configuration_id: Unique system identifier (CFG_ + 36-character UUID)
-            - configuration_name: Configuration name (comfort, elite, tech_plus, premium)
+            - configuration: Configuration name (comfort, elite, tech_plus, premium)
             - description: Optional description of the configuration
             ---
             BUSINESS RULES:
