@@ -68,6 +68,7 @@ from functools import wraps
 from pathlib import Path
 from threading import Lock
 from typing import Tuple, Optional, Dict, Any
+import zoneinfo
 
 # Third-party imports
 import requests
@@ -102,6 +103,9 @@ logger = get_logger("endpoints.mft_upload_api")
 # Load environment variables
 env_path = PROJECT_ROOT / '.env'
 load_dotenv(dotenv_path=env_path)
+
+# ========== TIMEZONE SETTINGS ==========
+MOSCOW_TZ = zoneinfo.ZoneInfo("Europe/Moscow")
 
 # ========== CONFIGURATION ==========
 
@@ -829,7 +833,8 @@ def generate_unique_filename(original_filename: str) -> tuple[str, str, str]:
         >>> safe_name, ts, uid = generate_unique_filename("My File@2.xlsx")
         >>> print(safe_name)  # My File_2_20260226_143015_a1b2c3d4.xlsx
     """
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    moscow_time = datetime.now(MOSCOW_TZ)
+    timestamp = moscow_time.strftime('%Y%m%d_%H%M%S')
     unique_id = uuid.uuid4().hex[:8]
 
     file_ext = Path(original_filename).suffix

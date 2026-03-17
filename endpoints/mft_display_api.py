@@ -23,10 +23,12 @@ from pathlib import Path
 import sys
 import re
 import os
+import uuid
 import tempfile
 from datetime import datetime
 from typing import Dict, Any, Optional
 from functools import wraps
+import zoneinfo
 
 # Third-party imports
 import polars as pl
@@ -65,6 +67,9 @@ from database.database import (
 
 # Logger setup
 logger = get_logger("endpoints.mft_display_api")
+
+# ========== TIMEZONE SETTINGS ==========
+MOSCOW_TZ = zoneinfo.ZoneInfo("Europe/Moscow")
 
 # ========== CONFIGURATION ==========
 
@@ -911,33 +916,11 @@ class DatabaseAPI:
             # Create Polars DataFrame
             df = pl.DataFrame(data)
 
-            # Generate filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-            # Create filter description for filename
-            filter_desc = []
-            for key, value in filters.items():
-                if value:
-                    # Clean key for filename
-                    clean_key = key.replace('_', '').replace('-', '')
-                    if isinstance(value, dict):
-                        # Handle range filters
-                        range_parts = []
-                        if 'min' in value:
-                            range_parts.append(f"min{value['min']}")
-                        if 'max' in value:
-                            range_parts.append(f"max{value['max']}")
-                        if range_parts:
-                            filter_desc.append(f"{clean_key}_{'_'.join(range_parts)}")
-                    else:
-                        filter_desc.append(f"{clean_key}_{value}")
-
-            filter_str = "_".join(filter_desc)[:50]  # Limit length
-
-            if filter_str:
-                filename = f"mft_export_{filter_str}_{timestamp}.xlsx"
-            else:
-                filename = f"mft_export_all_{timestamp}.xlsx"
+            # Generate unique filename with Moscow timezone timestamp and UUID
+            moscow_time = datetime.now(MOSCOW_TZ)
+            timestamp = moscow_time.strftime("%Y%m%d_%H%M%S")
+            unique_id = uuid.uuid4().hex[:8]
+            filename = f"mft_export_{timestamp}_{unique_id}.xlsx"
 
             # Determine export path
             if export_path:
