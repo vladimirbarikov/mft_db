@@ -510,7 +510,3 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
 
 # Create global logger for this module
 logger = get_logger(__name__)
-
-
-# Export only the public interface
-__all__ = ['get_logger']
