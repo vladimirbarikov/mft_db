@@ -668,11 +668,19 @@ def mft_etl_pipeline():
         # Deserialize the DataFrame from bytes
         supplier_df = deserialize_df(serialized_raw_supplier_df)
 
-        # Deleting lines if all values are Null/Nan
+        # Drop rows where all values are missing/NaN
         supplier_df = supplier_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
+        str_cols = [
+            'SUPPLIER_NAME',
+            'LOCATION',
+            'CITY',
+            'STREET',
+            'BUILDING'
+        ]
+
         # Apply converting and cleaninig text
-        for col in ['SUPPLIER_NAME', 'LOCATION', 'CITY', 'STREET', 'BUILDING']:
+        for col in str_cols:
             supplier_df = convert_to_string(supplier_df, col)
             supplier_df = advanced_clean_text(supplier_df, col)
             supplier_df = pinyin_conversion(supplier_df, col)
@@ -718,16 +726,15 @@ def mft_etl_pipeline():
         # Deserialize the DataFrame from bytes
         part_df = deserialize_df(serialized_raw_part_df)
 
-        # Deleting lines where if values are Null/Nan
+        # Drop rows where all values are missing/NaN
         part_df = part_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting and cleaninig text
         part_df = convert_to_string(part_df, 'PART_NUMBER')
         part_df = basic_clean_text(part_df, 'PART_NUMBER')
 
-        text_cols = ['PART_NAME', 'SUPPLIER_NAME']
-
-        for col in text_cols:
+        str_cols = ['PART_NAME', 'SUPPLIER_NAME']
+        for col in str_cols:
             part_df = convert_to_string(part_df, col)
             part_df = advanced_clean_text(part_df, col)
             part_df = pinyin_conversion(part_df, col)
@@ -772,7 +779,7 @@ def mft_etl_pipeline():
         # Deserialize the DataFrame from bytes
         box_df = deserialize_df(serialized_raw_box_df)
 
-        # Deleting lines if all values are Null/Nan
+        # Drop rows where all values are missing/NaN
         box_df = box_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting and cleaninig text
@@ -830,7 +837,7 @@ def mft_etl_pipeline():
         # Deserialize the DataFrame from bytes
         pallet_df = deserialize_df(serialized_raw_pallet_df)
 
-        # Deleting lines if all values are Null/Nan
+        # Drop rows where all values are missing/NaN
         pallet_df = pallet_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting and cleaninig text
@@ -888,7 +895,7 @@ def mft_etl_pipeline():
         # Deserialize the DataFrame from bytes
         model_df = deserialize_df(serialized_raw_model_df)
 
-        # Deleting lines if all values are Null/Nan
+        # Drop rows where all values are missing/NaN
         model_df = model_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting and cleaninig text
@@ -933,7 +940,7 @@ def mft_etl_pipeline():
         # Deserialize the DataFrame from bytes
         configuration_df = deserialize_df(serialized_raw_configuration_df)
 
-        # Deleting lines if all values are Null/Nan
+        # Drop rows where all values are missing/NaN
         configuration_df = configuration_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting text
@@ -946,7 +953,9 @@ def mft_etl_pipeline():
         configuration_df = pinyin_conversion(configuration_df, 'DESCRIPTION')
 
         # Removing duplicates across all MODEL_COLS
-        transformed_configuration_df = configuration_df.unique(subset=CONFIGURATION_COLS, keep='first')
+        transformed_configuration_df = configuration_df.unique(
+            subset=CONFIGURATION_COLS, keep='first'
+        )
 
         # Convert all column names to lowercase
         transformed_configuration_df = columns_to_lowercase(transformed_configuration_df)
@@ -982,7 +991,7 @@ def mft_etl_pipeline():
         # Deserialize the DataFrame from bytes
         workshop_df = deserialize_df(serialized_raw_workshop_df)
 
-        # Deleting lines if all values are Null/Nan
+        # Drop rows where all values are missing/NaN
         workshop_df = workshop_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting and cleaninig text
@@ -1027,7 +1036,7 @@ def mft_etl_pipeline():
         # Deserialize the DataFrame from bytes
         line_df = deserialize_df(serialized_raw_line_df)
 
-        # Deleting lines if all values are Null/Nan
+        # Drop rows where all values are missing/NaN
         line_df = line_df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
         # Apply converting and cleaninig text
@@ -1077,7 +1086,7 @@ def mft_etl_pipeline():
         if 'part_to_box' in raw_junction_dict:
             df = raw_junction_dict['part_to_box']
 
-            # Deleting lines if all values are Null/Nan
+            # Drop rows where all values are missing/NaN
             df = df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
             # Apply converting and cleaninig text
@@ -1111,11 +1120,12 @@ def mft_etl_pipeline():
         if 'box_to_pallet' in raw_junction_dict:
             df = raw_junction_dict['box_to_pallet']
 
-            # Deleting lines if all values are Null/Nan
+            # Drop rows where all values are missing/NaN
             df = df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
             # Apply converting and cleaninig text
             str_cols = [
+                'PART_NUMBER',
                 'BOX_TYPE',
                 'PALLET_TYPE'
             ]
@@ -1145,11 +1155,17 @@ def mft_etl_pipeline():
         if 'part_to_model' in raw_junction_dict:
             df = raw_junction_dict['part_to_model']
 
-            # Deleting lines if all values are Null/Nan
+            # Drop rows where all values are missing/NaN
             df = df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
+            str_cols = [
+                'PART_NUMBER',
+                'MODEL_CODE',
+                'CONFIGURATION'
+            ]
+
             # Apply converting and cleaninig text
-            for col in ['PART_NUMBER', 'MODEL_CODE', 'CONFIGURATION']:
+            for col in str_cols:
                 df = convert_to_string(df, col)
                 df = basic_clean_text(df, col)
 
@@ -1166,7 +1182,7 @@ def mft_etl_pipeline():
         if 'part_to_line' in raw_junction_dict:
             df = raw_junction_dict['part_to_line']
 
-            # Deleting lines if all values are Null/Nan
+            # Drop rows where all values are missing/NaN
             df = df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
             # Apply converting and cleaninig text
