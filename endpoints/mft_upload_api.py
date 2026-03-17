@@ -97,7 +97,7 @@ from config import get_logger
 from config.clamav_service import clamav_scanner
 
 # Logger setup
-logger = get_logger(__name__)
+logger = get_logger("endpoints.mft_upload_api")
 
 # Load environment variables
 env_path = PROJECT_ROOT / '.env'
