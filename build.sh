@@ -199,8 +199,14 @@ ask_confirmation() {
             echo -e -n "${YELLOW}$prompt (y/N): ${NC}"
         fi
 
-        read -r answer
+        # Reading the response, checking for EOF
+        if ! read -r answer; then
+            # If a reading error has occurred (including Ctrl+D)
+            echo -e "\n${RED}Input cancelled. Exiting...${NC}"
+            exit 1
+        fi
 
+        # If the answer is empty (just press Enter)
         if [ -z "$answer" ]; then
             answer=$default
         fi
@@ -302,12 +308,28 @@ check_registry_images_pulled() {
     for service in "${services[@]}"; do
         # Get image name for service from docker-compose
         local image_name
-        image_name=$(docker compose config | grep -A 10 "$service:" | grep "image:" | head -1 | awk '{print $2}' | tr -d '"' || echo "")
+        # Use docker compose config and search for the service section more precisely
+        image_name=$(docker compose config | awk -v svc="$service" '
+            $0 ~ "^  " svc ":" {found=1; next}
+            found && /^    image:/ {print $2; exit}
+            found && /^    [a-z]/ {found=0}
+        ' | tr -d '"' || echo "")
 
         if [ -n "$image_name" ]; then
             if ! docker image inspect "$image_name" &>/dev/null; then
                 all_pulled=false
                 missing_images+=("$service ($image_name)")
+            fi
+        else
+            # If it was not possible to get the image name, try an alternative method.
+            image_name=$(docker compose config | grep -A 5 "^  $service:" | grep "image:" | head -1 | awk '{print $2}' | tr -d '"' || echo "")
+            if [ -n "$image_name" ]; then
+                if ! docker image inspect "$image_name" &>/dev/null; then
+                    all_pulled=false
+                    missing_images+=("$service ($image_name)")
+                fi
+            else
+                echo -e "${YELLOW} Warning: Could not determine image for service $service${NC}"
             fi
         fi
     done
