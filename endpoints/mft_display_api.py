@@ -64,7 +64,7 @@ from database.database import (
 )
 
 # Logger setup
-logger = get_logger(__name__)
+logger = get_logger("endpoints.mft_display_api")
 
 # ========== CONFIGURATION ==========
 
@@ -1112,22 +1112,28 @@ def handle_api_response(f):
         try:
             result = f(*args, **kwargs)
 
-            if isinstance(result, tuple):
+            # If it is already an HTTP response (send_file, jsonify, redirect, tuple)
+            if isinstance(result, tuple) or hasattr(result, 'get_data'):
                 return result
 
-            if result.get('error'):
-                status_code = 500
-                if result.get('status') in ['integrity_error', 'data_error']:
-                    status_code = 400
-                elif result.get('status') == 'operational_error':
-                    status_code = 503
-                elif result.get('status') == 'not_found':
-                    status_code = 404
-                elif result.get('status') == 'no_data':
-                    status_code = 404
-                return jsonify(result), status_code
+            # Check that result is a dictionary before calling .get()
+            if isinstance(result, dict):
+                if result.get('error'):
+                    status_code = 500
+                    if result.get('status') in ['integrity_error', 'data_error']:
+                        status_code = 400
+                    elif result.get('status') == 'operational_error':
+                        status_code = 503
+                    elif result.get('status') == 'not_found':
+                        status_code = 404
+                    elif result.get('status') == 'no_data':
+                        status_code = 404
+                    return jsonify(result), status_code
 
-            return jsonify(result)
+                # If the dictionary has no error, we return it as JSON
+                return jsonify(result)
+            # For all other types (None, list, number, etc.)
+            return result
 
         except (ValueError, TypeError) as e:
             logger.warning("Validation error in API request: %s", e)
@@ -1334,21 +1340,47 @@ def export_to_excel_endpoint():
     """
     Export search results to Excel file.
     
-    POST /api/export with JSON body containing filters and optional export_path
+    POST /export with JSON body containing filters and optional export_path
     
-    Request body example:
-    {
-        "filters": {
-            "part_number": "999",
-            "localization": "yes",
-            "workshop_code": "as"
-        },
-        "export_path": "/path/to/save"  # optional
-    }
-    
+    Expected JSON body:
+        {
+            "filters": {                    # Dictionary with search filters
+                "part_number": "999",        # Case-insensitive partial match
+                "localization": "yes",       # Exact match for enum fields
+                "workshop_code": "as",       # Can use _min/_max for range queries
+                "box_length_mm_min": 500,    # Minimum value for range filter
+                "box_length_mm_max": 1200    # Maximum value for range filter
+            }
+        }
+
+    Note: export_path parameter is no longer supported. File is always sent for download
+    and user chooses save location in their browser/Postman save dialog.
+
+    Workflow:
+        1. Client sends POST request with filters
+        2. Server validates filters and queries database
+        3. Server creates temporary Excel file using Polars
+        4. Server sends file to client with as_attachment=True
+        5. Browser shows save dialog
+        6. User selects folder on the local machine
+        7. File is saved to user-specified location
+        8. Temporary file is automatically cleaned up
+
     Returns:
-        If export_path provided: JSON with file info
-        If no export_path: Downloads the Excel file
+        flask.Response: Excel file as attachment with:
+            - Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+            - Content-Disposition: attachment; filename=mft_export_*.xlsx
+            - File is sent for download, user chooses save location in their browser/Postman
+
+    Raises:
+        ValueError: If request body is not a JSON object or filters is not a dictionary
+        Various SQLAlchemy errors: Handled by @handle_api_response decorator
+
+    Status Codes:
+        200: OK - Excel file successfully sent
+        400: Bad Request - Invalid JSON format or filters not a dictionary
+        503: Service Unavailable - Database connection not available
+        500: Internal Server Error - Unexpected error during export
     """
     api = get_db_api()
     if not api:
@@ -1361,18 +1393,22 @@ def export_to_excel_endpoint():
     # Get request data
     data = request.get_json(silent=True)
     if not data or not isinstance(data, dict):
+        logger.warning("Invalid request body: not a JSON object")
         raise ValueError("Request body must be a JSON object")
 
     filters = data.get('filters', {})
-    export_path = data.get('export_path')
+
+    # Log but ignore export_path
+    if 'export_path' in data:
+        logger.info(
+            "export_path parameter is ignored. User will choose save location in the browser"
+        )
 
     if not isinstance(filters, dict):
+        logger.warning("Filters parameter is not a dictionary: %s", type(filters))
         raise ValueError("'filters' must be a JSON object")
 
-    if export_path is not None and not isinstance(export_path, str):
-        raise ValueError("'export_path' must be a string")
-
-    logger.info("Export request with filters: %s, path: %s", filters, export_path)
+    logger.info("Export request with filters: %s", filters)
 
     # Process filters (same as in search endpoint)
     processed_filters = {}
@@ -1395,7 +1431,11 @@ def export_to_excel_endpoint():
                                 processed_filters[key][range_key] = range_value
                         else:
                             processed_filters[key][range_key] = range_value
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError) as conv_error:
+                        logger.warning(
+                            "Failed to convert range value '%s' for key '%s': %s",
+                            range_value, key, conv_error
+                        )
                         processed_filters[key][range_key] = range_value
         else:
             # Regular filter
@@ -1409,52 +1449,107 @@ def export_to_excel_endpoint():
                         processed_filters[key] = value
                 else:
                     processed_filters[key] = value
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as conv_error:
+                logger.warning(
+                    "Failed to convert filter value '%s' for key '%s': %s",
+                    value, key, conv_error
+                )
                 processed_filters[key] = value
 
-    # Export to Excel
-    result = api.export_to_excel(processed_filters, export_path)
+    # Export to Excel - ALWAYS creating a temporary file (export_path=None)
+    result = api.export_to_excel(processed_filters, export_path=None)
 
     if not result.get('success'):
+        logger.error("Export failed: %s", result.get('error', 'Unknown error'))
         return result
 
-    # If export_path was provided, return file info
-    if export_path:
-        return jsonify({
-            'success': True,
-            'message': f'Successfully exported {result["row_count"]} rows',
-            'file_path': result['file_path'],
-            'filename': result['filename'],
-            'row_count': result['row_count']
-        })
+    # Send file to the user for download
+    file_path = result['file_path']
+    filename = result['filename']
 
-    # Otherwise, download the file
     try:
-        return send_file(
-            result['file_path'],
+        if not os.path.exists(file_path):
+            logger.error("Export file not found: %s", file_path)
+            return {
+                'success': False,
+                'error': 'Export file not found',
+                'status': 'export_error'
+            }
+
+        # send_file sends file to client, browser shows save dialog
+        response = send_file(
+            file_path,
             as_attachment=True,
             download_name=result['filename'],
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
-    except Exception as e:
-        logger.error("Error sending file: %s", e)
+
+        # Clean up temporary file AFTER sending
+        @response.call_on_close
+        def cleanup():
+            try:
+                if os.path.exists(file_path):
+                    os.unlink(file_path)
+                    logger.debug("Temporary file %s cleaned up", file_path)
+                else:
+                    logger.debug("File %s already removed", file_path)
+
+            except OSError as cleanup_error:
+                logger.warning("Failed to cleanup temp file %s: %s", file_path, cleanup_error)
+
+            except Exception as unexpected_error:
+                logger.error(
+                    "Unexpected error during cleanup of %s: %s",
+                    file_path, unexpected_error, exc_info=True
+                )
+
+        logger.info("File %s sent to user, will be cleaned up after download", filename)
+        return response
+
+    except PermissionError as perm_error:
+        logger.error("Permission denied when accessing file %s: %s", file_path, perm_error)
+        # Clean up temp file
+        try:
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+        except Exception:
+            pass
+        return {
+            'success': False,
+            'error': 'File access denied',
+            'status': 'export_error'
+        }
+
+    except OSError as os_error:
+        logger.error("OS error when sending file %s: %s", file_path, os_error)
+        # Clean up temp file
+        try:
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+        except Exception:
+            pass
+        return {
+            'success': False,
+            'error': f'File system error: {str(os_error)}',
+            'status': 'export_error'
+        }
+
+    except Exception as unexpected_error:
+        logger.error("Unexpected error sending file: %s", unexpected_error, exc_info=True)
 
         # Clean up temp file if it exists
-        if 'file_path' in result:
-            try:
+        try:
+            if 'file_path' in result and os.path.exists(result['file_path']):
                 os.unlink(result['file_path'])
-                logger.debug("Temporary file %s cleaned up successfully", result['file_path'])
+                logger.debug("Temporary file %s cleaned up after error", result['file_path'])
+        except Exception as cleanup_error:
+            logger.warning("Failed to cleanup temp file after error: %s", cleanup_error)
 
-            except FileNotFoundError:
-                # File already deleted, that's fine
-                logger.debug("Temporary file %s already removed", result['file_path'])
-
-            except PermissionError as e1:
-                logger.warning("Permission denied when cleaning up %s: %s", result['file_path'], e1)
-
-            except OSError as e2:
-                logger.warning("OS error when cleaning up %s: %s", result['file_path'], e2)
-        raise
+        return {
+            'success': False,
+            'error': f'Failed to send file: {str(unexpected_error)}',
+            'status': 'export_error'
+        }
 
 
 # ========== ENDPOINTS FOR REFERENCE INFORMATION ==========
