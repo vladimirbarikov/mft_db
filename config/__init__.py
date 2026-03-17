@@ -2,23 +2,7 @@
 The logging configuration package for the Material Flow Table Database project.
 """
 
-from .logging_config import (
-    setup_logging,
-    get_logger,
-    logger,
-    LOG_DIR,
-    PROJECT_ROOT
-)
+from .logging_config import get_logger
 
-# Automatic initialization of logging when importing a package
-setup_logging()
 
-__all__ = [
-    'setup_logging',
-    'get_logger',
-    'logger',
-    'LOG_DIR',
-    'PROJECT_ROOT'
-]
-
-logger.info("The configuration package is loaded. Logs in: %s", LOG_DIR)
+__all__ = ['get_logger']
