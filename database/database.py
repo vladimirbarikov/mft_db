@@ -3,14 +3,30 @@ Database Models Module for Material Flow Table Database with SQLAlchemy ORM.
 
 DATABASE ENUM TYPES, MODELS AND TABLES:
 1. ENUM TYPES:
-    - LOCALIZATION_ENUM: yes/no - Local or foreign supplier
-    - PACKAGING_TYPE_ENUM: returnable/non-returnable - Packaging type
-    - MODEL_CODES_ENUM: a01, a08, b02, b04, b06, b16 - Platform codes
-    - MODEL_NAMES_ENUM: jolion, h3, f7, f7x, dargo, h7 - Model names
-    - WORKSHOP_CODES_ENUM: as, comp, paint, weld, stamp, en - Workshop codes
-    - WORKSHOP_NAMES_ENUM: assembly, component, painting, welding, stamping, engine
-    - CONFIGURATION_ENUM: comfort, elite, tech-plus, premium - Vehicle trim levels
-    - BREAKPOINT_ACTION_ENUM: replace, delete, add, update - Types of technical changes
+    - LOCALIZATION_ENUM:
+        - yes/no - Local or foreign supplier. 
+        - no data - if no information about Localization status.
+    - PACKAGING_TYPE_ENUM:
+        - returnable/non-returnable - Packaging type. 
+        - no data - if no information about Packaging type.
+    - MODEL_CODES_ENUM:
+        - a01, a08, b02, b04, b06, b16 - Platform codes.
+        - no data - if no information about Packaging type.
+    - MODEL_NAMES_ENUM:
+        - jolion, h3, f7, f7x, dargo, h7 - Model names.
+        - no data - if no information about Model name.
+    - WORKSHOP_CODES_ENUM:
+        - as, comp, paint, weld, stamp, en - Workshop codes.
+        - no data - if no information about Workshop code.
+    - WORKSHOP_NAMES_ENUM:
+        - assembly, component, painting, welding, stamping, engine.
+        - no data - if no information about Workshop name.
+    - CONFIGURATION_ENUM:
+        - comfort, elite, tech-plus, premium - Vehicle assembly levels.
+        - no data - if no information about Configuration level.
+    - BREAKPOINT_ACTION_ENUM:
+        - replace, delete, add, update - Types of technical changes.
+        - no data - if no information about Breakpoint action.
 
 2. CORE ENTITY TABLES:
     - supplier_data      - Information about component suppliers
@@ -125,35 +141,43 @@ Base = declarative_base()
 
 # ========== ENUM TYPES ==========
 LOCALIZATION_ENUM = SqlEnum(
-    'yes', 'no', name='localization'
+    'yes', 'no', 'no data',
+    name='localization'
 )
 
 PACKAGING_TYPE_ENUM = SqlEnum(
-    'returnable', 'non-returnable', name='packaging_type'
+    'returnable', 'non-returnable', 'no data',
+    name='packaging_type'
 )
 
 MODEL_CODES_ENUM = SqlEnum(
-    'a01', 'a08', 'b02', 'b04', 'b06', 'b16', name='model_codes'
+    'a01', 'a08', 'b02', 'b04', 'b06', 'b16', 'no data',
+    name='model_codes'
 )
 
 MODEL_NAMES_ENUM = SqlEnum(
-    'jolion', 'h3', 'f7', 'f7x', 'dargo', 'h7', name='model_names'
+    'jolion', 'h3', 'f7', 'f7x', 'dargo', 'h7', 'no data',
+    name='model_names'
 )
 
 WORKSHOP_CODES_ENUM = SqlEnum(
-    'as', 'comp', 'paint', 'weld', 'stamp', 'en', name='workshop_codes'
+    'as', 'comp', 'paint', 'weld', 'stamp', 'en', 'no data',
+    name='workshop_codes'
 )
 
 WORKSHOP_NAMES_ENUM = SqlEnum(
-    'assembly', 'component', 'painting', 'welding', 'stamping', 'engine', name='workshop_names'
+    'assembly', 'component', 'painting', 'welding', 'stamping', 'engine', 'no data',
+    name='workshop_names'
 )
 
 CONFIGURATION_ENUM = SqlEnum(
-    'comfort', 'elite', 'tech-plus', 'premium', name='configuration_types'
+    'comfort', 'elite', 'tech-plus', 'premium', 'no data',
+    name='configuration_types'
 )
 
 BREAKPOINT_ACTION_ENUM = SqlEnum(
-    'replace', 'delete', 'add', 'update', name='breakpoint_action'
+    'replace', 'delete', 'add', 'update', 'no data',
+    name='breakpoint_action'
 )
 
 # ========== CORE ENTITY TABLES ==========
