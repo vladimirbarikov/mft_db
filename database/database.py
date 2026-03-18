@@ -1,3 +1,5 @@
+# pylint: disable=too-many-lines
+# pylint: disable=wrong-import-position
 """
 Database Models Module for Material Flow Table Database with SQLAlchemy ORM.
 
@@ -339,21 +341,49 @@ class BoxData(Base):
         nullable=False
     )
     box_type = Column(PACKAGING_TYPE_ENUM)
-    box_weight_kg = Column(Numeric(5, 2), CheckConstraint('box_weight_kg >= 0'))
-    box_length_mm = Column(SmallInteger)
-    box_width_mm = Column(SmallInteger)
-    box_height_mm = Column(SmallInteger)
+    box_weight_kg = Column(
+        Numeric(5, 2),
+        CheckConstraint('box_weight_kg >= 0'),
+        nullable=True
+    )
+    box_length_mm = Column(
+        SmallInteger,
+        CheckConstraint('box_length_mm > 0'),
+        nullable=True
+    )
+    box_width_mm = Column(
+        SmallInteger,
+        CheckConstraint('box_width_mm > 0'),
+        nullable=True
+    )
+    box_height_mm = Column(
+        SmallInteger,
+        CheckConstraint('box_height_mm > 0'),
+        nullable=True
+    )
     box_number = Column(String(50), Computed(
         """
         CASE
             WHEN box_type IS NOT NULL
-                 AND box_length_mm IS NOT NULL
-                 AND box_width_mm IS NOT NULL
-                 AND box_height_mm IS NOT NULL
-            THEN (CASE WHEN box_type = 'returnable' THEN 'R' ELSE 'N' END) || ' ' ||
-                 box_length_mm::text || '-' ||
-                 box_width_mm::text || '-' ||
-                 box_height_mm::text
+                AND box_length_mm IS NOT NULL
+                AND box_width_mm IS NOT NULL
+                AND box_height_mm IS NOT NULL
+            THEN 
+                CASE 
+                    WHEN box_type = 'returnable' THEN 'R ' || 
+                        box_length_mm::text || '-' ||
+                        box_width_mm::text || '-' ||
+                        box_height_mm::text
+                    WHEN box_type = 'non-returnable' THEN 'N ' ||
+                        box_length_mm::text || '-' ||
+                        box_width_mm::text || '-' ||
+                        box_height_mm::text
+                    WHEN box_type = 'no data' THEN 'no_d ' ||
+                        box_length_mm::text || '-' ||
+                        box_width_mm::text || '-' ||
+                        box_height_mm::text
+                    ELSE NULL
+                END
             ELSE NULL
         END
         """
@@ -389,7 +419,11 @@ class BoxData(Base):
         """
         ), nullable=True
     )
-    box_stacking = Column(SmallInteger)
+    box_stacking = Column(
+        SmallInteger,
+        CheckConstraint('box_stacking >= 0'),
+        nullable=True
+    )
     # Relationships
     parts = relationship('PartToBox', back_populates='box', lazy='select')
     pallets = relationship('BoxToPallet', back_populates='box', lazy='select')
@@ -440,21 +474,49 @@ class PalletData(Base):
         nullable=False
     )
     pallet_type = Column(PACKAGING_TYPE_ENUM)
-    pallet_weight_kg = Column(Numeric(5, 2), CheckConstraint('pallet_weight_kg >= 0'))
-    pallet_length_mm = Column(SmallInteger)
-    pallet_width_mm = Column(SmallInteger)
-    pallet_height_mm = Column(SmallInteger)
+    pallet_weight_kg = Column(
+        Numeric(5, 2),
+        CheckConstraint('pallet_weight_kg >= 0'),
+        nullable=True
+    )
+    pallet_length_mm = Column(
+        SmallInteger,
+        CheckConstraint('pallet_length_mm > 0'),
+        nullable=True
+    )
+    pallet_width_mm = Column(
+        SmallInteger,
+        CheckConstraint('pallet_width_mm > 0'),
+        nullable=True
+    )
+    pallet_height_mm = Column(
+        SmallInteger,
+        CheckConstraint('pallet_height_mm > 0'),
+        nullable=True
+    )
     pallet_number = Column(String(50), Computed(
         """
         CASE
             WHEN pallet_type IS NOT NULL
-                 AND pallet_length_mm IS NOT NULL
-                 AND pallet_width_mm IS NOT NULL
-                 AND pallet_height_mm IS NOT NULL
-            THEN (CASE WHEN pallet_type = 'returnable' THEN 'R' ELSE 'N' END) || ' ' ||
-                 pallet_length_mm::text || '-' ||
-                 pallet_width_mm::text || '-' ||
-                 pallet_height_mm::text
+                AND pallet_length_mm IS NOT NULL
+                AND pallet_width_mm IS NOT NULL
+                AND pallet_height_mm IS NOT NULL
+            THEN 
+                CASE 
+                    WHEN pallet_type = 'returnable' THEN 'R ' || 
+                        pallet_length_mm::text || '-' ||
+                        pallet_width_mm::text || '-' ||
+                        pallet_height_mm::text
+                    WHEN pallet_type = 'non-returnable' THEN 'N ' ||
+                        pallet_length_mm::text || '-' ||
+                        pallet_width_mm::text || '-' ||
+                        pallet_height_mm::text
+                    WHEN pallet_type = 'no data' THEN 'no_d ' ||
+                        pallet_length_mm::text || '-' ||
+                        pallet_width_mm::text || '-' ||
+                        pallet_height_mm::text
+                    ELSE NULL
+                END
             ELSE NULL
         END
         """
@@ -490,7 +552,11 @@ class PalletData(Base):
         """
         ), nullable=True
     )
-    pallet_stacking = Column(SmallInteger)
+    pallet_stacking = Column(
+        SmallInteger,
+        CheckConstraint('pallet_stacking >= 0'),
+        nullable=True
+    )
     # Relationships
     boxes = relationship('BoxToPallet', back_populates='pallet', lazy='select')
 
@@ -528,7 +594,11 @@ class ModelData(Base):
         unique=True,
         nullable=False
     )
-    model_code = Column(MODEL_CODES_ENUM, unique=True, nullable=False)
+    model_code = Column(
+        MODEL_CODES_ENUM,
+        unique=True,
+        nullable=False
+    )
     model_name = Column(MODEL_NAMES_ENUM)
     # Relationships
     parts = relationship('PartToModel', back_populates='model', lazy='select')
@@ -613,7 +683,11 @@ class WorkshopData(Base):
         unique=True,
         nullable=False
     )
-    workshop_code = Column(WORKSHOP_CODES_ENUM, unique=True, nullable=False)
+    workshop_code = Column(
+        WORKSHOP_CODES_ENUM,
+        unique=True,
+        nullable=False
+    )
     workshop_name = Column(WORKSHOP_NAMES_ENUM)
     # Relationships
     lines = relationship('LineData', back_populates='workshop', lazy='joined')
@@ -655,7 +729,11 @@ class LineData(Base):
         unique=True,
         nullable=False
     )
-    line_code = Column(String(10), unique=True, nullable=False)
+    line_code = Column(
+        String(10),
+        unique=True,
+        nullable=False
+    )
     line_name = Column(String(50))
     workshop_id = Column(
         String(40),
@@ -714,8 +792,15 @@ class BreakpointData(Base):
         unique=True,
         nullable=False
     )
-    input_date = Column(DateTime(), server_default=func.now())
-    breakpoint_number = Column(String(10), unique=True, nullable=False)
+    input_date = Column(
+        DateTime(),
+        server_default=func.now()
+    )
+    breakpoint_number = Column(
+        String(10),
+        unique=True,
+        nullable=False
+    )
     breakpoint_date = Column(DateTime())
     batch = Column(String(10), nullable=True)
     description = Column(Text, nullable=True)
@@ -761,7 +846,11 @@ class PartToBox(Base):
         primary_key=True,
         comment="The box cannot be removed if it is used by parts!"
     )
-    part_per_box = Column(Integer)
+    part_per_box = Column(
+        Integer,
+        CheckConstraint('part_per_box > 0'),
+        nullable=True
+    )
     # Relationships
     part = relationship('PartData', back_populates='boxes')
     box = relationship('BoxData', back_populates='parts')
@@ -810,7 +899,11 @@ class BoxToPallet(Base):
         primary_key=True,
         comment="The pallet cannot be removed if it is used by boxes!"
     )
-    box_per_pallet = Column(SmallInteger)
+    box_per_pallet = Column(
+        SmallInteger,
+        CheckConstraint('box_per_pallet > 0'),
+        nullable=True
+    )
     # Relationships
     part = relationship('PartData', back_populates='box_pallet_combinations')
     box = relationship('BoxData', back_populates='pallets')
@@ -860,7 +953,11 @@ class PartToModel(Base):
         ForeignKey('configuration_data.configuration_id', ondelete='RESTRICT'),
         primary_key=True
     )
-    part_per_vehicle = Column(SmallInteger)
+    part_per_vehicle = Column(
+        SmallInteger,
+        CheckConstraint('part_per_vehicle > 0'),
+        nullable=True
+    )
     # Relationships
     part = relationship('PartData', back_populates='models')
     model = relationship('ModelData', back_populates='parts')
@@ -983,7 +1080,8 @@ class PartToBreakpoint(Base):
     supplier_name_before_change = Column(String(200))
     localization_before_change = Column(
         LOCALIZATION_ENUM,
-        nullable=False)
+        nullable=False
+    )
     line_name_before_change = Column(String(50))
     # Relationships
     part = relationship('PartData', back_populates='breakpoints')
