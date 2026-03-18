@@ -51,7 +51,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from config import get_logger
 from config.columns_config import MFT_TABLE_REQUIREMENTS
 from dags.tasks.connector import initialize_database
-from dags.tasks.mft_mapper import create_mapper
+from dags.tasks.mft_mapper import create_mft_mapper
 from database.database import (
     # Entity tables
     SupplierData, PartData, BoxData, PalletData,
@@ -567,7 +567,7 @@ def load_core_entity_tables(
             # Create mapper AFTER loading independent tables commit
             mapper = None
             try:
-                mapper = create_mapper(engine)
+                mapper = create_mft_mapper(engine)
                 logger.info("Mapper created successfully for foreign key resolution.")
 
             except (SQLAlchemyError, ProgrammingError) as e:
@@ -919,7 +919,7 @@ def load_junction_tables(
 
     # Create mapper
     try:
-        mapper = create_mapper(engine)
+        mapper = create_mft_mapper(engine)
         if mapper is None:
             logger.error("Mapper creation returned None!")
             return {}

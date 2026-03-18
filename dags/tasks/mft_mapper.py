@@ -1062,7 +1062,7 @@ class MFTObjectMapper:
         logger.debug("Cache cleared.")
 
 
-def create_mapper(engine=None) -> MFTObjectMapper:
+def create_mft_mapper(engine=None) -> MFTObjectMapper:
     """
     Factory function to create MFTObjectMapper.
     
