@@ -314,93 +314,99 @@ LOGGING_CONFIG = {
             "handlers": ["console", "app_file", "json_file", "error_file"],
             "propagate": False
         },
-        # App module loggers
+        # App logger
         "__main__": {
             "level": "INFO",
             "handlers": ["console", "app_file", "json_file", "error_file"],
             "propagate": False,
         },
-        # API endpoints - all logs from endpoints/ go to api_logs/
+        # API endpoint loggers
         "endpoints": {
             "level": "INFO",
-            "handlers": ["console", "api_file", "error_file"],
-            "propagate": False,
+            "handlers": ["console", "api_file", "json_file", "error_file"],
+            "propagate": True,  # True for inheritance
         },
-        # DAGs
+        "endpoints.mft_upload_api": {
+            "level": "INFO",
+            "propagate": True,
+        },
+        "endpoints.mft_display_api": {
+            "level": "INFO",
+            "propagate": True,
+        },
+        "endpoints.mft_modify_api": {
+            "level": "INFO",
+            "propagate": True,
+        },
+        "endpoints.user_manager_api": {
+            "level": "INFO",
+            "propagate": True,
+        },
+        # DAG loggers
         "dags": {
             "level": "INFO",
-            "handlers": ["console", "airflow_file", "error_file"],
-            "propagate": False,
+            "handlers": ["console", "airflow_file", "json_file", "error_file"],
+            "propagate": True,  # True for inheritance
         },
         "dags.bp_dag": {
             "level": "INFO",
-            "handlers": ["console", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
         "dags.mft_dag": {
             "level": "INFO",
-            "handlers": ["console", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
-        # Airflow tasks
+        # Airflow task loggers
         "dags.tasks": {
             "level": "DEBUG",
-            "handlers": ["console", "airflow_file", "error_file"],
-            "propagate": False,
+            "handlers": ["console", "app_file", "json_file", "error_file"],
+            "propagate": True,  # True for inheritance
         },
         "dags.tasks.bp_loader": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "database_file", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
         "dags.tasks.bp_mapper": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "database_file", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
         "dags.tasks.connector": {
             "level": "DEBUG",
-            "handlers": ["console", "app_file", "database_file", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
         "dags.tasks.extractor": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "database_file", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
         "dags.tasks.mft_loader": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "database_file", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
         "dags.tasks.mft_mapper": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "database_file", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
         "dags.tasks.serializer": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "database_file", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
         "dags.tasks.transformer": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "database_file", "airflow_file", "error_file"],
-            "propagate": False,
+            "propagate": True,
         },
-        # Database operations
+        # Database operation logger
         "database": {
             "level": "INFO",
             "handlers": ["console", "database_file", "error_file"],
             "propagate": False,
         },
-        # Config modules
+        # Config module logger
         "config": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "error_file"],
+            "handlers": ["console", "app_file", "json_file", "error_file"],
             "propagate": False,
         },
-        # Airflow system logs
+        # Airflow system loggers
         "airflow": {
             "level": "WARNING",
             "handlers": ["airflow_file", "error_file"],
@@ -431,7 +437,7 @@ LOGGING_CONFIG = {
             "handlers": ["airflow_file", "error_file"],
             "propagate": False,
         },
-        # Third-party libraries
+        # Third-party library logger
         "sqlalchemy": {
             "level": "WARNING",
             "handlers": ["database_file", "error_file"],
@@ -444,7 +450,7 @@ LOGGING_CONFIG = {
         },
         "requests": {
             "level": "WARNING",
-            "handlers": ["app_file", "error_file"],
+            "handlers": ["api_file", "error_file"],
             "propagate": False,
         },
         # Special logger for all errors
