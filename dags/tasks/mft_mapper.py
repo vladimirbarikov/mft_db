@@ -1038,7 +1038,7 @@ class MFTObjectMapper:
         total_entries = 0
 
         logger.info("=" * 60)
-        logger.info("MAPPING STATISTICS (with composite key support)")
+        logger.info("MFT MAPPING STATISTICS (with composite key support)")
         logger.info("=" * 60)
         logger.info("Composite Key Format: (type, length, width, height) → id")
         logger.info("=" * 60)
