@@ -46,24 +46,34 @@ Log directories created:
         - api_logs/         : API endpoint logs (INFO+)
         - database_logs/    : Database-related operations (INFO+)
         - json_logs/        : JSON-formatted logs for analysis (INFO+)
-        - error_logs/       : Centralized error logs - ALL ERROR and CRITICAL messages from ALL sources
+        - error_logs/       : Centralized error logs
 
 Configuration features:
     - Console output: INFO+ to stdout, WARNING+ to stderr
     - File output for Airflow: WARNING+ between DAG runs, INFO+ during DAG execution
     - Centralized error log: ALL WARNING+ messages from ALL sources
-    - File rotation: Automatic based on file size (5-20 MB)
+    - File rotation: Daily at midnight with date-based filenames
+    - Log retention: 30 days for regular logs, 90 days for errors
+    - Backup format: app.log → app.log.2026-03-18 (automatically created at midnight)
     - Encoding: UTF-8 for all files
     - Thread/process safety: All handlers are thread-safe
     - Error handling: Graceful fallback if configuration fails
     - Moscow timezone (Europe/Moscow) for all timestamps
     - UTC time also included in JSON logs for compatibility
 
+File rotation behavior:
+    - Each log type uses fixed filename (e.g., app.log)
+    - When size limit reached: app.log → app.log.1, new app.log created
+    - Old backups are automatically deleted when backupCount exceeded
+    - Examples:
+        * app.log (current), app.log.1 (oldest), app.log.5 (newest backup)
+        * Total files per type = backupCount + 1
+
 Version: 1.0.0
 Compatibility: Python 3.12.3
 Maintainer: PLD Engineering Center
 Created: 2026-02-16
-Last Modified: 2026-03-17
+Last Modified: 2026-03-18
 License: MIT
 Status: Production
 """
@@ -93,8 +103,6 @@ ERROR_LOG_DIR = LOG_DIR / "error_logs"
 
 # Time settings
 MOSCOW_TZ = zoneinfo.ZoneInfo("Europe/Moscow")
-LOG_ID = datetime.now(MOSCOW_TZ).strftime("%Y%m%d_%H%M%S")
-CURRENT_TIME = datetime.now(MOSCOW_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')
 
 # ====== HELPER FUNCTIONS ======
 def ensure_log_dir(directory: Path) -> None:
@@ -241,66 +249,76 @@ LOGGING_CONFIG = {
         },
         # App logs
         "app_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.TimedRotatingFileHandler",
             "level": "DEBUG",
             "formatter": "verbose",
-            "filename": get_log_file_path(APP_LOG_DIR, f"app_{LOG_ID}.log"),
-            "maxBytes": 10 * 1024 * 1024,  # 10 MB
-            "backupCount": 5,
+            "filename": get_log_file_path(APP_LOG_DIR, "app.log"),
+            "when": "midnight",
+            "interval": 1,
+            "backupCount": 30,
             "encoding": "utf8",
             "delay": True,
+            "utc": False
         },
         # CENTRALIZED ERROR-ONLY logs (for all sources)
         "error_file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "level": "ERROR",  # ERROR and higher only (ERROR, CRITICAL)
+            "class": "logging.handlers.TimedRotatingFileHandler",
+            "level": "ERROR",
             "formatter": "verbose",
-            "filename": get_log_file_path(ERROR_LOG_DIR, f"errors_{LOG_ID}.log"),
-            "maxBytes": 10 * 1024 * 1024,
-            "backupCount": 5,
+            "filename": get_log_file_path(ERROR_LOG_DIR, "errors.log"),
+            "when": "midnight",
+            "interval": 1,
+            "backupCount": 90,
             "encoding": "utf8",
             "delay": True,
+            "utc": False
         },
         # JSON logs
         "json_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.TimedRotatingFileHandler",
             "level": "INFO",
             "formatter": "json",
-            "filename": get_log_file_path(JSON_LOG_DIR, f"json_{LOG_ID}.log"),
-            "maxBytes": 10 * 1024 * 1024,
-            "backupCount": 3,
+            "filename": get_log_file_path(JSON_LOG_DIR, "json.log"),
+            "when": "midnight",
+            "interval": 1,
+            "backupCount": 30,
             "encoding": "utf8",
             "delay": True,
+            "utc": False
         },
         # Airflow-specific logs (in the airflow_logs directory)
         "airflow_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.TimedRotatingFileHandler",
             "level": "INFO",
             "formatter": "airflow",
-            "filename": get_log_file_path(AIRFLOW_LOG_DIR, f"airflow_{LOG_ID}.log"),
-            "maxBytes": 20 * 1024 * 1024,  # 20 MB
-            "backupCount": 10,
+            "filename": get_log_file_path(AIRFLOW_LOG_DIR, "airflow.log"),
+            "when": "midnight",
+            "interval": 1,
+            "backupCount": 30,
             "encoding": "utf8",
             "delay": True,
+            "utc": False,
             "filters": ["airflow_task_filter"]
         },
         # Database logs (in the database_logs directory)
         "database_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.TimedRotatingFileHandler",
             "level": "INFO",
             "formatter": "verbose",
-            "filename": get_log_file_path(DATABASE_LOG_DIR, f"database_{LOG_ID}.log"),
-            "maxBytes": 5 * 1024 * 1024,
-            "backupCount": 3,
+            "filename": get_log_file_path(DATABASE_LOG_DIR, "database.log"),
+            "when": "midnight",
+            "interval": 1,
+            "backupCount": 30,
             "encoding": "utf8",
             "delay": True,
+            "utc": False
         },
         # API logs (in the api_logs directory)
         "api_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "logging.handlers.TimedRotatingFileHandler",
             "level": "INFO",
             "formatter": "verbose",
-            "filename": get_log_file_path(API_LOG_DIR, f"api_{LOG_ID}.log"),
+            "filename": get_log_file_path(API_LOG_DIR, "api.log"),
             "maxBytes": 5 * 1024 * 1024,
             "backupCount": 3,
             "encoding": "utf8",
@@ -477,7 +495,9 @@ except (ValueError, TypeError, KeyError) as e:
 else:
     # Only create logger if configuration succeeded
     init_logger = logging.getLogger(__name__)
-    init_logger.debug("Logging initialized. Log ID: %s", LOG_ID)
+    init_logger.debug("Logging initialized with timed rotating file handlers")
+    init_logger.debug("Log files: app.log, errors.log, json.log, airflow.log, database.log, api.log")
+    init_logger.debug("Rotation settings: daily at midnight with backup counts 30-90 days")
     init_logger.debug("Project root: %s", PROJECT_ROOT)
     init_logger.debug("Main log directory: %s", LOG_DIR)
     init_logger.debug("Log directories created:")
