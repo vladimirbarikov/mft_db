@@ -219,12 +219,31 @@ class SupplierData(Base):
         unique=True,
         nullable=False
     )
-    supplier_name = Column(String(200), unique=True, nullable=False)
-    location = Column(String(50))
-    city = Column(String(50))
-    street = Column(String(100))
-    building = Column(String(10))
-    localization = Column(LOCALIZATION_ENUM)
+    supplier_name = Column(
+        String(200),
+        unique=True,
+        nullable=False
+    )
+    location = Column(
+        String(50),
+        nullable=True
+    )
+    city = Column(
+        String(50),
+        nullable=True
+    )
+    street = Column(
+        String(100),
+        nullable=True
+    )
+    building = Column(
+        String(10),
+        nullable=True
+    )
+    localization = Column(
+        LOCALIZATION_ENUM,
+        nullable=False
+    )
     # Relationships
     parts = relationship('PartData', back_populates='supplier', lazy='selectin')
     breakpoint_changes = relationship(
@@ -273,11 +292,20 @@ class PartData(Base):
         unique=True,
         nullable=False
     )
-    part_number = Column(String(50), unique=True, nullable=False)
-    part_name = Column(String(100))
+    part_number = Column(
+        String(50),
+        unique=True,
+        nullable=False
+    )
+    part_name = Column(
+        String(100),
+        nullable=True
+    )
     part_weight_kg = Column(
         Numeric(5, 2),
-        CheckConstraint('part_weight_kg >= 0'))
+        CheckConstraint('part_weight_kg >= 0'),
+        nullable=True
+    )
     supplier_id = Column(
         String(40),
         ForeignKey('supplier_data.supplier_id', ondelete='RESTRICT'),
@@ -285,12 +313,36 @@ class PartData(Base):
         comment="The supplier cannot be deleted if there are part-numbers!"
     )
     # Relationships
-    supplier = relationship('SupplierData', back_populates='parts', lazy='joined')
-    boxes = relationship('PartToBox', back_populates='part', lazy='selectin')
-    models = relationship('PartToModel', back_populates='part', lazy='selectin')
-    lines = relationship('PartToLine', back_populates='part', lazy='select')
-    box_pallet_combinations = relationship('BoxToPallet', back_populates='part', lazy='selectin')
-    breakpoints = relationship('PartToBreakpoint', back_populates='part', lazy='select')
+    supplier = relationship(
+        'SupplierData',
+        back_populates='parts',
+        lazy='joined'
+    )
+    boxes = relationship(
+        'PartToBox',
+        back_populates='part',
+        lazy='selectin'
+    )
+    models = relationship(
+        'PartToModel',
+        back_populates='part',
+        lazy='selectin'
+    )
+    lines = relationship(
+        'PartToLine',
+        back_populates='part',
+        lazy='select'
+    )
+    box_pallet_combinations = relationship(
+        'BoxToPallet',
+        back_populates='part',
+        lazy='selectin'
+    )
+    breakpoints = relationship(
+        'PartToBreakpoint',
+        back_populates='part',
+        lazy='select'
+    )
 
 
 class BoxData(Base):
@@ -340,7 +392,10 @@ class BoxData(Base):
         unique=True,
         nullable=False
     )
-    box_type = Column(PACKAGING_TYPE_ENUM)
+    box_type = Column(
+        PACKAGING_TYPE_ENUM,
+        nullable=False
+    )
     box_weight_kg = Column(
         Numeric(5, 2),
         CheckConstraint('box_weight_kg >= 0'),
@@ -425,8 +480,16 @@ class BoxData(Base):
         nullable=True
     )
     # Relationships
-    parts = relationship('PartToBox', back_populates='box', lazy='select')
-    pallets = relationship('BoxToPallet', back_populates='box', lazy='select')
+    parts = relationship(
+        'PartToBox',
+        back_populates='box',
+        lazy='select'
+    )
+    pallets = relationship(
+        'BoxToPallet',
+        back_populates='box',
+        lazy='select'
+    )
 
 
 class PalletData(Base):
@@ -473,7 +536,10 @@ class PalletData(Base):
         unique=True,
         nullable=False
     )
-    pallet_type = Column(PACKAGING_TYPE_ENUM)
+    pallet_type = Column(
+        PACKAGING_TYPE_ENUM,
+        nullable=False
+    )
     pallet_weight_kg = Column(
         Numeric(5, 2),
         CheckConstraint('pallet_weight_kg >= 0'),
@@ -558,7 +624,11 @@ class PalletData(Base):
         nullable=True
     )
     # Relationships
-    boxes = relationship('BoxToPallet', back_populates='pallet', lazy='select')
+    boxes = relationship(
+        'BoxToPallet',
+        back_populates='pallet',
+        lazy='select'
+    )
 
 
 class ModelData(Base):
@@ -599,9 +669,17 @@ class ModelData(Base):
         unique=True,
         nullable=False
     )
-    model_name = Column(MODEL_NAMES_ENUM)
+    model_name = Column(
+        MODEL_NAMES_ENUM,
+        unique=True,
+        nullable=False
+    )
     # Relationships
-    parts = relationship('PartToModel', back_populates='model', lazy='select')
+    parts = relationship(
+        'PartToModel',
+        back_populates='model',
+        lazy='select'
+    )
     breakpoint_changes = relationship(
         'PartToBreakpoint',
         foreign_keys='PartToBreakpoint.model_id',
@@ -645,9 +723,15 @@ class ConfigurationData(Base):
         unique=True,
         nullable=False
     )
-    description = Column(String(100), nullable=True)
+    description = Column(
+        String(100),
+        nullable=True
+    )
     # Relationships
-    part_models = relationship('PartToModel', back_populates='configuration')
+    part_models = relationship(
+        'PartToModel',
+        back_populates='configuration'
+    )
 
 
 class WorkshopData(Base):
@@ -688,7 +772,11 @@ class WorkshopData(Base):
         unique=True,
         nullable=False
     )
-    workshop_name = Column(WORKSHOP_NAMES_ENUM)
+    workshop_name = Column(
+        WORKSHOP_NAMES_ENUM,
+        unique=True,
+        nullable=False
+    )
     # Relationships
     lines = relationship('LineData', back_populates='workshop', lazy='joined')
 
@@ -734,16 +822,27 @@ class LineData(Base):
         unique=True,
         nullable=False
     )
-    line_name = Column(String(50))
+    line_name = Column(
+        String(50),
+        nullable=True
+    )
     workshop_id = Column(
         String(40),
         ForeignKey('workshop_data.workshop_id', ondelete='RESTRICT'),
         nullable=False,
         comment="The production workshop cannot be deleted if there are lines!"
-        )
+    )
     # Relationships
-    workshop = relationship('WorkshopData', back_populates='lines', lazy='joined')
-    parts = relationship('PartToLine', back_populates='line', lazy='select')
+    workshop = relationship(
+        'WorkshopData',
+        back_populates='lines',
+        lazy='joined'
+    )
+    parts = relationship(
+        'PartToLine',
+        back_populates='line',
+        lazy='select'
+    )
     breakpoint_changes = relationship(
         'PartToBreakpoint',
         foreign_keys='PartToBreakpoint.line_id',
@@ -794,18 +893,32 @@ class BreakpointData(Base):
     )
     input_date = Column(
         DateTime(),
-        server_default=func.now()
+        server_default=func.now(),
+        nullable=False
     )
     breakpoint_number = Column(
         String(10),
         unique=True,
         nullable=False
     )
-    breakpoint_date = Column(DateTime())
-    batch = Column(String(10), nullable=True)
-    description = Column(Text, nullable=True)
+    breakpoint_date = Column(
+        DateTime(),
+        nullable=False
+    )
+    batch = Column(
+        String(10),
+        nullable=True
+    )
+    description = Column(
+        Text,
+        nullable=True
+    )
     # Relationships
-    parts = relationship('PartToBreakpoint', back_populates='breakpoint', lazy='select')
+    parts = relationship(
+        'PartToBreakpoint',
+        back_populates='breakpoint',
+        lazy='select'
+    )
 
 
 # ========== JUNCTION TABLES ==========
@@ -852,8 +965,14 @@ class PartToBox(Base):
         nullable=True
     )
     # Relationships
-    part = relationship('PartData', back_populates='boxes')
-    box = relationship('BoxData', back_populates='parts')
+    part = relationship(
+        'PartData',
+        back_populates='boxes'
+    )
+    box = relationship(
+        'BoxData',
+        back_populates='parts'
+    )
 
 
 class BoxToPallet(Base):
@@ -905,9 +1024,18 @@ class BoxToPallet(Base):
         nullable=True
     )
     # Relationships
-    part = relationship('PartData', back_populates='box_pallet_combinations')
-    box = relationship('BoxData', back_populates='pallets')
-    pallet = relationship('PalletData', back_populates='boxes')
+    part = relationship(
+        'PartData',
+        back_populates='box_pallet_combinations'
+    )
+    box = relationship(
+        'BoxData',
+        back_populates='pallets'
+    )
+    pallet = relationship(
+        'PalletData',
+        back_populates='boxes'
+    )
 
 
 class PartToModel(Base):
@@ -959,9 +1087,18 @@ class PartToModel(Base):
         nullable=True
     )
     # Relationships
-    part = relationship('PartData', back_populates='models')
-    model = relationship('ModelData', back_populates='parts')
-    configuration = relationship('ConfigurationData', back_populates='part_models')
+    part = relationship(
+        'PartData',
+        back_populates='models'
+    )
+    model = relationship(
+        'ModelData',
+        back_populates='parts'
+    )
+    configuration = relationship(
+        'ConfigurationData',
+        back_populates='part_models'
+    )
 
 
 class PartToLine(Base):
@@ -1000,8 +1137,14 @@ class PartToLine(Base):
         comment="The line cannot be deleted if parts are installed on it!"
     )
     # Relationships
-    part = relationship('PartData', back_populates='lines')
-    line = relationship('LineData', back_populates='parts')
+    part = relationship(
+        'PartData',
+        back_populates='lines'
+    )
+    line = relationship(
+        'LineData',
+        back_populates='parts'
+    )
 
 
 class PartToBreakpoint(Base):
@@ -1049,7 +1192,7 @@ class PartToBreakpoint(Base):
         ForeignKey('part_data.part_id', ondelete='RESTRICT'),
         primary_key=True,
         comment="The part-number cannot be deleted as it is included in the revision history!"
-        )
+    )
     breakpoint_id = Column(
         String(40),
         ForeignKey('breakpoint_data.breakpoint_id', ondelete='RESTRICT'),
@@ -1064,28 +1207,57 @@ class PartToBreakpoint(Base):
     )
     supplier_id = Column(
         String(40),
-        ForeignKey('supplier_data.supplier_id'),
-        nullable=False
+        ForeignKey('supplier_data.supplier_id', ondelete='RESTRICT'),
+        nullable=False,
+        comment="The model cannot be deleted as it is included in the revision history!"
     )
     line_id = Column(
         String(40),
-        ForeignKey('line_data.line_id'),
-        nullable=False
+        ForeignKey('line_data.line_id', ondelete='RESTRICT'),
+        nullable=False,
+        comment="The model cannot be deleted as it is included in the revision history!"
     )
     action = Column(
         BREAKPOINT_ACTION_ENUM,
         nullable=False
     )
-    part_number_before_change = Column(String(50))
-    supplier_name_before_change = Column(String(200))
+    part_number_before_change = Column(
+        String(50),
+        nullable=True
+    )
+    supplier_name_before_change = Column(
+        String(200),
+        nullable=True
+    )
     localization_before_change = Column(
         LOCALIZATION_ENUM,
-        nullable=False
+        nullable=True
     )
-    line_name_before_change = Column(String(50))
+    line_name_before_change = Column(
+        String(50),
+        nullable=True
+    )
     # Relationships
-    part = relationship('PartData', back_populates='breakpoints')
-    breakpoint = relationship('BreakpointData', back_populates='parts')
-    model = relationship('ModelData', foreign_keys=[model_id], back_populates='breakpoint_changes')
-    supplier = relationship('SupplierData', foreign_keys=[supplier_id], back_populates='breakpoint_changes')
-    line = relationship('LineData', foreign_keys=[line_id], back_populates='breakpoint_changes')
+    part = relationship(
+        'PartData',
+        back_populates='breakpoints'
+    )
+    breakpoint = relationship(
+        'BreakpointData',
+        back_populates='parts'
+    )
+    model = relationship(
+        'ModelData',
+        foreign_keys=[model_id],
+        back_populates='breakpoint_changes'
+    )
+    supplier = relationship(
+        'SupplierData',
+        foreign_keys=[supplier_id],
+        back_populates='breakpoint_changes'
+    )
+    line = relationship(
+        'LineData',
+        foreign_keys=[line_id],
+        back_populates='breakpoint_changes'
+    )
