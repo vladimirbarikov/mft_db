@@ -57,33 +57,74 @@ JUNCTION TABLES COLUMNS (UPPERCASE for Excel extraction):
 
     PART_TO_BREAKPOINT_COLS: Part-to-breakpoint junction (change history)
         - PART_NUMBER, BREAKPOINT_NUMBER, MODEL_CODE, ACTION,
-          SUPPLIER_NAME, LINE_CODE, PART_NUMBER_BEFORE_CHANGE,
-          SUPPLIER_NAME_BEFORE_CHANGE, LOCALIZATION_BEFORE_CHANGE,
-          LINE_NAME_BEFORE_CHANGE
+          SUPPLIER_NAME, LINE_CODE, LINE_NAME_BEFORE_CHANGE,
+          PART_NUMBER_BEFORE_CHANGE, SUPPLIER_NAME_BEFORE_CHANGE,
+          LOCALIZATION_BEFORE_CHANGE
 
 MFT PIPELINE CONFIGURATION (for mft_dag.py, mft_mapper.py, mft_loader.py)
+
+    MFT_COMPOSITE_COLUMNS: Composite key types requiring special handling
+        - 'box_composite', 'pallet_composite'
+
     MFT_JUNCTION_REQUIRED: Required columns for MFT pipeline junction tables
+        - part_to_box_composite: part_number, box_type, box_length_mm, 
+          box_width_mm, box_height_mm
+        - box_to_pallet_composite: part_number, box_type, box_length_mm,
+          box_width_mm, box_height_mm, pallet_type, pallet_length_mm,
+          pallet_width_mm, pallet_height_mm
+        - part_to_model: part_number, model_code, configuration
+        - part_to_line: part_number, line_code
+
     MFT_JUNCTION_OPTIONAL: Optional columns for MFT pipeline junction tables
+        - part_to_box_composite: part_per_box
+        - box_to_pallet_composite: box_per_pallet
+        - part_to_model: part_per_vehicle
+        - part_to_line: (none)
+
     MFT_TABLE_REQUIREMENTS: Required columns for MFT pipeline core tables
-    MFT_EXCEL_COLUMNS: Excel column mappings for MFT pipeline
+        - supplier_data, part_data, box_data, pallet_data, model_data,
+          workshop_data, line_data, configuration_data
 
 BP PIPELINE CONFIGURATION (for bp_dag.py, bp_mapper.py, bp_loader.py)
-    BP_JUNCTION_REQUIRED: Required columns for BP pipeline junction tables
-                        (includes MODEL_CODE and ACTION as mandatory fields)
-    BP_JUNCTION_OPTIONAL: Optional columns for BP pipeline junction tables
-    BP_TABLE_REQUIREMENTS: Required columns for BP pipeline core tables
-    BP_EXCEL_COLUMNS: Excel column mappings for BP pipeline
-    BP_LOOKUP_TABLES: Tables needed for ID lookups in BP pipeline
-                        (supplier, line, part, breakpoint, model)
 
-BP PIPELINE CONFIGURATION (for bp_dag.py, bp_mapper.py, bp_loader.py)
-    BP_JUNCTION_REQUIRED: Required columns for BP pipeline junction tables
-                        (includes MODEL_CODE and ACTION as mandatory fields)
-    BP_JUNCTION_OPTIONAL: Optional columns for BP pipeline junction tables
-    BP_TABLE_REQUIREMENTS: Required columns for BP pipeline core tables
-    BP_EXCEL_COLUMNS: Excel column mappings for BP pipeline
+    BP_JUNCTION_REQUIRED: Required columns for breakpoint junction table
+        - part_to_breakpoint: part_number, breakpoint_number, model_code
+
     BP_LOOKUP_TABLES: Tables needed for ID lookups in BP pipeline
-                        (supplier, line, part, breakpoint, model)
+        - supplier: SUPPLIER_COLS (supplier_name lookup)
+        - line: LINE_COLS (line_code lookup)
+        - part: PART_COLS (part_number lookup)
+        - breakpoint: ['breakpoint_number']
+        - model: ['model_code']
+
+BP MAPPER CONFIGURATION (for bp_mapper.py)
+
+    BP_REQUIRED_FIELDS_BY_ACTION: Required fields for each action type
+        - replace: PART_NUMBER_BEFORE_CHANGE, PART_NUMBER_AFTER_CHANGE,
+          LINE_CODE_BEFORE_CHANGE, LINE_CODE_AFTER_CHANGE,
+          SUPPLIER_NAME_AFTER_CHANGE
+        - delete: PART_NUMBER_BEFORE_CHANGE, LINE_CODE_BEFORE_CHANGE
+        - add: PART_NUMBER_AFTER_CHANGE, LINE_CODE_AFTER_CHANGE,
+          SUPPLIER_NAME_AFTER_CHANGE
+        - update: PART_NUMBER_BEFORE_CHANGE, DESCRIPTION
+        - no data: (none)
+
+    BP_DEFAULT_VALUES: Default values for missing data
+        - localization: 'no data'
+        - action: 'no data'
+        - line_name_prefix: 'Auto-created line'
+        - part_name_prefix: 'Auto-created for breakpoint'
+        - workshop_default_code: 'as' (assembly workshop)
+
+    BP_VALIDATION_RULES: Validation rules for BP mapper
+        - composite_key_fields: ['part_id', 'breakpoint_id', 'model_id']
+        - nullable_fields_by_action: Action-specific nullable fields
+        - required_always: ['breakpoint_id', 'model_id', 'action']
+
+    BP_LOGGING_CONFIG: Logging configuration for BP mapper
+        - levels: Info/warning/error keywords
+        - batch_size_warning: 100 records
+        - log_stats: True
 
 DATABASE MODEL MAPPING:
 
@@ -106,11 +147,28 @@ DATABASE MODEL MAPPING:
         part_to_breakpoint   ←→ Used only in BP pipeline
                               (includes MODEL_CODE and ACTION for change tracking)
 
+ARCHITECTURE NOTES:
+
+    MFT Pipeline (ETL Pattern):
+        - Static data loading (suppliers, parts, boxes, pallets)
+        - Core tables are pre-loaded, junction tables only link existing records
+        - No creation of new records in core tables
+        - Mapper performs only ID lookups, no business logic
+        - Loader handles INSERT with ON CONFLICT DO NOTHING
+
+    BP Pipeline (CDC Pattern - Change Data Capture):
+        - Tracks engineering changes over time
+        - Creates new records in core tables (parts, lines, suppliers)
+        - Preserves historical snapshots (before-change values)
+        - Mapper contains ACTION-based business logic (replace/delete/add/update)
+        - Loader handles INSERT into part_to_breakpoint (history table)
+        - Supports time series analysis (which part was active when)
+
 Version: 1.0.0
 Compatibility: Python 3.12.3
 Maintainer: PLD Engineering Center
 Created: 2026-02-16
-Last Modified: 2026-03-12
+Last Modified: 2026-03-21
 License: MIT
 Status: Production
 """
@@ -338,25 +396,65 @@ MFT_TABLE_REQUIREMENTS = {
             ]
         }
 
-# Excel column mappings for MFT pipeline
-MFT_EXCEL_COLUMNS = {
-    'supplier': SUPPLIER_COLS,
-    'part': PART_COLS,
-    'box': BOX_COLS,
-    'pallet': PALLET_COLS,
-    'model': MODEL_COLS,
-    'configuration': CONFIGURATION_COLS,
-    'workshop': WORKSHOP_COLS,
-    'line': LINE_COLS,
-    'part_to_box': PART_TO_BOX_COMPOSITE_COLS,
-    'box_to_pallet': BOX_TO_PALLET_COMPOSITE_COLS,
-    'part_to_model': PART_TO_MODEL_COLS,
-    'part_to_line': PART_TO_LINE_COLS,
-    # Note: 'part_to_breakpoint' is used only in BP_EXCEL_COLUMNS
-}
-
 # ========== BP PIPELINE CONFIGURATION ==========
 # For use in bp_dag.py, bp_mapper.py, and bp_loader.py
+
+# Required fields for each action type in part_to_breakpoint
+BP_REQUIRED_FIELDS_BY_ACTION = {
+    'replace': [
+        'PART_NUMBER_BEFORE_CHANGE',
+        'PART_NUMBER_AFTER_CHANGE',
+        'LINE_CODE_BEFORE_CHANGE',
+        'LINE_CODE_AFTER_CHANGE',
+        'SUPPLIER_NAME_AFTER_CHANGE'
+    ],
+    'delete': [
+        'PART_NUMBER_BEFORE_CHANGE',
+        'LINE_CODE_BEFORE_CHANGE'
+    ],
+    'add': [
+        'PART_NUMBER_AFTER_CHANGE',
+        'LINE_CODE_AFTER_CHANGE',
+        'SUPPLIER_NAME_AFTER_CHANGE'
+    ],
+    'update': [
+        'PART_NUMBER_BEFORE_CHANGE',
+        'DESCRIPTION'
+    ],
+    'no data': []  # No required fields, manual processing
+}
+
+# Default values for missing data
+BP_DEFAULT_VALUES = {
+    'localization': 'no data',
+    'action': 'no data',
+    'line_name_prefix': 'Auto-created line',
+    'part_name_prefix': 'Auto-created for breakpoint',
+    'workshop_default_code': 'as'  # Assembly workshop as default
+}
+
+# Validation rules for BP mapper
+BP_VALIDATION_RULES = {
+    'composite_key_fields': ['part_id', 'breakpoint_id', 'model_id'],
+    'nullable_fields_by_action': {
+        'delete': ['supplier_id', 'line_id'],
+        'add': ['part_number_before_change', 'supplier_name_before_change', 
+                'localization_before_change', 'line_name_before_change'],
+        'no data': ['supplier_id', 'line_id', 'part_number_before_change']
+    },
+    'required_always': ['breakpoint_id', 'model_id', 'action']
+}
+
+# Logging configuration for BP mapper
+BP_LOGGING_CONFIG = {
+    'levels': {
+        'info': ['Created new', 'Mapped', 'Processing', 'Updated'],
+        'warning': ['not found', 'missing', 'skipping'],
+        'error': ['Failed', 'Error']
+    },
+    'batch_size_warning': 100,  # Warn if processing more than this many records
+    'log_stats': True  # Log statistics after processing
+}
 
 # Required columns for breakpoint junction table (in lowercase for mapper)
 BP_JUNCTION_REQUIRED = {
@@ -365,35 +463,6 @@ BP_JUNCTION_REQUIRED = {
         'breakpoint_number',
         'model_code'
     ]
-}
-
-# Optional columns for breakpoint junction table (in lowercase for mapper)
-BP_JUNCTION_OPTIONAL = {
-    'part_to_breakpoint': [
-        'action',
-        'supplier_name',
-        'line_code',
-        'part_number_before_change',
-        'supplier_name_before_change',
-        'localization_before_change',
-        'line_name_before_change'
-    ]
-}
-
-# Expected columns for breakpoint core table
-BP_TABLE_REQUIREMENTS = {
-    'breakpoint_data': [
-        'breakpoint_number',
-        'breakpoint_date',
-        'description',
-        'batch'
-    ]
-}
-
-# Excel column mappings for BP pipeline
-BP_EXCEL_COLUMNS = {
-    'breakpoint': BREAKPOINT_COLS,
-    'part_to_breakpoint': PART_TO_BREAKPOINT_COLS,
 }
 
 # Tables needed for ID lookups in BP pipeline
