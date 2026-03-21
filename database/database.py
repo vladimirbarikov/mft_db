@@ -13,7 +13,7 @@ DATABASE ENUM TYPES, MODELS AND TABLES:
         - no data - if no information about Packaging type.
     - MODEL_CODES_ENUM:
         - a01, a08, b02, b04, b06, b16 - Platform codes.
-        - no data - if no information about Packaging type.
+        - no data - if no information about Model code.
     - MODEL_NAMES_ENUM:
         - jolion, h3, f7, f7x, dargo, h7 - Model names.
         - no data - if no information about Model name.
@@ -57,50 +57,70 @@ STORED INFORMATION:
 
 2. PARTS (part_data):
    - Identifiers: PART_ID, PART_NUMBER
-   - Description: name, weight (kg)
-   - Supplier relationship (ForeignKey)
+   - Description: name, weight (kg) with CheckConstraint (>= 0)
+   - Supplier relationship (ForeignKey with RESTRICT on delete)
+   - Soft delete support: is_active flag, deactivated_at timestamp
+   - deactivated_by_breakpoint_id: References breakpoint that caused deactivation (SET NULL on delete)
 
 3. PACKAGING (box_data, pallet_data):
-   - Packaging type: returnable/non-returnable
-   - Dimensions: length, width, height (mm)
+   - Packaging type: returnable/non-returnable/no data
+   - Dimensions: length, width, height (mm) with CheckConstraint (> 0)
    - Calculated parameters: volume (m³), area (m²)
-   - Weight and maximum stacking capability
-   - Automatic packaging number generation
-   - Real-time calculation via database triggers
+   - Weight and maximum stacking capability with CheckConstraint (>= 0)
+   - Automatic packaging number generation: 'R/N/no_d L-W-H' format
+   - Real-time calculation via database triggers (Computed fields)
+   - UniqueConstraint on (type, length, width, height) to prevent duplicates
 
 4. PRODUCTION (workshop_data, line_data):
    - Workshops: code (as, comp, paint, etc.) and name
-   - Lines: code, name, workshop affiliation
+   - Lines: code, name, workshop affiliation (ForeignKey with RESTRICT on delete)
 
 5. VEHICLE MODELS (model_data):
-   - Model codes: a01, a08, b02, etc.
-   - Model names: jolion, h3, f7, etc.
+   - Model codes: a01, a08, b02, b04, b06, b16, no data
+   - Model names: jolion, h3, f7, f7x, dargo, h7, no data
 
 6. TECHNICAL CHANGES (breakpoint_data):
-   - Breakpoint number and date
-   - Entry date into the system
+   - Breakpoint number (unique, mandatory) and date
+   - Entry date into the system (auto-generated)
    - Batch information
    - Description of change
 
 7. CHANGE HISTORY (part_to_breakpoint):
    - Links parts to breakpoints with model specificity
-   - Action type: replace, delete, add, update
-   - Before-change values (snapshot from Excel)
-   - After-change references to current master data
+   - Action type: replace, delete, add, update, no data
+   - Before-change values (snapshot from Excel):
+        * part_number_before_change
+        * supplier_name_before_change
+        * localization_before_change (uses LOCALIZATION_ENUM)
+        * line_name_before_change
+   - After-change references to current master data:
+        * supplier_id (SET NULL on delete, NULL for DELETE actions)
+        * line_id (SET NULL on delete, NULL for DELETE actions)
    - Tracks model-specific part changes
+   - Composite primary key: (part_id, breakpoint_id, model_id)
+   - For DELETE action: supplier_id and line_id are NULL (no new supplier/line)
 
 IMPLEMENTATION FEATURES:
     - UUID format: 32 hexadecimal characters + 4 hyphens = 36 characters total
     - Automatic ID generation with prefixes: SUP_, PRT_, BOX_, PLT_, MDL_, CFG_, WSP_, LNE_, BPT_
     - All ID fields use format: PREFIX_ + UUID = 40 characters total
-    - Business rule validation through CheckConstraint
-    - Enum type support for categorized data (including breakpoint actions)
+    - Business rule validation through CheckConstraint:
+        * Positive values for dimensions, weights, quantities
+        * Non-negative values for stacking heights
+    - Enum type support for categorized data (including breakpoint actions with 'no data')
     - Unique constraints for dimension combinations (box/pallet)
     - Complete bidirectional relationship mapping with back_populates
     - Real-time calculation of packaging volume/area via SQLAlchemy Computed fields
     - Automatic packaging number generation via SQLAlchemy Computed expressions
-    - Composite foreign keys with RESTRICT/CASCADE rules
+    - Composite foreign keys with RESTRICT/CASCADE/SET NULL rules:
+        * RESTRICT: Prevents deletion of referenced records with dependencies
+        * CASCADE: Automatically deletes child records when parent deleted
+        * SET NULL: Sets foreign key to NULL when referenced record deleted
     - Comprehensive indexing strategy including GIN for text search
+    - Optimized lazy loading strategies:
+        * selectin: Used for collections to avoid N+1 queries
+        * joined: Used for single relationships when always needed
+        * select: Default lazy loading for less frequently accessed relationships
 
 RELATIONSHIP STRUCTURE:
     - Supplier (1) ↔ (N) Part (N) ↔ (N) Box (N) ↔ (N) Pallet
@@ -114,16 +134,38 @@ RELATIONSHIP STRUCTURE:
 
 CHANGE TRACKING (PartToBreakpoint):
     - Composite PK: (part_id, breakpoint_id, model_id)
-    - Action field: replace/delete/add/update
-    - Before values: part_number, supplier_name, localization, line_name
+    - Action field: replace/delete/add/update/no data
+    - Before values: part_number, supplier_name, localization, line_name (snapshots)
     - After references: supplier_id, line_id (current master data)
     - Enables complete audit trail of part evolution per model
+    - Business rules:
+        * DELETE action: supplier_id and line_id must be NULL
+        * REPLACE/UPDATE: supplier_id and line_id reference new values
+        * ADD action: before-change fields typically NULL
+        * Part soft deletion: is_active=False with deactivation breakpoint reference
+
+DATABASE CONSTRAINTS SUMMARY:
+    - Check Constraints:
+        * part_weight_kg >= 0
+        * box_weight_kg >= 0, box_length_mm > 0, box_width_mm > 0, box_height_mm > 0, box_stacking >= 0
+        * pallet_weight_kg >= 0, pallet_length_mm > 0, pallet_width_mm > 0, pallet_height_mm > 0, pallet_stacking >= 0
+        * part_per_box > 0, box_per_pallet > 0, part_per_vehicle > 0
+    - Unique Constraints:
+        * supplier_name
+        * part_number
+        * (box_type, box_length_mm, box_width_mm, box_height_mm) on box_data
+        * (pallet_type, pallet_length_mm, pallet_width_mm, pallet_height_mm) on pallet_data
+        * model_code, model_name on model_data
+        * configuration on configuration_data
+        * workshop_code, workshop_name on workshop_data
+        * line_code on line_data
+        * breakpoint_number on breakpoint_data
 
 Version: 1.0.0
 Compatibility: Python 3.12.3, SQLAlchemy 1.4.54, PostgreSQL 12+
 Maintainer: PLD Engineering Center
 Created: 2026-01-16
-Last Modified: 2026-03-12
+Last Modified: 2026-03-20
 License: MIT
 Status: Production
 """
@@ -133,7 +175,7 @@ from sqlalchemy import (
     ForeignKey, func, Index, text, UniqueConstraint
 )
 from sqlalchemy.types import (
-    Integer, Numeric, String, SmallInteger, Text
+    Boolean, Integer, Numeric, String, SmallInteger, Text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
@@ -263,6 +305,8 @@ class PartData(Base):
         Index('idx_part_name', 'part_name'),
         Index('idx_part_weight', 'part_weight_kg'),
         Index('idx_part_supplier_id', 'supplier_id'),
+        Index('idx_part_active', 'is_active'),
+        Index('idx_part_deactivated', 'deactivated_at'),
         {
             'comment': """
             PURPOSE: Automotive component master data
@@ -273,6 +317,9 @@ class PartData(Base):
             - part_name: Technical description
             - part_weight_kg: Weight in kilograms (precision 0.01)
             - supplier_id: References supplier_data
+            - is_active: Whether part is currently in production (soft delete flag)
+            - deactivated_at: When part was deactivated (if is_active=False)
+            - deactivated_by_breakpoint_id: Which breakpoint caused deactivation
             ---
             RELATIONSHIPS:
             - Many-to-Many with: ModelData, LineData, BoxData, BreakpointData
@@ -282,6 +329,8 @@ class PartData(Base):
             - Part number follows corporate standard
             - Weight critical for logistics costing
             - Each part has exactly one supplier
+            - Parts are never physically deleted, only deactivated (soft delete)
+            - Historical data in part_to_breakpoint remains valid
             """
         },
     )
@@ -312,6 +361,24 @@ class PartData(Base):
         nullable=False,
         comment="The supplier cannot be deleted if there are part-numbers!"
     )
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text('true'),
+        comment="Whether part is currently in production. False = soft deleted"
+    )
+    deactivated_at = Column(
+        DateTime,
+        nullable=True,
+        comment="When part was deactivated (set when is_active becomes False)"
+    )
+    deactivated_by_breakpoint_id = Column(
+        String(40),
+        ForeignKey('breakpoint_data.breakpoint_id', ondelete='SET NULL'),
+        nullable=True,
+        comment="Which breakpoint caused this part to be deactivated"
+    )
     # Relationships
     supplier = relationship(
         'SupplierData',
@@ -341,6 +408,11 @@ class PartData(Base):
     breakpoints = relationship(
         'PartToBreakpoint',
         back_populates='part',
+        lazy='select'
+    )
+    deactivation_breakpoint = relationship(
+        'BreakpointData',
+        foreign_keys=[deactivated_by_breakpoint_id],
         lazy='select'
     )
 
@@ -1170,18 +1242,20 @@ class PartToBreakpoint(Base):
                 - breakpoint_id: References breakpoint_data (the change event)
                 - model_id: References model_data (which model this change applies to)
                 - action: Type of change (replace, delete, add, update)
-                - supplier_id: References supplier_data (new/current supplier)
-                - line_id: References line_data (new/current line)
-                - *_before_change: Values before engineering change
+                - supplier_id: References supplier_data (new/current supplier) - NULL for DELETE
+                - line_id: References line_data (new/current line) - NULL for DELETE
+                - *_before_change: Values before engineering change (snapshots)
             ---
             BUSINESS RULES:
                 - Tracks part evolution over time per model
                 - The same part may have different changes for different models
                 - BEFORE values are snapshots from Excel at time of change
                 - AFTER values are references to current master data
+                - For DELETE action: supplier_id and line_id are NULL (no new supplier/line)
+                - For DELETE action: before-change fields contain the old values
                 - ACTION determines how to process the change:
                     * replace: Old part replaced by new part number
-                    * delete: Part removed from production
+                    * delete: Part removed from production (soft delete)
                     * add: New part introduced
                     * update: Part attributes changed without part number change
             """
@@ -1207,35 +1281,40 @@ class PartToBreakpoint(Base):
     )
     supplier_id = Column(
         String(40),
-        ForeignKey('supplier_data.supplier_id', ondelete='RESTRICT'),
-        nullable=False,
-        comment="The model cannot be deleted as it is included in the revision history!"
+        ForeignKey('supplier_data.supplier_id', ondelete='SET NULL'),
+        nullable=True,
+        comment="New/current supplier. NULL for DELETE actions (part removed from production)."
     )
     line_id = Column(
         String(40),
-        ForeignKey('line_data.line_id', ondelete='RESTRICT'),
-        nullable=False,
-        comment="The model cannot be deleted as it is included in the revision history!"
+        ForeignKey('line_data.line_id', ondelete='SET NULL'),
+        nullable=True,
+        comment="New/current line. NULL for DELETE actions (part removed from production)."
     )
     action = Column(
         BREAKPOINT_ACTION_ENUM,
         nullable=False
     )
+    # Before-change snapshots
     part_number_before_change = Column(
         String(50),
-        nullable=True
+        nullable=True,
+        comment="Part number before change (snapshot). Always populated for DELETE."
     )
     supplier_name_before_change = Column(
         String(200),
-        nullable=True
+        nullable=True,
+        comment="Supplier name before change (snapshot). Populated for DELETE/REPLACE/UPDATE."
     )
     localization_before_change = Column(
         LOCALIZATION_ENUM,
-        nullable=True
+        nullable=True,
+        comment="Localization status before change (snapshot). NULL for ADD/NO DATA actions."
     )
     line_name_before_change = Column(
         String(50),
-        nullable=True
+        nullable=True,
+        comment="Line name before change (snapshot). Populated for DELETE/REPLACE/UPDATE."
     )
     # Relationships
     part = relationship(
