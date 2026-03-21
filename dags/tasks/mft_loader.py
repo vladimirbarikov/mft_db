@@ -1,29 +1,123 @@
 # pylint: disable=too-many-lines
 # pylint: disable=wrong-import-position
 """
-Data Loading Module for Material Flow Table Database.
+Material Flow Table (MFT) Database Loader Module.
 
-This module provides comprehensive functionality for bulk loading transformed
-manufacturing data into a PostgreSQL database. Refactored to eliminate code
-duplication with mapper.py and fix transactional issues.
+This module provides a robust, production-grade data loading system for bulk inserting
+transformed manufacturing data into a PostgreSQL database. It handles both core entity
+tables (e.g., suppliers, parts, boxes) and junction tables (many-to-many relationships)
+with comprehensive error handling, foreign key management, and duplicate prevention.
 
-Key Changes:
-    - Removed _resolve_core_entity_foreign_keys() - using mapper directly
-    - Split core entity loading into two phases with explicit commit
-    - Simplified _prepare_junction_dataframes() - removed duplicate validations
-    - Fixed transactional issues with mapper creation
+The loader implements a two-phase loading strategy:
+    1. Core entity tables are loaded first, with independent tables (no foreign keys)
+       loaded and committed before dependent tables
+    2. Junction tables are loaded after all core entities are present, using a mapper
+       service to resolve text references to database IDs
+
+Key Features:
+    - Bulk insert with ON CONFLICT handling to prevent duplicate records
+    - Automatic foreign key constraint management during bulk operations
+    - Integration with Mapper service for ID resolution and validation
+    - Comprehensive logging and error recovery
+    - Transaction-safe loading with explicit commit points
+    - Support for both core entity tables and junction tables
+
+Loading Architecture:
+    Core Entity Tables (load_core_entity_tables):
+        Phase 1: Load independent tables (no foreign keys)
+            - supplier_data, box_data, pallet_data
+            - model_data, configuration_data, workshop_data
+        Phase 2: Load dependent tables (with foreign keys)
+            - line_data (requires workshop_id from workshop_data)
+            - part_data (requires supplier_id from supplier_data)
+    
+    Junction Tables (load_junction_tables):
+        - part_to_box: Links parts to boxes (many-to-many)
+        - box_to_pallet: Links boxes to pallets (many-to-many)
+        - part_to_model: Links parts to model configurations
+        - part_to_line: Links parts to production lines
+
+Database Operations:
+    - Uses PostgreSQL's ON CONFLICT DO NOTHING for idempotent inserts
+    - Temporarily disables foreign key constraints for bulk operations
+    - Implements unique constraint handling per table type
+    - Automatically handles constraint name mapping for junction tables
+
+Error Handling Strategy:
+    - Catches and logs specific SQLAlchemy exceptions (IntegrityError, DataError, ProgrammingError)
+    - Always attempts to re-enable foreign keys even after errors
+    - Gracefully handles missing DataFrames or empty datasets
+    - Provides detailed logging for debugging and monitoring
+    - Falls back to regular inserts when constraint-based operations fail
 
 Dependencies:
-    - SQLAlchemy for database operations
-    - Polars for DataFrame handling
-    - mapper.py for ID resolution and mapping
-    - config.columns_config for table requirements validation
+    - SQLAlchemy 1.4.54+: Database ORM and connection management
+    - Polars: DataFrame operations and data manipulation
+    - PostgreSQL 12+: Target database with full constraint support
+    - mapper.py: ID resolution and mapping service
+    - config.columns_config: Table schema validation rules
+
+Module Functions:
+    - disable_foreign_keys(): Temporarily disables FK constraints
+    - enable_foreign_keys(): Re-enables FK constraints
+    - _bulk_insert_dataframe(): Core insertion logic with conflict handling
+    - _process_dependent_entity_with_mapper(): Processes tables requiring FK resolution
+    - load_core_entity_tables(): Main entry point for entity table loading
+    - _prepare_junction_dataframes(): Prepares junction data using mapper
+    - load_junction_tables(): Main entry point for junction table loading
+
+Usage Example:
+    ```
+    from dags.tasks.mft_loader import load_core_entity_tables, load_junction_tables
+    from dags.tasks.connector import initialize_database
+    
+    # Initialize database connection
+    engine = initialize_database(create_tables=True)
+    
+    # Load core entity tables first
+    transformed_data = {
+        'transformed_supplier_df': supplier_df,
+        'transformed_part_df': part_df,
+        'transformed_line_df': line_df,
+        # ... other DataFrames
+    }
+    
+    entity_results = load_core_entity_tables(transformed_data, engine)
+    
+    # Then load junction tables
+    junction_data = {
+        'part_to_box': part_to_box_df,
+        'box_to_pallet': box_to_pallet_df,
+        'part_to_model': part_to_model_df,
+        'part_to_line': part_to_line_df
+    }
+    
+    junction_results = load_junction_tables(junction_data, engine)
+    ```
+Performance Considerations:
+    - Bulk operations use batch inserts for optimal performance
+    - Foreign keys are temporarily disabled during bulk loads to improve speed
+    - Mapper caches ID mappings to avoid repeated database queries
+    - Duplicate records are filtered out before insertion
+
+Data Integrity Guarantees:
+    - All required columns validated against schema requirements
+    - Foreign key references validated through mapper before insertion
+    - Unique constraints enforced at database level
+    - Transaction commits ensure data consistency
+    - Foreign keys automatically re-enabled after bulk operations
+
+Logging:
+    - INFO level: Operation progress and summary statistics
+    - DEBUG level: Detailed processing steps and mapping details
+    - WARNING level: Missing data, empty tables, skipped records
+    - ERROR level: Failed operations with full traceback
 
 Maintainer: PLD Engineering Center
 Version: 1.0.0
 Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
 Created: 2026-01-12
-Last Modified: 2025-03-13
+Last Modified: 2025-03-20
 License: MIT
 Status: Production
 """
