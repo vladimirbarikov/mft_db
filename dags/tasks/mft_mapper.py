@@ -31,9 +31,57 @@ Architecture:
     Composite key processing matches exactly what database.py event handlers
     do, ensuring consistent packaging number generation across the system.
 
+ARCHITECTURE NOTES:
+
+    MFT Pipeline follows the ETL (Extract-Transform-Load) pattern:
+    
+    1. EXTRACT: Raw data from Excel files
+    2. TRANSFORM: Data cleaning, validation, and preparation
+    3. MAP: Text-to-ID conversion (this module)
+    4. LOAD: Database insertion
+    
+    Key Characteristics of MFT Mapper:
+    
+    - READ-ONLY OPERATIONS: Only performs ID lookups, never modifies database
+    - NO BUSINESS LOGIC: All transformations are done in transformer
+    - NO RECORD CREATION: Does not create new parts, suppliers, or lines
+    - SIMPLE MAPPING: Converts text values (part_number) to IDs (part_id)
+    - OPTIONAL FIELDS HANDLING: Copies optional fields as-is from transformer
+    
+    Why MFT Mapper Has No Business Logic:
+    
+    - Core entity tables (supplier_data, part_data, box_data, etc.) are 
+      pre-loaded and contain all possible records
+    - Junction tables only link existing records, no new entities created
+    - Data represents static structure, not temporal changes
+    - All validation and defaults are handled by transformer
+    - Mapper's sole responsibility is ID resolution
+    
+    Example of MFT Mapper's Simplicity:
+    
+        Input from transformer: {
+            'part_number': 'ABC-123',      # Text reference
+            'box_type': 'returnable',       # Text reference
+            'box_length_mm': 400,
+            'box_width_mm': 300,
+            'box_height_mm': 200,
+            'part_per_box': 50              # Optional field
+        }
+        
+        Output from mapper: {
+            'part_id': '123e4567-e89b-12d3-a456-426614174000',  # UUID
+            'box_id': '123e4567-e89b-12d3-a456-426614174001',   # UUID
+            'part_per_box': 50                                   # Copied as-is
+        }
+    
+    This simplicity enables:
+        - Easy testing (mock session, no complex logic)
+        - High performance (pure ID lookups)
+        - Clear separation of concerns
+        - Predictable behavior
+
 Dependencies:
     - SQLAlchemy 1.4.54+ for ORM and database abstraction
-    - Polars for DataFrame operations (junction table mapping)
     - PostgreSQL 12+ as the source database for ID lookups
 
 Performance Considerations:
@@ -50,36 +98,36 @@ Security Notes:
 
 Usage Example:
     ```
-    from dags.tasks.mft_mapper import create_mapper
-    
-    # Create mapper (after entity tables are loaded)
-    mapper = create_mapper()
-    
-    # Standard text-to-ID mapping
+    from dags.tasks.mft_mapper import create_mft_mapper
+
+    Create mapper (after entity tables are loaded)
+    mapper = create_mft_mapper()
+
+    Standard text-to-ID mapping
     part_id = mapper.get_id('part_number', 'ABC-123')
-    
-    # Composite key mapping for packaging
-    box_id = mapper.get_id('box_composite', 
-                          ('returnable', 400, 300, 200))
-    
-    # Junction table mapping
+
+    Composite key mapping for packaging
+    box_id = mapper.get_id('box_composite',
+    ('returnable', 400, 300, 200))
+
+    Junction table mapping
     records = mapper.map_junction_records(df, 'part_to_box_composite')
-    
-    # Pre-load all mappings for bulk operations
+
+    Pre-load all mappings for bulk operations
     mapper.get_supplier_mapping()
     mapper.get_part_mapping()
     mapper.get_box_mapping()
 
-    # Check mapping statistics
+    Check mapping statistics
     mapper.log_mapping_statistics()
 
-    # Clear cache when done with bulk operations
+    Clear cache when done with bulk operations
     mapper.clear_cache()
     ```
 
 Module Structure:
     - MFTObjectMapper: Main mapper class with comprehensive mapping capabilities
-    - create_mapper(): Factory function for mapper creation
+    - create_mft_mapper(): Factory function for mapper creation
     - Column-to-model mapping configuration (COLUMN_TO_MODEL)
     - Composite key handling utilities (_get_composite_id, _load_composite_mapping)
     - Junction-specific mapping methods (_map_part_to_box_composite, etc.)
@@ -108,16 +156,27 @@ Error Handling:
 
 Integration Notes:
     - Must be created AFTER core entity tables are loaded (depends on their IDs)
-    - Used primarily by loader.py for junction table processing
+    - Used primarily by mft_loader.py for junction table processing
     - Cache should be cleared after bulk operations to free memory
     - Session is maintained for the lifetime of the mapper
     - Designed for read-heavy, write-light scenarios
+
+Comparison with BP Mapper:
+    | Aspect              | MFT Mapper (ETL)          | BP Mapper (CDC)           |
+    |---------------------|---------------------------|---------------------------|
+    | Primary Purpose     | ID lookup only            | ID lookup + business logic|
+    | Creates new records | No                        | Yes (parts, lines, supp.) |
+    | Modifies data       | No                        | Yes (soft delete, update) |
+    | Business logic      | None                      | ACTION-based handlers     |
+    | Optional fields     | Simple copy               | Action-specific handling  |
+    | Time series support | No                        | Yes (breakpoint tracking) |
+    | Complexity          | Low                       | High                      |
 
 Version: 1.0.0
 Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
 Maintainer: PLD Engineering Center
 Created: 2025-01-19
-Last Modified: 2025-03-12
+Last Modified: 2026-03-21
 License: MIT
 Status: Production
 """
