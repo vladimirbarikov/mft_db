@@ -1,3 +1,6 @@
+# Ignoring the vscode settings
+.vscode
+
 # Ignoring the log files
 logs/
 *.log
