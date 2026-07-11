@@ -110,16 +110,16 @@ limiter = Limiter(
 def rate_limit(limit_string: Optional[str] = None):
     """
     Decorator factory for applying rate limits to endpoints.
-    
+
     Wraps Flask routes with Flask-Limiter's rate limiting functionality.
-    
+
     Args:
         limit_string (Optional[str]): Rate limit string (e.g., "10 per minute").
                                      If None, uses default RATE_LIMIT setting.
-                                     
+
     Returns:
         Callable: Decorated function with rate limiting applied
-        
+
     Example:
         >>> @rate_limit("5 per minute")
         ... def my_endpoint():
@@ -140,6 +140,7 @@ def to_uppercase(value: Any) -> Any:
         return None
     return str(value).upper()
 
+
 def to_title_case(value: Any) -> Any:
     """Convert to title case (first letter of each word uppercase) if not None."""
     if value is None:
@@ -151,6 +152,7 @@ def to_title_case(value: Any) -> Any:
                   lambda mo: mo.group(0)[0].upper() +
                   mo.group(0)[1:].lower(), s)
 
+
 def to_sentence_case(value: Any) -> Any:
     """Convert to sentence case (first letter uppercase, rest lowercase) if not None."""
     if value is None:
@@ -160,13 +162,14 @@ def to_sentence_case(value: Any) -> Any:
         return s
     return s[0].upper() + s[1:].lower()
 
+
 def normalize_output(
         column_name: str,
         value: Any
     ) -> Any:
     """
     Normalize output value based on column name rules.
-    
+
     Rules:
     - UPPERCASE: PART_NUMBER, CONFIGURATION, MODEL_CODE, LINE_CODE, WORKSHOP_CODE, BUILDING
     - Sentence case: PART_NAME, MODEL_NAME, LINE_NAME, WORKSHOP_NAME,
@@ -177,7 +180,7 @@ def normalize_output(
         return None
 
     uppercase_columns = [
-        'PART_NUMBER', 'CONFIGURATION', 'MODEL_CODE', 
+        'PART_NUMBER', 'CONFIGURATION', 'MODEL_CODE',
         'LINE_CODE', 'WORKSHOP_CODE', 'BUILDING'
     ]
 
@@ -203,7 +206,7 @@ def normalize_output(
 class DatabaseAPI:
     """
     Main API class for database operations.
-    
+
     Provides methods for querying and filtering data across all tables.
     Handles session management and error handling with case-insensitive search.
     Supports range queries for numeric fields.
@@ -218,10 +221,10 @@ class DatabaseAPI:
     def __init__(self, engine):
         """
         Initialize with database engine.
-        
+
         Args:
             engine: SQLAlchemy engine from connector.py
-            
+
         Raises:
             ValueError: If engine is None
         """
@@ -239,10 +242,10 @@ class DatabaseAPI:
     def _safe_query(self, query_func):
         """
         Execute query with proper error handling and session management.
-        
+
         Args:
             query_func: Function that executes the query
-        
+
         Returns:
             Query results or error dict
         """
@@ -329,13 +332,13 @@ class DatabaseAPI:
     def _apply_filter(self, query, field, value, is_enum=False):
         """
         Smart application of the filter, taking into account the type of field.
-        
+
         Args:
             query: SQLAlchemy query object
             field: A field for filtering
             value: The value for the search
             is_enum: Is the ENUM field a type
-            
+
         Returns:
             Modified query
         """
@@ -356,7 +359,7 @@ class DatabaseAPI:
         Universal search - returns ONLY rows that match ALL provided filters.
         Each column in result contains ONLY values that satisfy the filters.
         Filters are combined with AND logic - each additional filter narrows the search.
-        
+
         Args:
         filters: Dictionary with filter parameters (any column from any table)
                 Example: {
@@ -366,7 +369,7 @@ class DatabaseAPI:
                     "LOCATION": "China",
                     "BOX_TYPE": "Non-returnable"
                 }
-        
+
         Returns:
             Dictionary with complete information for all matching parts
         """
@@ -881,11 +884,11 @@ class DatabaseAPI:
         ) -> Dict[str, Any]:
         """
         Export search results to Excel file using Polars.
-        
+
         Args:
             filters: Dictionary with filter parameters (same as universal_search)
             export_path: Optional path to save the file. If None, creates a temporary file.
-            
+
         Returns:
             Dictionary with export information including file path
         """
@@ -972,7 +975,7 @@ class DatabaseAPI:
     def check_connection(self) -> bool:
         """
         Check if database connection is alive.
-        
+
         Returns:
             bool: True if connection is working, False otherwise
         """
@@ -992,10 +995,10 @@ def get_db_api() -> Optional[DatabaseAPI]:
     """
     Get DatabaseAPI instance from Flask application context.
     If not initialized or connection lost, attempt to reconnect.
-    
+
     Returns:
         DatabaseAPI instance or None if not available
-        
+
     Note:
         Attempts to reconnect if connection is lost or was never established.
         Only logs errors without raising exceptions to keep the API responsive.
@@ -1076,7 +1079,7 @@ def get_db_api() -> Optional[DatabaseAPI]:
         return None
 
     except KeyError as e:
-        logger.error("KeyError accessing app.extensions: %s", e)
+        logger.error("KeyError accessing flask_app.extensions: %s", e)
         return None
 
     except AttributeError as e:
@@ -1322,9 +1325,9 @@ def universal_search_endpoint():
 def export_to_excel_endpoint():
     """
     Export search results to Excel file.
-    
+
     POST /export with JSON body containing filters and optional export_path
-    
+
     Expected JSON body:
         {
             "filters": {                    # Dictionary with search filters
@@ -1830,8 +1833,9 @@ def create_app():
 
     return app
 
+
 # ========== CREATE APP INSTANCE ==========
-app = create_app()
+flask_app = create_app()
 
 
 # ========== MAIN ENTRY POINT ==========
@@ -1845,7 +1849,7 @@ if __name__ == '__main__':
     logger.info("Debug mode: %s", FLASK_DEBUG)
     logger.info("="*60)
 
-    app.run(
+    flask_app.run(
         host=FLASK_HOST,
         port=FLASK_PORT,
         debug=FLASK_DEBUG,
