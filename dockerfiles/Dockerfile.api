@@ -23,14 +23,14 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Copying only requirements first (for caching)
-COPY dockerfiles/requirements_api.txt .
+COPY ./dockerfiles/requirements_api.txt .
 RUN pip install --no-cache-dir -r requirements_api.txt
 
 # Copying the necessary modules
 COPY endpoints/ /app/endpoints/
 COPY database/ /app/database/
 COPY config/ /app/config/
-COPY dags/ /app/dags/ 
+COPY dags/ /app/dags/
 
 # Creating an unprivileged user
 RUN useradd -m -u 1000 -s /bin/bash appuser && \

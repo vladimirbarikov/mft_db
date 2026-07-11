@@ -1,14 +1,14 @@
 FROM apache/airflow:2.9.3
 
-COPY dockerfiles/requirements_airflow.txt /tmp/requirements_airflow.txt
+COPY ./dockerfiles/requirements_airflow.txt /tmp/requirements_airflow.txt
 
 USER root
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        gosu \
-        gcc \
-        python3-dev && \
+    gosu \
+    gcc \
+    python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
 
