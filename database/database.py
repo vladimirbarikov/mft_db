@@ -774,12 +774,13 @@ class ConfigurationData(Base):
             COLUMN DESCRIPTION:
             - configuration_id: Unique system identifier (CFG_ + 36-character UUID)
             - configuration: Configuration name (comfort, elite, tech_plus, premium)
-            - description: Optional description of the configuration
+            - transmission: Drivetrain type (4x4 or 4x2)
             ---
             BUSINESS RULES:
             - Configuration names are unique
             - Used across all vehicle models
             - Affects part consumption per vehicle
+            - Transmission type determines parts compatibility
             """
         },
     )
@@ -795,7 +796,7 @@ class ConfigurationData(Base):
         unique=True,
         nullable=False
     )
-    description = Column(
+    transmission = Column(
         String(100),
         nullable=True
     )

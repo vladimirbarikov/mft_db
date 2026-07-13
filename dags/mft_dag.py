@@ -949,8 +949,7 @@ def mft_etl_pipeline():
 
         # Apply cleaning text
         configuration_df = basic_clean_text(configuration_df, 'CONFIGURATION')
-        configuration_df = advanced_clean_text(configuration_df, 'DESCRIPTION')
-        configuration_df = pinyin_conversion(configuration_df, 'DESCRIPTION')
+        configuration_df = basic_clean_text(configuration_df, 'TRANSMISSION')
 
         # Removing duplicates across all MODEL_COLS
         transformed_configuration_df = configuration_df.unique(

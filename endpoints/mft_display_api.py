@@ -173,7 +173,7 @@ def normalize_output(
     Rules:
     - UPPERCASE: PART_NUMBER, CONFIGURATION, MODEL_CODE, LINE_CODE, WORKSHOP_CODE, BUILDING
     - Sentence case: PART_NAME, MODEL_NAME, LINE_NAME, WORKSHOP_NAME,
-                     BOX_TYPE, PALLET_TYPE, SUPPLIER_NAME, LOCALIZATION, DESCRIPTION
+                     BOX_TYPE, PALLET_TYPE, SUPPLIER_NAME, LOCALIZATION, TRANSMISSION
     - Title case: LOCATION, CITY, STREET
     """
     if value is None:
@@ -186,7 +186,7 @@ def normalize_output(
 
     sentence_case_columns = [
         'PART_NAME', 'MODEL_NAME', 'LINE_NAME', 'WORKSHOP_NAME', 'BOX_TYPE',
-        'PALLET_TYPE', 'SUPPLIER_NAME', 'LOCALIZATION', 'DESCRIPTION'
+        'PALLET_TYPE', 'SUPPLIER_NAME', 'LOCALIZATION', 'TRANSMISSION'
     ]
 
     title_case_columns = ['LOCATION', 'CITY', 'STREET']

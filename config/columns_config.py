@@ -27,7 +27,7 @@ CORE ENTITY TABLES COLUMNS (UPPERCASE for Excel extraction):
         - MODEL_CODE, MODEL_NAME
 
     CONFIGURATION_COLS: Columns for configuration entity table
-        - CONFIGURATION, DESCRIPTION
+        - CONFIGURATION, TRANSMISSION
 
     WORKSHOP_COLS: Columns for workshop entity table
         - WORKSHOP_CODE, WORKSHOP_NAME
@@ -222,7 +222,7 @@ MODEL_COLS = [
 # Configuration entity columns
 CONFIGURATION_COLS = [
     'CONFIGURATION',
-    'DESCRIPTION'
+    'TRANSMISSION'
 ]
 
 # Workshop entity columns
@@ -392,7 +392,7 @@ MFT_TABLE_REQUIREMENTS = {
             ],
             'configuration_data': [
                 'configuration',
-                'description'
+                'transmission'
             ]
         }
 
