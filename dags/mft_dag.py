@@ -152,9 +152,9 @@ Security Notes:
 
 Maintainer: PLD Engineering Center
 Version: 1.0.0
-Compatibility: Python 3.12.3+
+Compatibility: Python 3.14.4+
 Created: 2025-01-19
-Last Modified: 2026-03-13
+Last Modified: 2026-07-13
 Status: Production
 License: MIT
 """
@@ -168,8 +168,8 @@ import pytz
 import polars as pl
 from airflow.decorators import dag, task
 from airflow.exceptions import AirflowSkipException
-from airflow.models.dag import DAG
-from airflow.operators.python import get_current_context
+from airflow.sdk.definitions.dag import DAG
+from airflow.providers.standard.operators.python import get_current_context
 
 
 # The relative path to the root project directory
@@ -225,8 +225,8 @@ moscow_tz = pytz.timezone('Europe/Moscow')
 # DAG configuration
 @dag(
     dag_id="mft_etl_pipeline",
-    schedule_interval=None,  #  Triggered
-    start_date=moscow_tz.localize(datetime(2026, 2, 7)),
+    schedule=None,  # Изменено с schedule_interval на schedule
+    start_date=datetime(2026, 2, 7, tzinfo=moscow_tz),  # Упрощенный способ указания timezone
     end_date=None,
     catchup=False,
     max_active_runs=1,
