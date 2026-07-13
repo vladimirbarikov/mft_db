@@ -290,11 +290,8 @@ def _bulk_insert_dataframe(
             'pallet_data': ['pallet_type', 'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm']
         }
 
-        # constraint_name = junction_table_constraints.get(table_name, f"{table_name}_pkey")
-
         with engine.begin() as connection:
             stmt = pg_insert(model_class.__table__).values(records)
-            # stmt = stmt.on_conflict_do_nothing(constraint=constraint_name)
 
             # Defining a way to handle conflicts
             if conflict_columns is not None:
@@ -332,23 +329,28 @@ def _bulk_insert_dataframe(
                 )
 
             result = connection.execute(stmt)
+
+        # Calculate inserted count - unified approach
+        if result is None or result.rowcount is None:
+            inserted_count = len(records)
+        else:
             inserted_count = result.rowcount
 
-            # Logging results
-            total_records = len(records)
-            if inserted_count < total_records:
-                skipped = total_records - inserted_count
-                logger.info(
-                    "Inserted %d/%d records into %s (%d duplicates skipped based on unique constraints).",
-                    inserted_count, total_records, table_name, skipped
-                )
-            else:
-                logger.info(
-                    "Loaded %d records into %s",
-                    inserted_count, table_name
-                )
+        # Log results
+        total_records = len(records)
+        if inserted_count < total_records:
+            skipped = total_records - inserted_count
+            logger.info(
+                "Inserted %d/%d records into %s (%d duplicates skipped based on unique constraints).",
+                inserted_count, total_records, table_name, skipped
+            )
+        else:
+            logger.info(
+                "Loaded %d records into %s",
+                inserted_count, table_name
+            )
 
-            return inserted_count
+        return inserted_count
 
     except (IntegrityError, DataError, ProgrammingError) as e:
         logger.error("Database error loading %s: %s", table_name, e)
@@ -971,7 +973,8 @@ def load_junction_tables(
             missing_tables = []
             for table_name, query in critical_tables.items():
                 try:
-                    count = conn.execute(text(query)).scalar()
+                    result = conn.execute(text(query))
+                    count = result.scalar() if result is not None else 0
                     if count == 0:
                         missing_tables.append(table_name)
                         logger.warning("Table %s is empty (0 records)", table_name)
