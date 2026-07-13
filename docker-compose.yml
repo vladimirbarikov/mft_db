@@ -1,6 +1,6 @@
 x-airflow-common:
   &airflow-common
-  image: ${AIRFLOW_IMAGE_NAME:-mft-airflow:2.9.3}
+  image: ${AIRFLOW_IMAGE_NAME:-mft-airflow:3.0.6}
   build:
     context: .
     dockerfile: dockerfiles/Dockerfile.airflow
@@ -12,23 +12,16 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_USER:-admin}:${AIRFLOW_PASSWORD:-airflow}@postgres/${AIRFLOW_DB:-airflow}
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_USER:-admin}:${AIRFLOW_PASSWORD:-airflow}@postgres/${AIRFLOW_DB:-airflow}
     AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
-    # Metrics for Airflow 2.9.3
-    AIRFLOW__METRICS__STATSD_DATADOG_METRICS_TAGS: 'true'
-    AIRFLOW__METRICS__POOL_METRICS_INTERVAL: 5.0
-    AIRFLOW__SCHEDULER__STATS_ON: 'true'
-    AIRFLOW__SCHEDULER__PUBLISH_SCHEDULER_STAT: 'true'
-    AIRFLOW__SCHEDULER__EMIT_POOL_METRICS: 'true'
-    AIRFLOW__SCHEDULER__EMIT_POOL_STARVATION_METRICS: 'true'
-    AIRFLOW__METRICS__DAG_FILE_PROCESSING_TIMES: 'true'
-    AIRFLOW__CELERY__WORKER_HEARTBEAT_INTERVAL: 10
+    AIRFLOW__CORE__XCOM_MAX_SIZE: 52428800
     # Time zone settings (Moscow Time)
     AIRFLOW__CORE__DEFAULT_TIMEZONE: 'Europe/Moscow'
     AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: 'Europe/Moscow'
@@ -86,7 +79,7 @@ x-api-common:
       RATE_LIMIT: ${RATE_LIMIT:-10 per minute}          # Global rate limit for all endpoints
       RATE_LIMIT_STORAGE_URL: ${RATE_LIMIT_STORAGE_URL:-memory://}
       # Airflow connection
-      AIRFLOW_API_URL: http://airflow-webserver:8080/api/v1
+      AIRFLOW_API_URL: http://airflow-apiserver:8080/api/v1
       AIRFLOW_USER: ${AIRFLOW_USER:-admin}
       AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD:-airflow}
       DAG_ID: mft_etl_pipeline
@@ -194,7 +187,6 @@ services:
     volumes:
       - prometheus_volume:/prometheus
       - ./config/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./config/monitoring/prometheus/recording_rules_airflow.yml:/etc/prometheus/recording_rules_airflow.yml
       - ./config/monitoring/prometheus/recording_rules_mft.yml:/etc/prometheus/recording_rules_mft.yml
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -205,14 +197,8 @@ services:
     ports:
       - "9090:9090"
     depends_on:
-      postgres-exporter-airflow:
-        condition: service_healthy
       postgres-exporter-mft:
         condition: service_healthy
-      statsd-exporter:
-        condition: service_healthy
-      redis-exporter:
-        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
       interval: 30s
@@ -245,7 +231,6 @@ services:
       - ./config/monitoring/grafana/provisioning/datasources/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
       - ./config/monitoring/grafana/provisioning/dashboards/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml
       - ./config/monitoring/grafana/dashboards/dashboard_mft.json:/etc/grafana/dashboards/mft_dashboard.json
-      - ./config/monitoring/grafana/dashboards/dashboard_airflow.json:/etc/grafana/dashboards/airflow_dashboard.json
     ports:
       - "3000:3000"
     depends_on:
@@ -257,33 +242,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    networks:
-      - mft_airflow_network
-  
-  postgres-exporter-airflow:
-    image: prometheuscommunity/postgres-exporter:v0.16.0
-    container_name: postgres_exporter_airflow
-    restart: unless-stopped
-    environment:
-      DATA_SOURCE_NAME: "postgresql://${AIRFLOW_USER:-airflow}:${AIRFLOW_PASSWORD:-airflow}@postgres:5432/${AIRFLOW_DB:-airflow}?sslmode=disable"
-      PG_EXPORTER_CONFIG: /etc/postgres_exporter/queries_airflow.yml
-    volumes:
-      - ./config/monitoring/postgres_exporter/queries_airflow.yml:/etc/postgres_exporter/queries_airflow.yml
-    ports:
-      - "9187:9187"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command:
-      - '--log.level=info'
-      - '--web.listen-address=:9187'
-      - '--extend.query-path=/etc/postgres_exporter/queries_airflow.yml'
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9187/metrics"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
     networks:
       - mft_airflow_network
   
@@ -314,50 +272,6 @@ services:
     networks:
       - mft_airflow_network
 
-  statsd-exporter:
-    image: prom/statsd-exporter:v0.28.0
-    container_name: statsd-exporter
-    restart: unless-stopped
-    volumes:
-      - ./config/monitoring/statsd-exporter/statsd_mapping.yml:/etc/statsd-exporter/mapping.yml
-    command:
-      - '--log.level=info'
-      - '--statsd.listen-udp=:9125'
-      - '--web.listen-address=:9102'
-      - '--statsd.mapping-config=/etc/statsd-exporter/mapping.yml'
-    ports:
-      - "9102:9102"
-      - "9125:9125/udp"
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9102/metrics"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    networks:
-      - mft_airflow_network
-
-  redis-exporter:
-    image: oliver006/redis_exporter:v1.68.0
-    container_name: redis_exporter
-    restart: unless-stopped
-    environment:
-      - REDIS_ADDR=redis:6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_password}
-    ports:
-      - "9121:9121"
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - mft_airflow_network
-    healthcheck:
-      test: ["CMD", "/redis_exporter", "-version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
   airflow-init:
     <<: *airflow-common
     container_name: airflow_init
@@ -373,7 +287,7 @@ services:
         
         if [ -z "$airflow_version" ]; then
           echo "Could not detect Airflow version, assuming it's recent enough..."
-          airflow_version="2.9.3"
+          airflow_version="3.0.6"
         fi
 
         airflow_version_comparable=$$(ver $${airflow_version})
@@ -499,7 +413,7 @@ services:
     container_name: airflow_webserver
     command: webserver
     ports:
-      - "8080:8080"
+      - "8081:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
@@ -565,6 +479,24 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  airflow-apiserver:
+    <<: *airflow-common
+    container_name: airflow_apiserver
+    command: apiserver
+    ports:
+      - "8080:8080"  # API Server порт
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
   airflow-cli:
     <<: *airflow-common
     container_name: airflow_cli
@@ -617,7 +549,7 @@ services:
     depends_on:
       clamav:
         condition: service_healthy
-      airflow-webserver:
+      airflow-apiserver:
         condition: service_healthy
       db:
         condition: service_healthy

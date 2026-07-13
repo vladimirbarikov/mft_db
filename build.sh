@@ -22,14 +22,14 @@
 #
 # STAGES:
 #   1. STAGE 1: Build local images
-#      - Builds mft-airflow:2.9.3 from ./dockerfiles/Dockerfile.airflow
+#      - Builds mft-airflow:3.0.6 from ./dockerfiles/Dockerfile.airflow
 #      - Builds mft-api:3.12.3-slim from ./dockerfiles/Dockerfile.api
 #      - Checks if images exist and asks for rebuild confirmation
 #
 #   2. STAGE 2: Sequential image pull from registry
 #      - Pulls images in dependency order:
 #        * Infrastructure: postgres, redis, db
-#        * Exporters: postgres-exporter-airflow, postgres-exporter-mft, redis-exporter, statsd-exporter
+#        * Exporters: postgres-exporter-mft (MFT only)
 #        * Monitoring: prometheus, grafana
 #        * Security: clamav
 #        * Additional: adminer, flower
@@ -40,11 +40,11 @@
 #      - Creates containers in dependency order with group confirmation:
 #        
 #        GROUP 1: Infrastructure (postgres, redis, db)
-#        GROUP 2: Exporters (postgres-exporter-airflow, postgres-exporter-mft, redis-exporter, statsd-exporter)
+#        GROUP 2: Exporters (postgres-exporter-mft)
 #        GROUP 3: ClamAV (clamav)
 #        GROUP 4: Monitoring (prometheus, grafana)
 #        GROUP 5: Airflow Init (airflow-init)
-#        GROUP 6: Airflow Core (airflow-webserver, airflow-scheduler, airflow-worker, airflow-triggerer)
+#        GROUP 6: Airflow Core (airflow-webserver, airflow-scheduler, airflow-worker, airflow-triggerer, airflow-apiserver)
 #        GROUP 7: Additional Services (adminer, flower, airflow-cli)
 #        GROUP 8: API Services (mft-upload-api, mft-display-api)
 #        
@@ -67,10 +67,7 @@
 #   - postgres:              airflow_db
 #   - redis:                 airflow_redis
 #   - db:                    mft_db
-#   - postgres-exporter-airflow: postgres_exporter_airflow
-#   - postgres-exporter-mft:     postgres_exporter_mft
-#   - redis-exporter:        redis_exporter
-#   - statsd-exporter:       statsd-exporter
+#   - postgres-exporter-mft: postgres_exporter_mft
 #   - prometheus:            prometheus
 #   - grafana:               grafana
 #   - clamav:                clamav
@@ -81,18 +78,20 @@
 #   - airflow-scheduler:     airflow_scheduler
 #   - airflow-worker:        airflow_worker
 #   - airflow-triggerer:     airflow_triggerer
+#   - airflow-apiserver:     airflow_apiserver
 #   - airflow-cli:           airflow_cli (debug profile)
 #   - mft-upload-api:        mft_upload_api
 #   - mft-display-api:       mft_display_api
 #
 # SERVICE URLS:
-#   - Airflow:     http://localhost:8080
-#   - Upload API:  http://localhost:5002
-#   - Display API: http://localhost:5003
-#   - Grafana:     http://localhost:3000
-#   - Prometheus:  http://localhost:9090
-#   - Adminer:     http://localhost:8081
-#   - Flower:      http://localhost:5555
+#   - Airflow Webserver: http://localhost:8081
+#   - Airflow API:      http://localhost:8080
+#   - Upload API:       http://localhost:5002
+#   - Display API:      http://localhost:5003
+#   - Grafana:          http://localhost:3000
+#   - Prometheus:       http://localhost:9090
+#   - Adminer:          http://localhost:8081
+#   - Flower:           http://localhost:5555
 #
 # DEPENDENCIES:
 #   - Docker (20.10+)
@@ -155,10 +154,10 @@
 #   MFT Project Team
 #
 # VERSION:
-#   2.0.0 - Added sequential container creation with group confirmation
-#         - Special handling for display-api data dependency
-#         - Interactive prompts for each group
-#         - Comprehensive testing mode
+#   3.0.0 - Updated for Airflow 3.0.6
+#         - Removed Airflow metrics services (postgres-exporter-airflow, redis-exporter, statsd-exporter)
+#         - Added airflow-apiserver service
+#         - Updated service URLs (Webserver on 8081)
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -173,7 +172,8 @@ NC='\033[0m' # No Color
 set -euo pipefail
 
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}   MFT Project Build Script${NC}"
+echo -e "${YELLOW}   MFT Project Build Script v3.0${NC}"
+echo -e "${YELLOW}   Airflow 3.0.6${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 # Function to check execution status
@@ -218,7 +218,7 @@ check_local_images_exist() {
     local airflow_exists=false
     local api_exists=false
 
-    if docker image inspect mft-airflow:2.9.3 &>/dev/null; then
+    if docker image inspect mft-airflow:3.0.6 &>/dev/null; then
         airflow_exists=true
     fi
 
@@ -270,8 +270,8 @@ build_local_images() {
 
     if [ "$should_build" = true ]; then
         # Build Airflow image
-        echo -e "${YELLOW}  Building mft-airflow:2.9.3...${NC}"
-        if docker build --no-cache -t mft-airflow:2.9.3 -f ./dockerfiles/Dockerfile.airflow .; then
+        echo -e "${YELLOW}  Building mft-airflow:3.0.6...${NC}"
+        if docker build --no-cache -t mft-airflow:3.0.6 -f ./dockerfiles/Dockerfile.airflow .; then
             echo -e "${GREEN}  Airflow image built successfully${NC}"
         else
             echo -e "${RED}  Failed to build Airflow image${NC}"
@@ -331,14 +331,12 @@ pull_images_sequentially() {
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
     # Array of services in correct order (excluding local ones)
+    # Updated: removed postgres-exporter-airflow, redis-exporter, statsd-exporter
     local services=(
         "postgres"
         "redis"
         "db"
-        "postgres-exporter-airflow"
         "postgres-exporter-mft"
-        "redis-exporter"
-        "statsd-exporter"
         "prometheus"
         "grafana"
         "clamav"
@@ -431,13 +429,14 @@ create_containers_sequentially() {
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
     # Define services in dependency order based on docker-compose.yml
-    # Разбиваем на группы с описаниями
+    # Updated: removed postgres-exporter-airflow, redis-exporter, statsd-exporter
+    # Added: airflow-apiserver to Airflow Core group
     local group1_infra=("postgres" "redis" "db")
-    local group2_exporters=("postgres-exporter-airflow" "postgres-exporter-mft" "redis-exporter" "statsd-exporter")
+    local group2_exporters=("postgres-exporter-mft")
     local group3_clamav=("clamav")
     local group4_monitoring=("prometheus" "grafana")
     local group5_airflow_init=("airflow-init")
-    local group6_airflow_core=("airflow-webserver" "airflow-scheduler" "airflow-worker" "airflow-triggerer")
+    local group6_airflow_core=("airflow-webserver" "airflow-scheduler" "airflow-worker" "airflow-triggerer" "airflow-apiserver")
     local group7_additional=("adminer" "flower" "airflow-cli")
     local group8_api=("mft-upload-api" "mft-display-api")
 
@@ -567,11 +566,11 @@ create_containers_sequentially() {
 
     # Create groups in order
     create_group "Infrastructure (postgres, redis, db)" "${group1_infra[@]}"
-    create_group "Exporters" "${group2_exporters[@]}"
+    create_group "Exporters (postgres-exporter-mft)" "${group2_exporters[@]}"
     create_group "ClamAV" "${group3_clamav[@]}"
     create_group "Monitoring (prometheus, grafana)" "${group4_monitoring[@]}"
     create_group "Airflow Init" "${group5_airflow_init[@]}"
-    create_group "Airflow Core (webserver, scheduler, worker, triggerer)" "${group6_airflow_core[@]}"
+    create_group "Airflow Core (webserver, scheduler, worker, triggerer, apiserver)" "${group6_airflow_core[@]}"
     create_group "Additional Services (adminer, flower, airflow-cli)" "${group7_additional[@]}"
     create_group "API Services (mft-upload-api, mft-display-api)" "${group8_api[@]}"
 
@@ -730,13 +729,14 @@ check_prerequisites() {
 show_next_steps() {    
     echo -e "\n${PURPLE} Available services:${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "  Airflow:     ${GREEN}http://localhost:8080${NC} (admin/airflow)"
-    echo -e "  Upload API:  ${GREEN}http://localhost:5002${NC}"
-    echo -e "  Display API: ${GREEN}http://localhost:5003${NC}"
-    echo -e "  Grafana:     ${GREEN}http://localhost:3000${NC} (admin/grafana)"
-    echo -e "  Prometheus:  ${GREEN}http://localhost:9090${NC}"
-    echo -e "  Adminer:     ${GREEN}http://localhost:8081${NC}"
-    echo -e "  Flower:      ${GREEN}http://localhost:5555${NC}"
+    echo -e "  Airflow Webserver: ${GREEN}http://localhost:8081${NC} (admin/airflow)"
+    echo -e "  Airflow API:       ${GREEN}http://localhost:8080${NC}"
+    echo -e "  Upload API:        ${GREEN}http://localhost:5002${NC}"
+    echo -e "  Display API:       ${GREEN}http://localhost:5003${NC}"
+    echo -e "  Grafana:           ${GREEN}http://localhost:3000${NC} (admin/grafana)"
+    echo -e "  Prometheus:        ${GREEN}http://localhost:9090${NC}"
+    echo -e "  Adminer:           ${GREEN}http://localhost:8081${NC}"
+    echo -e "  Flower:            ${GREEN}http://localhost:5555${NC}"
 
     echo -e "\n${PURPLE} Useful commands:${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -745,19 +745,20 @@ show_next_steps() {
     echo -e "  View single service logs:            ${GREEN}docker-compose logs -f <service-name>${NC}"
     echo -e "  Test upload-api:                     ${GREEN}curl -F 'file=@data.xlsx' http://localhost:5002/upload-mft-excel${NC}"
     echo -e "  Test display-api:                    ${GREEN}curl http://localhost:5003/health${NC}"
-    echo -e "  Enter upload-api:                     ${GREEN}docker exec -it mft_upload_api bash${NC}"
-    echo -e "  Enter display-api:                    ${GREEN}docker exec -it mft_display_api bash${NC}"
-    echo -e "  Enter airflow:                        ${GREEN}docker exec -it airflow_webserver bash${NC}"
-    echo -e "  Enter airflow-cli:                     ${GREEN}docker compose run --rm airflow-cli${NC}"
-    echo -e "  Enter database:                       ${GREEN}docker exec -it mft_db psql -U mft_user -d mft_db${NC}"
-    echo -e "  Enter postgres:                       ${GREEN}docker exec -it airflow_db psql -U admin -d airflow${NC}"
-    echo -e "  Enter redis:                          ${GREEN}docker exec -it airflow_redis redis-cli${NC}"
-    echo -e "  Enter clamav:                         ${GREEN}docker exec -it clamav bash${NC}"
-    echo -e "  Stop everything:                      ${GREEN}docker-compose down${NC}"
-    echo -e "  Stop everything (with volumes):       ${GREEN}docker-compose down -v${NC}"
-    echo -e "  Create single service:                ${GREEN}docker-compose up -d <service-name>${NC}"
-    echo -e "  Rebuild single service:               ${GREEN}docker-compose up -d --build <service-name>${NC}"
-    echo -e "  Check service status:                 ${GREEN}docker-compose ps <service-name>${NC}"
+    echo -e "  Enter upload-api:                    ${GREEN}docker exec -it mft_upload_api bash${NC}"
+    echo -e "  Enter display-api:                   ${GREEN}docker exec -it mft_display_api bash${NC}"
+    echo -e "  Enter airflow webserver:             ${GREEN}docker exec -it airflow_webserver bash${NC}"
+    echo -e "  Enter airflow apiserver:             ${GREEN}docker exec -it airflow_apiserver bash${NC}"
+    echo -e "  Enter airflow-cli:                   ${GREEN}docker compose run --rm airflow-cli${NC}"
+    echo -e "  Enter database:                      ${GREEN}docker exec -it mft_db psql -U mft_user -d mft_db${NC}"
+    echo -e "  Enter postgres:                      ${GREEN}docker exec -it airflow_db psql -U admin -d airflow${NC}"
+    echo -e "  Enter redis:                         ${GREEN}docker exec -it airflow_redis redis-cli${NC}"
+    echo -e "  Enter clamav:                        ${GREEN}docker exec -it clamav bash${NC}"
+    echo -e "  Stop everything:                     ${GREEN}docker-compose down${NC}"
+    echo -e "  Stop everything (with volumes):      ${GREEN}docker-compose down -v${NC}"
+    echo -e "  Create single service:               ${GREEN}docker-compose up -d <service-name>${NC}"
+    echo -e "  Rebuild single service:              ${GREEN}docker-compose up -d --build <service-name>${NC}"
+    echo -e "  Check service status:                ${GREEN}docker-compose ps <service-name>${NC}"
 }
 
 # If the --show-steps argument is passed, we show only the steps and exit

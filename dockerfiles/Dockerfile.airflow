@@ -1,4 +1,4 @@
-FROM apache/airflow:2.9.3
+FROM apache/airflow:3.0.6
 
 COPY ./dockerfiles/requirements_airflow.txt /tmp/requirements_airflow.txt
 
