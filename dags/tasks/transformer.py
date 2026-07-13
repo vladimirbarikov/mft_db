@@ -121,7 +121,7 @@ Important Notes:
     - Empty strings become null in convert_to_string() only
 
 Version: 1.0.0
-Compatibility: Python 3.12.3+, Polars 1.0.0+, PyPinyin 0.50.0+
+Compatibility: Python 3.14.4+, Polars 1.36.1+, PyPinyin 0.55.0+
 Maintainer: PLD Engineering Center
 Created: 2025-10-25
 Last Modified: 2026-03-11

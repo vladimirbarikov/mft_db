@@ -152,7 +152,7 @@ Security Notes:
 
 Maintainer: PLD Engineering Center
 Version: 1.0.0
-Compatibility: Python 3.14.4+
+Compatibility: Python 3.14.4+, Apache Airflow 3.0.6+
 Created: 2025-01-19
 Last Modified: 2026-07-13
 Status: Production

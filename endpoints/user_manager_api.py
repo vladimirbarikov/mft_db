@@ -40,6 +40,7 @@ Environment requirements:
     - Access to PostgreSQL with administrative privileges
 
 Version: 1.0.0
+Compatibility: Python 3.14.4+, Flask 6.0.2+
 Maintainer: PLD Engineering Center
 Created: 2025
 Last Modified: 2025

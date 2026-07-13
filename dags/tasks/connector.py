@@ -112,7 +112,7 @@ Usage Example:
 
 Maintainer: PLD Engineering Center
 Version: 1.1.0
-Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
+Compatibility: Python 3.14.4+, SQLAlchemy 1.4.54+, PostgreSQL 12+
 Created: 2026-01-05
 Last Modified: 2025-02-16
 License: MIT

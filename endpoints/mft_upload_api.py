@@ -46,7 +46,7 @@ Endpoints:
     POST /admin/quarantine/files/batch-delete - Delete multiple files
 
 Version: 1.0.0
-Compatibility: Python 3.12.3
+Compatibility: Python 3.14.4+, Flask 6.0.2+
 Maintainer: PLD Engineering Center
 Created: 2026-02-26
 Last Modified: 2026-02-26

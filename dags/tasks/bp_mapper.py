@@ -247,7 +247,7 @@ Integration Notes:
     - Metadata fields (prefixed with '_') are for loader instructions
 
 Version: 1.0.0
-Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
+Compatibility: Python 3.14.4+, SQLAlchemy 1.4.54+, PostgreSQL 12+
 Maintainer: PLD Engineering Center
 Created: 2026-03-18
 Last Modified: 2026-03-21

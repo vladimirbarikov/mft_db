@@ -86,7 +86,7 @@ Note:
     For non-standard formats, additional preprocessing may be required.
 
 Version: 1.1.0
-Compatibility: Python 3.12.3+, Polars 1.0.0+, OpenPyXL 3.1.0+
+Compatibility: Python 3.14.4+, Polars 1.36.1, OpenPyXL 3.1.5+
 Maintainer: PLD Engineering Center
 Created: 2025-10-20
 Last Modified: 2026-02-16

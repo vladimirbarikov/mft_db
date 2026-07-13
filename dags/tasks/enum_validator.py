@@ -67,7 +67,7 @@ Error Handling:
 - Invalid values: Replaced with 'no data', logged with samples
 
 Version: 1.0.0
-Compatibility: Python 3.12.3+, Polars 0.20+
+Compatibility: Python 3.14.4+, Polars 1.36.1
 Maintainer: PLD Engineering Center
 Created: 2026-03-18
 Last Modified: 2026-03-18

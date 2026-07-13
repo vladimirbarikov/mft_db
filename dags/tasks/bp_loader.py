@@ -15,7 +15,7 @@ Key Features:
 
 Maintainer: PLD Engineering Center
 Version: 1.0.0
-Compatibility: Python 3.12.3+, SQLAlchemy 1.4.54+, PostgreSQL 12+
+Compatibility: Python 3.14.4+, SQLAlchemy 1.4.54+, PostgreSQL 12+
 Created: 2026-01-12
 Last Modified: 2025-03-13
 License: MIT
