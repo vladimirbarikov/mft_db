@@ -166,10 +166,8 @@ import pytz
 
 # Third-party imports
 import polars as pl
-from airflow.decorators import dag, task
 from airflow.exceptions import AirflowSkipException
-from airflow.sdk.definitions.dag import DAG
-from airflow.providers.standard.operators.python import get_current_context
+from airflow.sdk import DAG, dag, task, get_current_context
 
 
 # The relative path to the root project directory

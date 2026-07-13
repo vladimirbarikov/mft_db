@@ -18,6 +18,12 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__CORE__DAG_PROCESSOR_MANAGER_SLEEP_TIME: ${AIRFLOW__CORE__DAG_PROCESSOR_MANAGER_SLEEP_TIME:-30}
+    AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: ${AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT:-50}
+    AIRFLOW__CORE__MIN_FILE_PROCESS_INTERVAL: ${AIRFLOW__CORE__MIN_FILE_PROCESS_INTERVAL:-30}
+    AIRFLOW__CORE__DAG_PROCESSOR_SLEEP_TIME: ${AIRFLOW__CORE__DAG_PROCESSOR_SLEEP_TIME:-10}
+    AIRFLOW__SCHEDULER__DAG_PROCESSOR_SLEEP_TIME: ${AIRFLOW__SCHEDULER__DAG_PROCESSOR_SLEEP_TIME:-10}
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: ${AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL:-30}
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
@@ -25,6 +31,7 @@ x-airflow-common:
     # Time zone settings (Moscow Time)
     AIRFLOW__CORE__DEFAULT_TIMEZONE: 'Europe/Moscow'
     AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: 'Europe/Moscow'
+
     # Connecting to mft_db database
     MFT_DB_HOST: ${DB_HOST:-db}
     MFT_DB_PORT: ${DB_PORT:-5432}
@@ -153,7 +160,7 @@ services:
     container_name: adminer
     restart: always
     ports:
-      - 8081:8080
+      - 8082:8080
     depends_on:
       db:
         condition: service_healthy
@@ -408,14 +415,12 @@ services:
     depends_on:
       <<: *airflow-common-depends-on
 
-  airflow-webserver:
+  airflow-scheduler:
     <<: *airflow-common
-    container_name: airflow_webserver
-    command: webserver
-    ports:
-      - "8081:8080"
+    container_name: airflow_scheduler
+    command: scheduler
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -426,12 +431,12 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  airflow-scheduler:
+  airflow-dag-processor:
     <<: *airflow-common
-    container_name: airflow_scheduler
-    command: scheduler
+    container_name: airflow_dag_processor
+    command: dag-processor
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8793/health"]
       interval: 30s
       timeout: 10s
       retries: 5
