@@ -44,7 +44,7 @@
 #        GROUP 3: ClamAV (clamav)
 #        GROUP 4: Monitoring (prometheus, grafana)
 #        GROUP 5: Airflow Init (airflow-init)
-#        GROUP 6: Airflow Core (airflow-webserver, airflow-scheduler, airflow-worker, airflow-triggerer, airflow-apiserver)
+#        GROUP 6: Airflow Core (airflow-scheduler, airflow-worker, airflow-triggerer, airflow-apiserver)
 #        GROUP 7: Additional Services (adminer, flower, airflow-cli)
 #        GROUP 8: API Services (mft-upload-api, mft-display-api)
 #        
@@ -74,7 +74,6 @@
 #   - adminer:               adminer
 #   - flower:                airflow_flower
 #   - airflow-init:          airflow_init
-#   - airflow-webserver:     airflow_webserver
 #   - airflow-scheduler:     airflow_scheduler
 #   - airflow-worker:        airflow_worker
 #   - airflow-triggerer:     airflow_triggerer
@@ -84,7 +83,6 @@
 #   - mft-display-api:       mft_display_api
 #
 # SERVICE URLS:
-#   - Airflow Webserver: http://localhost:8081
 #   - Airflow API:      http://localhost:8080
 #   - Upload API:       http://localhost:5002
 #   - Display API:      http://localhost:5003
@@ -154,10 +152,11 @@
 #   MFT Project Team
 #
 # VERSION:
-#   3.0.0 - Updated for Airflow 3.0.6
+#   3.0.6 - Updated for Airflow 3.0.6
 #         - Removed Airflow metrics services (postgres-exporter-airflow, redis-exporter, statsd-exporter)
+#         - Removed airflow-webserver (not used in Airflow 3.0.6)
 #         - Added airflow-apiserver service
-#         - Updated service URLs (Webserver on 8081)
+#         - Updated service URLs (Adminer on 8081)
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -172,9 +171,12 @@ NC='\033[0m' # No Color
 set -euo pipefail
 
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}   MFT Project Build Script v3.0${NC}"
+echo -e "${YELLOW}   MFT Project Build Script v3.0.6${NC}"
 echo -e "${YELLOW}   Airflow 3.0.6${NC}"
 echo -e "${YELLOW}========================================${NC}"
+
+# Global flag for automatic confirmation
+AUTO_CONFIRM=false
 
 # Function to check execution status
 check_status() {
@@ -188,6 +190,10 @@ check_status() {
 
 # Function to ask user for confirmation
 ask_confirmation() {
+    if [ "$AUTO_CONFIRM" = true ]; then
+        return 0
+    fi
+    
     local prompt=$1
     local default=${2:-n}
     local answer
@@ -332,6 +338,7 @@ pull_images_sequentially() {
 
     # Array of services in correct order (excluding local ones)
     # Updated: removed postgres-exporter-airflow, redis-exporter, statsd-exporter
+    # Updated: removed airflow-webserver (not in compose)
     local services=(
         "postgres"
         "redis"
@@ -430,13 +437,14 @@ create_containers_sequentially() {
 
     # Define services in dependency order based on docker-compose.yml
     # Updated: removed postgres-exporter-airflow, redis-exporter, statsd-exporter
+    # Updated: removed airflow-webserver (not in compose)
     # Added: airflow-apiserver to Airflow Core group
     local group1_infra=("postgres" "redis" "db")
     local group2_exporters=("postgres-exporter-mft")
     local group3_clamav=("clamav")
     local group4_monitoring=("prometheus" "grafana")
     local group5_airflow_init=("airflow-init")
-    local group6_airflow_core=("airflow-webserver" "airflow-scheduler" "airflow-worker" "airflow-triggerer" "airflow-apiserver")
+    local group6_airflow_core=("airflow-scheduler" "airflow-worker" "airflow-triggerer" "airflow-apiserver")
     local group7_additional=("adminer" "flower" "airflow-cli")
     local group8_api=("mft-upload-api" "mft-display-api")
 
@@ -570,7 +578,7 @@ create_containers_sequentially() {
     create_group "ClamAV" "${group3_clamav[@]}"
     create_group "Monitoring (prometheus, grafana)" "${group4_monitoring[@]}"
     create_group "Airflow Init" "${group5_airflow_init[@]}"
-    create_group "Airflow Core (webserver, scheduler, worker, triggerer, apiserver)" "${group6_airflow_core[@]}"
+    create_group "Airflow Core (scheduler, worker, triggerer, apiserver)" "${group6_airflow_core[@]}"
     create_group "Additional Services (adminer, flower, airflow-cli)" "${group7_additional[@]}"
     create_group "API Services (mft-upload-api, mft-display-api)" "${group8_api[@]}"
 
@@ -729,7 +737,6 @@ check_prerequisites() {
 show_next_steps() {    
     echo -e "\n${PURPLE} Available services:${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "  Airflow Webserver: ${GREEN}http://localhost:8081${NC} (admin/airflow)"
     echo -e "  Airflow API:       ${GREEN}http://localhost:8080${NC}"
     echo -e "  Upload API:        ${GREEN}http://localhost:5002${NC}"
     echo -e "  Display API:       ${GREEN}http://localhost:5003${NC}"
@@ -747,7 +754,6 @@ show_next_steps() {
     echo -e "  Test display-api:                    ${GREEN}curl http://localhost:5003/health${NC}"
     echo -e "  Enter upload-api:                    ${GREEN}docker exec -it mft_upload_api bash${NC}"
     echo -e "  Enter display-api:                   ${GREEN}docker exec -it mft_display_api bash${NC}"
-    echo -e "  Enter airflow webserver:             ${GREEN}docker exec -it airflow_webserver bash${NC}"
     echo -e "  Enter airflow apiserver:             ${GREEN}docker exec -it airflow_apiserver bash${NC}"
     echo -e "  Enter airflow-cli:                   ${GREEN}docker compose run --rm airflow-cli${NC}"
     echo -e "  Enter database:                      ${GREEN}docker exec -it mft_db psql -U mft_user -d mft_db${NC}"
@@ -779,7 +785,6 @@ main() {
     local SKIP_PULL=false
     local SKIP_BUILD=false
     local SKIP_CREATE=false
-    local SKIP_CONFIRM=false
     local TEST_DISPLAY=false
     local CREATE_ONLY=""
 
@@ -798,7 +803,7 @@ main() {
                 shift
                 ;;
             --yes|-y)
-                SKIP_CONFIRM=true
+                AUTO_CONFIRM=true
                 shift
                 ;;
             --test-display)
@@ -827,12 +832,6 @@ main() {
                 ;;
         esac
     done
-
-    # Override confirmation if -y flag is used
-    if [ "$SKIP_CONFIRM" = true ]; then
-        # Create a wrapper function that always returns true
-        ask_confirmation() { return 0; }
-    fi
 
     # Check prerequisites
     check_prerequisites
