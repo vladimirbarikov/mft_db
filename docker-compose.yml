@@ -86,7 +86,7 @@ x-api-common:
       RATE_LIMIT: ${RATE_LIMIT:-10 per minute}          # Global rate limit for all endpoints
       RATE_LIMIT_STORAGE_URL: ${RATE_LIMIT_STORAGE_URL:-memory://}
       # Airflow connection
-      AIRFLOW_API_URL: http://airflow-apiserver:8080/api/v1
+      AIRFLOW_API_URL: http://airflow-apiserver:8080
       AIRFLOW_USER: ${AIRFLOW_USER:-admin}
       AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD:-airflow}
       DAG_ID: mft_etl_pipeline
@@ -487,11 +487,11 @@ services:
   airflow-apiserver:
     <<: *airflow-common
     container_name: airflow_apiserver
-    command: apiserver
+    command: api-server
     ports:
       - "8080:8080"  # API Server порт
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/openapi.json"]
       interval: 30s
       timeout: 10s
       retries: 5

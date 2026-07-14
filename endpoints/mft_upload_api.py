@@ -129,7 +129,7 @@ ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
 ADMIN_API_KEY = os.getenv('ADMIN_API_KEY', 'change-me-in-production')
 
 # Airflow configuration
-AIRFLOW_API_URL = os.getenv('AIRFLOW_API_URL', 'http://airflow-apiserver:8080/api/v1')
+AIRFLOW_API_URL = os.getenv('AIRFLOW_API_URL', 'http://airflow-apiserver:8080')
 AIRFLOW_USER = os.getenv('AIRFLOW_USER', 'admin')
 AIRFLOW_PASSWORD = os.getenv('AIRFLOW_PASSWORD', 'airflow')
 DAG_ID = os.getenv('DAG_ID', 'mft_etl_pipeline')
