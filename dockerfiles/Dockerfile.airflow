@@ -37,7 +37,7 @@ COPY ./plugins /opt/airflow/plugins
 # Create necessary directories with proper permissions
 USER root
 RUN mkdir -p /opt/airflow/logs /opt/airflow/data /opt/airflow/dags /opt/airflow/plugins && \
-    chown -R airflow:airflow /opt/airflow
+    chown -R airflow:root /opt/airflow
 USER airflow
 
 # Verify directory structure
