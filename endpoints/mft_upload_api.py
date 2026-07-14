@@ -885,10 +885,14 @@ def save_file_with_backup(file_content: bytes, file_path: Path) -> bool:
 
 def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]]:
     """
-    Trigger Airflow DAG with file information via REST API.
+    Trigger Airflow DAG with file information via REST API v2 using JWT authentication.
     
-    Sends a POST request to Airflow API to trigger the configured DAG
-    with file metadata passed in the DAG run configuration.
+    This function implements the new authentication flow required by Airflow 3.0:
+    1. First obtains a JWT token using username/password via the /auth/token endpoint
+    2. Then uses the token to trigger the DAG via the v2 API endpoint
+    
+    The function handles all network-related errors and provides detailed logging
+    for monitoring and debugging purposes.
     
     Args:
         file_info (Dict[str, Any]): Complete file metadata including:
@@ -905,63 +909,126 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
             
     Returns:
         Tuple[bool, Optional[Dict]]:
-            - bool: True if DAG triggered successfully
-            - Optional[Dict]: DAG run response on success, error dict on failure
+            - bool: True if DAG triggered successfully, False otherwise
+            - Optional[Dict]: DAG run response on success, error details on failure
             
     Raises:
         requests.exceptions.RequestException: For network/connection errors
+        KeyError: If expected fields are missing from response
+    
+    Example:
+        >>> file_info = {"safe_filename": "data.xlsx", ...}
+        >>> success, response = trigger_airflow_dag(file_info)
+        >>> if success:
+        ...     print("DAG triggered:", response["dag_run_id"])
+    
+    Note:
+        This function is compatible with Airflow 3.0+ which uses JWT-based authentication.
+        The authentication flow follows the official Airflow 3.0 API specification.
     """
     try:
-        auth = (AIRFLOW_USER, AIRFLOW_PASSWORD)
-        dag_run_url = f"{AIRFLOW_API_URL}/dags/{DAG_ID}/dagRuns"
+        # STEP 1: Get JWT token (Airflow 3.0 specification)
+        token_url = f"{AIRFLOW_API_URL}/auth/token"
+        token_payload = {"username": AIRFLOW_USER, "password": AIRFLOW_PASSWORD}
+
+        logger.info("Requesting JWT token from Airflow API...")
+        token_response = requests.post(
+            token_url,
+            json=token_payload,
+            timeout=15,
+            headers={"Content-Type": "application/json"}
+        )
+
+        if token_response.status_code != 200:
+            logger.error(
+                "Authentication failed. Status: %s, Response: %s",
+                token_response.status_code,
+                token_response.text,
+            )
+            return False, {
+                "error": "JWT token generation failed",
+                "status_code": token_response.status_code,
+                "response": token_response.text[:500]  # Limit response size
+            }
+
+        # Extract token from response
+        token_data = token_response.json()
+        access_token = token_data.get("access_token")
+
+        if not access_token:
+            logger.error("Token field 'access_token' missing in response structure.")
+            logger.debug("Token response: %s", token_data)
+            return False, {"error": "Invalid token response structure"}
+
+        logger.info("JWT token obtained successfully")
+
+        # STEP 2: Trigger DAG via v2 API with JWT token
+        dag_run_url = f"{AIRFLOW_API_URL}/api/v2/dags/{DAG_ID}/dag_runs"
+
+        # Build headers with JWT Bearer token
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
 
         payload = {
             "conf": {
-                "file_name": file_info['safe_filename'],
-                "file_path": str(file_info['final_path']),
-                "upload_timestamp": file_info['timestamp'],
-                "unique_id": file_info['unique_id'],
-                "original_filename": file_info['original_filename'],
-                "file_hash": file_info.get('file_hash'),
-                "file_size": file_info.get('file_size'),
-                "sheets": file_info.get('sheets', []),
-                "total_rows": file_info.get('total_rows', 0),
-                "file_format": file_info.get('format', 'unknown')
+                "file_name": file_info["safe_filename"],
+                "file_path": str(file_info["final_path"]),
+                "upload_timestamp": file_info["timestamp"],
+                "unique_id": file_info["unique_id"],
+                "original_filename": file_info["original_filename"],
+                "file_hash": file_info.get("file_hash"),
+                "file_size": file_info.get("file_size"),
+                "sheets": file_info.get("sheets", []),
+                "total_rows": file_info.get("total_rows", 0),
+                "file_format": file_info.get("format", "unknown")
             }
         }
 
-        logger.info("Triggering DAG %s with file: %s", DAG_ID, file_info['safe_filename'])
+        logger.info("Triggering DAG %s via v2 API with file: %s", DAG_ID, file_info["safe_filename"])
 
         response = requests.post(
             dag_run_url,
             json=payload,
-            auth=auth,
-            timeout=30,
-            headers={'Content-Type': 'application/json'}
+            headers=headers,
+            timeout=30
         )
 
+        # Airflow API v2 returns 201 Created on successful DAG run creation
         if response.status_code in (200, 201):
-            logger.info("DAG triggered successfully")
+            logger.info("DAG triggered successfully via REST API v2")
             return True, response.json()
         else:
-            logger.error("Failed to trigger DAG. Status: %s", response.status_code)
-            return False, {'status_code': response.status_code, 'error': response.text}
+            logger.error(
+                "Failed to trigger DAG. Status: %s, Response: %s",
+                response.status_code,
+                response.text
+            )
+            return False, {
+                "status_code": response.status_code,
+                "error": response.text[:500]  # Limit response size
+            }
 
     except requests.exceptions.ConnectionError as e:
         logger.error("Connection error to Airflow API: %s", e)
-        return False, {'error': 'Airflow API connection failed'}
+        return False, {"error": "Airflow API connection failed"}
 
     except requests.exceptions.Timeout as e:
         logger.error("Timeout connecting to Airflow API: %s", e)
-        return False, {'error': 'Airflow API timeout'}
+        return False, {"error": "Airflow API timeout"}
 
     except requests.exceptions.RequestException as e:
         logger.error("Request error to Airflow API: %s", e)
-        return False, {'error': f'Airflow API error: {str(e)}'}
+        return False, {"error": f"Airflow API error: {str(e)}"}
+
+    except KeyError as e:
+        logger.error("Missing expected field in response: %s", e)
+        return False, {"error": f"Unexpected response structure: {str(e)}"}
 
     except Exception as unexpected_error:
         logger.error("Unexpected error triggering DAG: %s", unexpected_error, exc_info=True)
-        return False, {'error': f'Unexpected error: {str(unexpected_error)}'}
+        return False, {"error": f"Unexpected error: {str(unexpected_error)}"}
 
 
 def cleanup_old_files(target_dir: Path, hours: int) -> int:

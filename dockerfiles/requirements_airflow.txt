@@ -1,25 +1,35 @@
-# Core data processing
-polars==1.36.1
-pyarrow>=25.0.0
+# ========== AIRFLOW CORE ==========
+apache-airflow==3.0.6
 
-# Excel file handling
-openpyxl==3.1.5
-
-# Timezone handling
-pytz==2025.2
-
-# PostgreSQL driver
-psycopg2-binary==2.9.11
-
-# Utilities
-python-dotenv==1.2.1
-pypinyin==0.55.0
-requests==2.32.5
-
-# Airflow 3.0.6 providers
+# ========== PROVIDERS ==========
 apache-airflow-providers-celery>=3.8.0
 apache-airflow-providers-common-sql>=1.30.0
 apache-airflow-providers-http>=6.0.0
 apache-airflow-providers-postgres>=6.0.0
-apache-airflow-providers-standard>=1.16.0
-apache-airflow-task-sdk>=1.0.6
+apache-airflow-providers-redis>=3.5.0
+apache-airflow-providers-ftp>=3.8.0
+
+# ========== JWT AUTH ==========
+# JWT is built into Airflow 3.0 core, but these libraries are needed for token handling
+pyjwt>=2.8.0
+cryptography>=42.0.0
+
+# Optional - if you need additional auth features
+# apache-airflow-providers-auth>=4.0.0
+
+# ========== DATA PROCESSING ==========
+polars>=1.36.1
+pyarrow>=25.0.0
+
+# ========== EXCEL ==========
+openpyxl>=3.1.5
+xlrd>=2.0.0
+
+# ========== DATABASE ==========
+psycopg2-binary>=2.9.11
+
+# ========== UTILITIES ==========
+python-dotenv>=1.2.1
+requests>=2.32.5
+pytz>=2025.2
+pypinyin>=0.55.0

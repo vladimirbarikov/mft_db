@@ -12,9 +12,25 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_USER:-admin}:${AIRFLOW_PASSWORD:-airflow}@postgres/${AIRFLOW_DB:-airflow}
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_USER:-admin}:${AIRFLOW_PASSWORD:-airflow}@postgres/${AIRFLOW_DB:-airflow}
     AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
-    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
-    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    
+    # ========== AIRFLOW 3.0.6 API CONFIGURATION ==========
+    AIRFLOW__API__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    
+    # ========== AIRFLOW 3.0.6 JWT AUTHENTICATION ==========
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.jwt,airflow.api.auth.backend.session'
+    AIRFLOW__API__JWT_SECRET_KEY: ${AIRFLOW_JWT_SECRET_KEY:-change-me-in-production}
+    AIRFLOW__API__JWT_ALGORITHM: HS256
+    AIRFLOW__API__JWT_EXPIRATION_DELTA: 3600
+    
+    # ========== SECURITY ==========
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY:-change-me-in-production}
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    
+    # ========== TRIGGERER CONFIGURATION (Airflow 3.0) ==========
+    AIRFLOW__TRIGGERER__DEFAULT_TRIGGER_TIMEOUT: 3600
+    AIRFLOW__TRIGGERER__MAX_TRIGGER_TIMEOUT: 86400
+    
+    # ========== CORE SETTINGS ==========
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
@@ -28,6 +44,7 @@ x-airflow-common:
     AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
     AIRFLOW__CORE__XCOM_MAX_SIZE: 52428800
+    
     # Time zone settings (Moscow Time)
     AIRFLOW__CORE__DEFAULT_TIMEZONE: 'Europe/Moscow'
     AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: 'Europe/Moscow'
@@ -40,10 +57,9 @@ x-airflow-common:
     MFT_DB_PASSWORD: ${DB_PASSWORD:-mft_password}
     DB_MAX_RETRIES: ${DB_MAX_RETRIES:-5}
     DB_RETRY_DELAY: ${DB_RETRY_DELAY:-2}
-    # Show Python where to find modules and packages to import
+    
     PYTHONPATH: /opt/airflow
   volumes:
-    # Mount each directory from root project directory (mft_src)
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
@@ -489,9 +505,9 @@ services:
     container_name: airflow_apiserver
     command: api-server
     ports:
-      - "8080:8080"  # API Server порт
+      - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/openapi.json"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -501,6 +517,14 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
 
   airflow-cli:
     <<: *airflow-common
@@ -548,6 +572,8 @@ services:
     environment:
       <<: *api-env
       FLASK_PORT: ${MFT_UPLOAD_API_PORT:-5002}
+      AIRFLOW_AUTH_METHOD: jwt
+      AIRFLOW_JWT_SECRET_KEY: ${AIRFLOW_JWT_SECRET_KEY:-change-me-in-production}
     command: python /app/endpoints/mft_upload_api.py
     ports:
       - "5002:5002"
