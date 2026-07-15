@@ -1,44 +1,30 @@
 FROM apache/airflow:3.0.6
 
-# Copy requirements file into the container
+# Copy requirements
 COPY ./dockerfiles/requirements_airflow.txt /tmp/requirements_airflow.txt
 
-# Install system dependencies (requires root privileges)
+# Install system dependencies (only what's needed)
 USER root
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    gosu \
     gcc \
     python3-dev \
     curl \
-    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Switch back to airflow user for security
 USER airflow
 
-# Upgrade pip and install Python dependencies
+# Install Python dependencies
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r /tmp/requirements_airflow.txt && \
-    pip cache purge
+    pip install --no-cache-dir -r /tmp/requirements_airflow.txt
 
-# Verify JWT authentication backend is available (built into Airflow 3.0 core)
-RUN python -c "from airflow.api.auth.backend import jwt; print('✓ JWT auth backend is available')" || \
-    echo "⚠️ WARNING: JWT auth backend not found - this may cause issues with REST API!"
+# Copy project files
+COPY --chown=airflow:root ./dags /opt/airflow/dags
+COPY --chown=airflow:root ./config /opt/airflow/config
+COPY --chown=airflow:root ./plugins /opt/airflow/plugins
 
-# Verify Airflow version
-RUN airflow version
-
-# Copy DAGs, configuration, and plugins
-COPY ./dags /opt/airflow/dags
-COPY ./config /opt/airflow/config
-COPY ./plugins /opt/airflow/plugins
-
-# Create necessary directories with proper permissions
+# Create necessary directories
 USER root
-RUN mkdir -p /opt/airflow/logs /opt/airflow/data /opt/airflow/dags /opt/airflow/plugins && \
+RUN mkdir -p /opt/airflow/logs /opt/airflow/data && \
     chown -R airflow:root /opt/airflow
 USER airflow
-
-# Verify directory structure
-RUN ls -la /opt/airflow/
