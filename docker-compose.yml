@@ -23,6 +23,7 @@ x-airflow-common:
     AIRFLOW__API__JWT_EXPIRATION_DELTA: 3600
     
     # ========== SECURITY ==========
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY:-change-me-in-production}
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY:-change-me-in-production}
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     

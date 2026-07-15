@@ -10,12 +10,12 @@ apache-airflow-providers-redis>=3.5.0
 apache-airflow-providers-ftp>=3.8.0
 
 # ========== JWT AUTH ==========
-# JWT is built into Airflow 3.0 core, but these libraries are needed for token handling
 pyjwt>=2.8.0
 cryptography>=42.0.0
 
-# Optional - if you need additional auth features
-# apache-airflow-providers-auth>=4.0.0
+# ========== UPath compatibility ==========
+universal-pathlib>=0.2.0,<0.3.0
+upath>=0.2.0,<0.3.0
 
 # ========== DATA PROCESSING ==========
 polars>=1.36.1
