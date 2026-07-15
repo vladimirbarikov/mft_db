@@ -17,13 +17,12 @@ x-airflow-common:
     AIRFLOW__API__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     
     # ========== AIRFLOW 3.0.6 JWT AUTHENTICATION ==========
-    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.jwt,airflow.api.auth.backend.session'
-    AIRFLOW__API__JWT_SECRET_KEY: ${AIRFLOW_JWT_SECRET_KEY:-change-me-in-production}
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.jwt'
+    AIRFLOW__API__JWT_SECRET: ${AIRFLOW_JWT_SECRET_KEY:-change-me-in-production}
     AIRFLOW__API__JWT_ALGORITHM: HS256
     AIRFLOW__API__JWT_EXPIRATION_DELTA: 3600
     
     # ========== SECURITY ==========
-    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY:-change-me-in-production}
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_WEBSERVER_SECRET_KEY:-change-me-in-production}
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     
@@ -303,32 +302,9 @@ services:
     command:
       - -c
       - |
-        function ver() {
-        printf "%04d%04d%04d%04d" $${1//./ }
-        }
-
-        airflow_version=$$(AIRFLOW__LOGGING__LOGGING_LEVEL=INFO && gosu airflow airflow version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        airflow_version="3.0.6"
         
-        if [ -z "$airflow_version" ]; then
-          echo "Could not detect Airflow version, assuming it's recent enough..."
-          airflow_version="3.0.6"
-        fi
-
-        airflow_version_comparable=$$(ver $${airflow_version})
-        min_airflow_version=2.2.0
-        min_airflow_version_comparable=$$(ver $${min_airflow_version})
-
-        echo "Detected Airflow version: $${airflow_version}"
-
-        if (( 10#$${airflow_version_comparable} < 10#$${min_airflow_version_comparable} )); then
-          echo
-          echo -e "\033[1;31mERROR!!!: Too old Airflow version $${airflow_version}!\e[0m"
-          echo "The minimum Airflow version supported: $${min_airflow_version}. Only use this or higher!"
-          echo
-          exit 1
-        else
-          echo -e "\033[1;32m✓ Airflow version $${airflow_version} is compatible\e[0m"
-        fi
+        echo "✓ Using Airflow version: ${airflow_version}"
 
         if [[ -z "${AIRFLOW_UID}" ]]; then
           echo
@@ -372,15 +348,11 @@ services:
 
         if [[ $${warning_resources} == "true" ]]; then
           echo
-          echo -e "\033[1;33mWARNING!!!: You have not enough resources to run Airflow (see
-          above)!\e[0m"
+          echo -e "\033[1;33mWARNING!!!: You have not enough resources to run Airflow (see above)!\e[0m"
           echo "Please follow the instructions to increase amount of resources available:"
           echo "https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#beforeyou-begin"
           echo
         fi
-
-        # mkdir -p /sources/logs /sources/dags /sources/plugins
-        # chown -R "${AIRFLOW_UID:-1000}:0" /sources/{logs,dags,plugins}
 
         echo "Running Airflow initialization..."
         /entrypoint airflow version
