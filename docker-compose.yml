@@ -12,6 +12,7 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_USER:-admin}:${AIRFLOW_PASSWORD:-airflow}@postgres/${AIRFLOW_DB:-airflow}
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${AIRFLOW_USER:-admin}:${AIRFLOW_PASSWORD:-airflow}@postgres/${AIRFLOW_DB:-airflow}
     AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+    AIRFLOW__CELERY_BROKER_TRANSPORT_OPTIONS__VISIBILITY_TIMEOUT: ${AIRFLOW__CELERY_BROKER_TRANSPORT_OPTIONS__VISIBILITY_TIMEOUT:-86400}
     
     # ========== AIRFLOW 3.0.6 API CONFIGURATION ==========
     AIRFLOW__API__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
