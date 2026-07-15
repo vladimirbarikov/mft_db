@@ -1,52 +1,46 @@
 FROM python:3.12.3-slim
 
-# Identification labels
 LABEL maintainer="MFT Project"
-LABEL description="API services for MFT Project (upload, display, modify)"
+LABEL description="API services for MFT Project"
 
-# Disabling buffering of Python logs
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
-# Installing system dependencies
+# Use the Yandex Mirror for Debian
+RUN sed -i 's/deb.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's/security.debian.org/mirror.yandex.ru\/debian-security/g' /etc/apt/sources.list.d/debian.sources
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     curl \
-    build-essential \
-    libxml2-dev \
-    libxslt1-dev \
-    zlib1g-dev && \
-    rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
-# Creating a working directory
 WORKDIR /app
 
-# Copying only requirements first (for caching)
 COPY ./dockerfiles/requirements_api.txt .
-RUN pip install --no-cache-dir -r requirements_api.txt
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --only-binary :all: -r requirements_api.txt
 
-# Copying the necessary modules
 COPY endpoints/ /app/endpoints/
 COPY database/ /app/database/
 COPY config/ /app/config/
 COPY dags/ /app/dags/
 
-# Creating an unprivileged user
-RUN useradd -m -u 1000 -s /bin/bash appuser && \
-    chown -R appuser:appuser /app && \
-    mkdir -p /opt/airflow/data/uploads && \
-    mkdir -p /opt/airflow/data/backups && \
-    mkdir -p /opt/airflow/data/processed && \
-    mkdir -p /opt/airflow/data/quarantine && \
-    chown -R appuser:appuser /opt/airflow/data
+ARG APP_UID=50000
+ARG APP_GID=0
 
-# Switching to an unprivileged user
+# Если GID=0, используем существующую группу root
+RUN if [ "${APP_GID}" = "0" ]; then \
+        groupname="root"; \
+    else \
+        groupadd -g ${APP_GID} -r appgroup && groupname="appgroup"; \
+    fi && \
+    useradd -m -u ${APP_UID} -g ${groupname} -s /bin/bash appuser && \
+    chown -R appuser:${groupname} /app && \
+    mkdir -p /opt/airflow/data/{uploads,backups,processed,quarantine} && \
+    chown -R appuser:${groupname} /opt/airflow/data
+
 USER appuser
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:5002/health || exit 1
-
-# Default command (will be overridden by docker-compose)
-CMD ["python", "endpoints/upload_api.py"]
+CMD ["python", "-m", "endpoints.mft_upload_api"]
