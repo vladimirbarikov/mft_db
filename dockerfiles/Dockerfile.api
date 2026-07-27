@@ -30,7 +30,7 @@ COPY dags/ /app/dags/
 ARG APP_UID=50000
 ARG APP_GID=0
 
-# Если GID=0, используем существующую группу root
+# If GID=0, use the existing root group
 RUN if [ "${APP_GID}" = "0" ]; then \
         groupname="root"; \
     else \

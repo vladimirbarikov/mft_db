@@ -348,7 +348,6 @@ pull_images_sequentially() {
         "grafana"
         "clamav"
         "adminer"
-        "flower"
     )
 
     # Check if docker-compose.yml exists
