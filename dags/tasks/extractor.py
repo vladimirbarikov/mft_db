@@ -9,20 +9,27 @@ It serves as the first step in the ETL pipeline, preparing raw data for subseque
 transformation and loading operations.
 
 Key Features:
-    - Excel file reading and validation with multiple engine support
-    - Creation of main DataFrame from source Excel files
+    - Streaming Excel file reading from memory (bytes) - no disk I/O
+    - Creation of main DataFrame from Excel content
     - Extraction of specialized DataFrames for different business domains
     - Comprehensive data validation and error handling
     - Airflow integration ready with task decorator support
     - Memory-efficient processing with Polars DataFrames
 
 Architecture:
-    The module follows a two-phase extraction approach:
-    1. Raw Extraction: Read Excel file into main DataFrame (create_main_df)
-    2. Specialization: Extract specific columns for business domains (create_specialized_df)
-    
+    The module follows a streaming-first approach:
+    1. Raw Extraction: Read Excel content from bytes into main DataFrame
+    2. Specialization: Extract specific columns for business domains
+
     This separation allows for flexible pipeline composition and reuse of the
     main DataFrame across multiple specialized extractions.
+
+Streaming Mode:
+    All Excel content is processed from memory using io.BytesIO.
+    No disk I/O operations are performed, making it ideal for:
+    - Upload API streaming endpoints
+    - Containerized deployments with ephemeral storage
+    - Environments where file system access is restricted
 
 Dependencies:
     - Polars 1.0.0+ for efficient DataFrame operations
@@ -30,73 +37,18 @@ Dependencies:
     - Apache Airflow 2.8.0+ (optional) for workflow integration
     - Python 3.12.3+ for type hints and modern features
 
-Performance Considerations:
-    - Uses Polars for memory-efficient DataFrame operations
-    - Lazy evaluation available for large files (not implemented)
-    - Column selection minimizes memory footprint
-    - File existence check before full read prevents wasted I/O
-
-Security Notes:
-    - Validates file paths to prevent directory traversal attacks
-    - Input validation for all DataFrame operations
-    - No execution of dynamic code from source files
-    - Safe handling of potentially malicious Excel content
-
-Error Handling:
-    - Comprehensive exception hierarchy (ValueError, TypeError, ComputeError)
-    - Detailed logging at appropriate levels (INFO, WARNING, ERROR)
-    - Graceful degradation for empty DataFrames
-    - Clear error messages for missing columns/files
-
-Integration Notes:
-    - Designed as Airflow tasks (commented decorators ready for activation)
-    - Output compatible with transformer.py and loader.py modules
-    - Column naming follows manufacturing data warehouse conventions
-    - Supports both standalone and pipeline execution
-
-Usage Example:
-    ```
-    from dags.tasks.extractor import create_main_df, create_specialized_df
-    
-    # Extract main DataFrame from Excel
-    main_df = create_main_df('/path/to/source.xlsx')
-    
-    # Create specialized DataFrame for suppliers
-    supplier_columns = ['supplier_name', 'supplier_code', 'country']
-    supplier_df = create_specialized_df(main_df, supplier_columns)
-    
-    # Create specialized DataFrame for parts  
-    part_columns = ['part_number', 'part_name', 'weight_kg']
-    part_df = create_specialized_df(main_df, part_columns)
-    ```
-
-Module Structure:
-    - create_main_df(): Primary Excel file reader and validator
-    - create_specialized_df(): Column selector for business domains
-
-Development Mode:
-    - Uses hardcoded file path for testing
-    - Comprehensive logging for debugging
-    - Standalone execution capability for development
-    - Type hints for better IDE support
-
-Note:
-    This module assumes Excel files follow the standardized Material Flow Table
-    format. Column names and data types should be consistent across source files.
-    For non-standard formats, additional preprocessing may be required.
-
-Version: 1.1.0
+Version: 2.0.0
 Compatibility: Python 3.14.4+, Polars 1.36.1, OpenPyXL 3.1.5+
 Maintainer: PLD Engineering Center
 Created: 2025-10-20
-Last Modified: 2026-02-16
+Last Modified: 2026-07-27
 License: MIT
-Status: Production
+Status: Production Ready
 """
 # Standard library imports
 from pathlib import Path
-import os
 import sys
+import io
 
 # Third-party imports
 import polars as pl
@@ -115,49 +67,59 @@ from config import get_logger
 logger = get_logger(__name__)
 
 
-def create_main_df(f_path: str | Path) -> pl.DataFrame:
+def create_main_df(file_content: bytes) -> pl.DataFrame:
     """
-    Read Excel file into Polars DataFrame.
-    
+    Create Polars DataFrame from Excel file content in memory (bytes).
+
+    Reads Excel data directly from memory without saving to disk.
+    This function is used in streaming upload mode where files are
+    processed entirely in memory.
+
     Args:
-        f_path: Path to Excel file
-        
+        file_content (bytes): Raw Excel file content as bytes
+
     Returns:
-        DataFrame with Excel data
-        
+        pl.DataFrame: DataFrame with Excel data
+
     Raises:
-        ValueError: If file not found
+        ValueError: If file_content is empty or invalid
         pl.exceptions.ComputeError: If Excel processing fails
+
+    Example:
+        >>> # From uploaded file
+        >>> content = await file.read()
+        >>> df = create_main_df(content)
+
+        >>> # From base64 decoded content
+        >>> content = base64.b64decode(encoded_data)
+        >>> df = create_main_df(content)
     """
-    # Check the file availability
-    if not f_path or not os.path.exists(f_path):
-        raise ValueError("The file was not found. The file path is missing or wrong.")
+    if not file_content:
+        raise ValueError("File content is empty or None")
 
     try:
         main_df = pl.read_excel(
-            f_path,
+            io.BytesIO(file_content),
             engine='openpyxl'
         )
 
     except pl.exceptions.ComputeError as e:
-        logger.error("Error processing data: %s", e)
+        logger.error("Error processing Excel data from memory: %s", e)
         raise
 
     except Exception as unexpected_error:
-        logger.error("Unexpected error reading file: %s", unexpected_error)
+        logger.error("Unexpected error reading Excel from memory: %s", unexpected_error)
         raise
 
     logger.info("=" * 60)
-
     logger.info(
-        "Successfully created main dataframe.\n"
+        "Successfully created main dataframe from memory.\n"
         "Shape: %d rows, %d columns\n"
         "Columns: %s",
         main_df.height,
         main_df.width,
         ', '.join(main_df.columns),
     )
-
     logger.info("=" * 60)
 
     return main_df
@@ -169,17 +131,22 @@ def create_specialized_df(
     ) -> pl.DataFrame:
     """
     Extract specific columns from main DataFrame.
-    
+
     Args:
         main_df: Source DataFrame
         required_columns: Columns to extract
-        
+
     Returns:
-        DataFrame with selected columns
-        
+        pl.DataFrame: DataFrame with selected columns
+
     Raises:
         TypeError: If main_df is not a Polars DataFrame
         ValueError: If required columns are missing
+
+    Example:
+        >>> main_df = create_main_df(file_content)
+        >>> supplier_columns = ['supplier_name', 'supplier_code', 'country']
+        >>> supplier_df = create_specialized_df(main_df, supplier_columns)
     """
     try:
         # Validate input
