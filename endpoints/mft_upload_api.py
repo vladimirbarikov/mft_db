@@ -775,7 +775,7 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
             json={"username": AIRFLOW_USER, "password": AIRFLOW_PASSWORD},
             timeout=15
         )
-        
+
         # Check if token request was successful
         if token_response.status_code != 200:
             return False, {
@@ -783,31 +783,31 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
                 "details": token_response.text,
                 "status_code": token_response.status_code
             }
-        
+
         # Extract access_token from response
         token_data = token_response.json()
         jwt_token = token_data.get('access_token')
-        
+
         if not jwt_token:
             return False, {
                 "error": "No access_token in JWT response",
                 "details": token_data
             }
-        
+
         # 2. Prepare DAG trigger request
         dag_url = f"{AIRFLOW_API_URL}/api/v2/dags/{DAG_ID}/dagRuns"
         headers = {
             "Authorization": f"Bearer {jwt_token}",
             "Content-Type": "application/json"
         }
-        
+
         # Prepare payload with file information
         dag_payload = {
             "conf": {
                 "file_info": file_info
             }
         }
-        
+
         # 3. Trigger the DAG
         dag_response = requests.post(
             dag_url,
@@ -815,7 +815,7 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
             headers=headers,
             timeout=30
         )
-        
+
         # Check if DAG trigger was successful
         if dag_response.status_code == 200:
             return True, dag_response.json()
@@ -825,7 +825,7 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
                 "details": dag_response.text,
                 "status_code": dag_response.status_code
             }
-            
+
     except requests.exceptions.Timeout as e:
         return False, {
             "error": "Timeout connecting to Airflow API",
