@@ -11,8 +11,8 @@ a PostgreSQL database with proper referential integrity.
 Pipeline Architecture:
     The DAG follows a three-phase ETL pattern and is triggered by the upload API:
     1. TRIGGER: DAG is automatically triggered by upload-mft-excel endpoint with 
-       file metadata passed via DAG run configuration (file_path, unique_id, etc.)
-    2. EXTRACT: Reads the Excel file from the provided path, extracts main DataFrame,
+       file metadata passed via DAG run configuration (file_content base64, unique_id, etc.)
+    2. EXTRACT: Reads the Excel content from memory (base64 decoded), extracts main DataFrame,
        and creates specialized datasets for each entity
     3. TRANSFORM: Cleans, validates, and prepares data for database loading
     4. LOAD: Bulk loads data into PostgreSQL with constraint management
@@ -30,6 +30,7 @@ Key Features:
     - Extensive logging and error handling throughout the pipeline
     - Data validation and integrity checks post-loading
     - Performance metrics collection for each task
+    - STREAMING MODE: Processes Excel content from memory (no disk I/O)
 
 Technical Implementation:
     - Uses Polars DataFrames for efficient data processing
@@ -42,30 +43,24 @@ Technical Implementation:
 DAG Schedule & Triggering:
     - Trigger-based execution (schedule_interval=None) - DAG runs only when triggered
     - Automatically triggered by upload API after successful file upload
-    - File metadata passed via DAG run configuration (conf parameter)
+    - File content passed via DAG run configuration (conf parameter) as base64
     - No catchup to prevent duplicate processing
     - Single concurrent run for data consistency
     - Configurable retry logic (3 attempts with 5-minute delays)
-
-Metrics Collected:
-    - Task execution time (extract, transform, load phases)
-    - Data volume processed (rows, columns)
-    - Database insertion rates (records per second)
-    - Memory usage for large DataFrames
-    - Success/failure rates per entity type
 
 Integration with Upload API:
     This DAG is designed to work seamlessly with the upload_api.py module:
     
     1. File Upload: User uploads Excel file via /upload-mft-excel endpoint
     2. Validation: upload_api performs virus scan, Excel validation, security checks
-    3. Storage: File is saved to shared volume with unique name
+    3. Encoding: File content is base64-encoded for transmission
     4. Trigger: upload_api triggers this DAG with file metadata in conf
-    5. Processing: DAG reads file from provided path and processes it
-    6. Cleanup: upload_api handles automatic cleanup of old files
+    5. Processing: DAG decodes base64 content and processes it from memory
+    6. No Disk I/O: Files are never written to disk in the Airflow container
     
     Data passed from upload_api to DAG via conf:
-    - file_path: Full path to the uploaded file
+    - file_content: Base64-encoded Excel file content
+    - file_name: Safe unique filename
     - original_filename: Original uploaded filename
     - unique_id: Unique identifier for tracking
     - file_hash: SHA-256 hash for integrity
@@ -75,90 +70,16 @@ Integration with Upload API:
     - file_size: Size in bytes
     - sheets: List of sheets in file
 
-Prerequisites:
-    - Docker Desktop installed and running
-    - Docker Compose support enabled
-    - Minimum 4GB RAM allocated to Docker
-    - Git for version control (optional)
-
-Setup and Deployment:
-    1. Install Docker Desktop from https://www.docker.com/products/docker-desktop
-    2. Ensure Docker Compose is available (included in Docker Desktop)
-    3. Download the Airflow docker-compose.yml file:
-    
-       curl -LfO 'https://airflow.apache.org/docs/apache-airflow/3.1.6/docker-compose.yaml'
-    
-    4. Place this DAG file in the ./dags directory of your Airflow project
-    5. Place sample_mft_data.xlsx in the ./data directory
-    6. Configure database connections in Airflow UI or environment variables
-    7. Initialize the Airflow database:
-    
-       docker-compose up airflow-init
-    
-    8. Start Airflow services:
-    
-       docker-compose up -d
-    
-    9. Access the Airflow UI at http://localhost:8080
-       Default credentials: airflow / airflow
-
-Database Configuration:
-    Ensure PostgreSQL connection is configured in Airflow:
-    - Connection ID: postgres_default
-    - Connection Type: Postgres
-    - Host: postgres (or your PostgreSQL host)
-    - Schema: manufacturing_dw (or your target database)
-    - Login: Your PostgreSQL username
-    - Password: Your PostgreSQL password
-    - Port: 5432
-
-Testing and Monitoring:
-    - Access Airflow UI at http://localhost:8080
-    - Monitor DAG runs in the "DAGs" section
-    - View task logs for debugging and metrics
-    - Use Tree View to visualize execution flow
-    - Check "Browse" → "Task Instances" for detailed status and timing
-    - Monitor custom metrics in task logs for performance analysis
-
-Troubleshooting:
-    - If DAG doesn't appear:
-        Check file is in ./dags directory
-    - If DAG isn't triggered after upload:
-        Check upload_api.py logs for trigger errors
-        Verify Airflow API connectivity
-        Check dag_run.conf in Airflow UI
-    - If tasks fail:
-        Check database connectivity and credentials
-        Verify file exists at path from dag_run.conf
-    - If imports fail:
-        Ensure custom modules are in Python path
-    - For Docker issues: 
-        Restart Docker Desktop and run 'docker-compose down' then 'docker-compose up -d'
-    - For performance issues:
-        Check metrics in task logs to identify bottlenecks
-
-Maintenance:
-    - Regularly check Airflow scheduler logs
-    - Monitor database disk space
-    - Update Airflow images periodically
-    - Backup DAG files and database regularly
-    - Review performance metrics for optimization opportunities
-
-Security Notes:
-    - Change default Airflow credentials in production
-    - Secure database connections with SSL/TLS
-    - Restrict Airflow UI access to authorized users
-    - Use environment variables for sensitive data
-
-Maintainer: PLD Engineering Center
-Version: 1.0.0
+Version: 2.0.0
 Compatibility: Python 3.14.4+, Apache Airflow 3.0.6+
+Maintainer: PLD Engineering Center
 Created: 2025-01-19
-Last Modified: 2026-07-13
-Status: Production
+Last Modified: 2026-07-27
+Status: Production Ready
 License: MIT
 """
 # Standard library imports
+import base64
 from pathlib import Path
 import sys
 from datetime import datetime, timedelta
@@ -276,12 +197,15 @@ def mft_etl_pipeline():
     # Extract data for main Dataframe
     @task(task_id="extract_main_data")
     def extract_main_data() -> bytes:
-        """Task extracts raw main data from Excel file provided by upload API"""
+        """
+        Task extracts raw main data from Excel content provided by upload API.
 
-        # Getting the context
+        Receives base64-encoded file content from upload_api via DAG run conf,
+        decodes it to bytes, and creates the main Polars DataFrame.
+        All processing is done in memory - no disk I/O.
+        """
         context = get_current_context()
 
-        # Getting the configuration from DAG run
         dag_run = context.get('dag_run')
         if not dag_run or not dag_run.conf:
             error_msg = "No configuration provided. DAG must be triggered with file information."
@@ -292,36 +216,42 @@ def mft_etl_pipeline():
 
         # Logging metadata from upload_api
         logger.info("=" * 60)
-        logger.info("PROCESSING FILE FROM UPLOAD API")
+        logger.info("PROCESSING FILE FROM UPLOAD API (STREAMING MODE)")
         logger.info("=" * 60)
         logger.info("File ID: %s", conf.get('unique_id', 'N/A'))
         logger.info("Original filename: %s", conf.get('original_filename', 'N/A'))
-        logger.info("File path: %s", conf.get('file_path', 'N/A'))
         logger.info("Upload timestamp: %s", conf.get('upload_timestamp', 'N/A'))
         logger.info("File hash: %s", conf.get('file_hash', 'N/A'))
         logger.info("Total rows: %s", conf.get('total_rows', 'N/A'))
         logger.info("File format: %s", conf.get('file_format', 'N/A'))
         logger.info("File size: %s bytes", conf.get('file_size', 'N/A'))
 
-        # Get the file path from the configuration
-        file_path_str = conf.get('file_path')
-        if not file_path_str:
-            error_msg = "No file_path provided in DAG run configuration"
+        # Get the file content from the configuration (base64 encoded)
+        file_content_b64 = conf.get('file_content')
+        if not file_content_b64:
+            error_msg = "No file_content provided in DAG run configuration"
             logger.error(error_msg)
             raise ValueError(error_msg)
 
-        file_path = Path(file_path_str)
+        # Decode base64 to bytes
+        try:
+            file_content = base64.b64decode(file_content_b64)
+            logger.info("Successfully decoded file content: %d bytes", len(file_content))
+        except Exception as e:
+            logger.error("Failed to decode base64 file content: %s", str(e))
+            raise ValueError(f"Invalid base64 file content: {str(e)}") from e
 
         # Saving metadata in XCom for future tasks
-        ti  = context.get('ti')
+        ti = context.get('ti')
         if ti:
             ti.xcom_push(key='file_metadata', value=conf)
         else:
             logger.warning("Could not get task instance from context")
 
-        logger.info("Extracting main data from: %s", file_path)
+        logger.info("Extracting main data from memory (streaming mode)")
 
-        main_df = create_main_df(file_path)
+        # Pass bytes directly to create_main_df (streaming mode)
+        main_df = create_main_df(file_content)
 
         logger.info(
             "Successfully extracted main data.\n"
@@ -332,7 +262,6 @@ def mft_etl_pipeline():
             ', '.join(main_df.columns),
         )
 
-        # Serializing the DataFrame to bytes
         serialized_main_df = serialize_df(main_df)
 
         logger.debug(
