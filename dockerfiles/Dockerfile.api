@@ -38,7 +38,7 @@ RUN if [ "${APP_GID}" = "0" ]; then \
     fi && \
     useradd -m -u ${APP_UID} -g ${groupname} -s /bin/bash appuser && \
     chown -R appuser:${groupname} /app && \
-    mkdir -p /opt/airflow/data/{uploads,backups,processed,quarantine} && \
+    mkdir -p /opt/airflow/data && \
     chown -R appuser:${groupname} /opt/airflow/data
 
 USER appuser
