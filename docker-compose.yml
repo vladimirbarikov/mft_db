@@ -431,7 +431,7 @@ services:
     container_name: airflow_dag_processor
     command: dag-processor
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8793/health"]
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
       interval: 30s
       timeout: 10s
       retries: 5
@@ -533,8 +533,6 @@ services:
     <<: *airflow-common
     container_name: airflow_flower
     command: celery flower --basic-auth=${FLOWER_USER}:${FLOWER_PASSWORD}
-    # profiles:
-    #   - flower
     ports:
       - "5555:5555"
     environment:
@@ -542,16 +540,25 @@ services:
       FLOWER_BASIC_AUTH: ${FLOWER_USER}:${FLOWER_PASSWORD}
       FLOWER_PORT: 5555
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
+      test:
+        - "CMD-SHELL"
+        - "celery -A airflow.providers.celery.executors.celery_executor.app inspect stats > /dev/null 2>&1 || exit 1"
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
     restart: always
     depends_on:
-      <<: *airflow-common-depends-on
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      db:
+        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+      airflow-worker:
+        condition: service_healthy
     networks:
       - mft_airflow_network
 
