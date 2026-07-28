@@ -31,6 +31,7 @@
 #        * Infrastructure: postgres, redis, db
 #        * Exporters: postgres-exporter-mft (MFT only)
 #        * Monitoring: prometheus, grafana
+#        * Logging: loki, promtail
 #        * Security: clamav
 #        * Additional: adminer, flower
 #      - 5-minute timeout per image, continues on error
@@ -43,10 +44,11 @@
 #        GROUP 2: Exporters (postgres-exporter-mft)
 #        GROUP 3: ClamAV (clamav)
 #        GROUP 4: Monitoring (prometheus, grafana)
-#        GROUP 5: Airflow Init (airflow-init)
-#        GROUP 6: Airflow Core (airflow-scheduler, airflow-worker, airflow-triggerer, airflow-apiserver)
-#        GROUP 7: Additional Services (adminer, flower, airflow-cli)
-#        GROUP 8: API Services (mft-upload-api, mft-display-api)
+#        GROUP 5: Logging Services (loki, promtail)
+#        GROUP 6: Airflow Init (airflow-init)
+#        GROUP 7: Airflow Core (airflow-scheduler, airflow-dag-processor, airflow-worker, airflow-triggerer, airflow-apiserver)
+#        GROUP 8: Additional Services (adminer, flower, airflow-cli)
+#        GROUP 9: API Services (mft-upload-api, mft-display-api)
 #        
 #      - Special handling for mft-display-api:
 #        * Prompts user to upload Excel file via mft-upload-api first
@@ -70,11 +72,14 @@
 #   - postgres-exporter-mft: postgres_exporter_mft
 #   - prometheus:            prometheus
 #   - grafana:               grafana
+#   - loki:                  loki
+#   - promtail:              promtail
 #   - clamav:                clamav
 #   - adminer:               adminer
 #   - flower:                airflow_flower
 #   - airflow-init:          airflow_init
 #   - airflow-scheduler:     airflow_scheduler
+#   - airflow-dag-processor: airflow_dag_processor
 #   - airflow-worker:        airflow_worker
 #   - airflow-triggerer:     airflow_triggerer
 #   - airflow-apiserver:     airflow_apiserver
@@ -88,6 +93,7 @@
 #   - Display API:      http://localhost:5003
 #   - Grafana:          http://localhost:3000
 #   - Prometheus:       http://localhost:9090
+#   - Loki:             http://localhost:3100
 #   - Adminer:          http://localhost:8081
 #   - Flower:           http://localhost:5555
 #
@@ -125,6 +131,10 @@
 #      ./build.sh --create-only mft-upload-api
 #      ./build.sh --create-only mft-display-api
 #
+#   9. Create logging services only:
+#      ./build.sh --create-only loki
+#      ./build.sh --create-only promtail
+#
 # TROUBLESHOOTING:
 #
 #   If build fails:
@@ -138,6 +148,12 @@
 #     1. Upload Excel file: curl -F 'file=@data.xlsx' http://localhost:5002/upload-mft-excel
 #     2. Check database: docker exec -it mft_db psql -U mft_user -d mft_db -c "SELECT * FROM your_table;"
 #     3. Recreate display-api: ./build.sh --create-only mft-display-api
+#
+#   If logs are not showing in Grafana:
+#     1. Check Loki is running: curl http://localhost:3100/ready
+#     2. Check Promtail is running: curl http://localhost:9090/ready
+#     3. Check logs in Loki: curl -G "http://localhost:3100/loki/api/v1/query" --data-urlencode 'query={job="docker_logs"}'
+#     4. Check Grafana datasource: http://localhost:3000 → Configuration → Data Sources → Loki
 #
 #   To reset everything:
 #     docker-compose down -v
@@ -156,7 +172,9 @@
 #         - Removed Airflow metrics services (postgres-exporter-airflow, redis-exporter, statsd-exporter)
 #         - Removed airflow-webserver (not used in Airflow 3.0.6)
 #         - Added airflow-apiserver service
-#         - Updated service URLs (Adminer on 8081)
+#         - Added airflow-dag-processor to Airflow Core group
+#         - Added logging services: loki, promtail
+#         - Updated service URLs (Adminer on 8081, Loki on 3100)
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -337,8 +355,7 @@ pull_images_sequentially() {
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
     # Array of services in correct order (excluding local ones)
-    # Updated: removed postgres-exporter-airflow, redis-exporter, statsd-exporter
-    # Updated: removed airflow-webserver (not in compose)
+    # Updated: added loki and promtail for logging services
     local services=(
         "postgres"
         "redis"
@@ -346,6 +363,8 @@ pull_images_sequentially() {
         "postgres-exporter-mft"
         "prometheus"
         "grafana"
+        "loki"
+        "promtail"
         "clamav"
         "adminer"
     )
@@ -435,17 +454,22 @@ create_containers_sequentially() {
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
     # Define services in dependency order based on docker-compose.yml
-    # Updated: removed postgres-exporter-airflow, redis-exporter, statsd-exporter
-    # Updated: removed airflow-webserver (not in compose)
-    # Added: airflow-apiserver to Airflow Core group
+    # Updated: added logging services (loki, promtail) and airflow-dag-processor
     local group1_infra=("postgres" "redis" "db")
     local group2_exporters=("postgres-exporter-mft")
     local group3_clamav=("clamav")
     local group4_monitoring=("prometheus" "grafana")
-    local group5_airflow_init=("airflow-init")
-    local group6_airflow_core=("airflow-scheduler" "airflow-worker" "airflow-triggerer" "airflow-apiserver")
-    local group7_additional=("adminer" "flower" "airflow-cli")
-    local group8_api=("mft-upload-api" "mft-display-api")
+    local group5_logging=("loki" "promtail")
+    local group6_airflow_init=("airflow-init")
+    local group7_airflow_core=(
+        "airflow-scheduler"
+        "airflow-dag-processor"
+        "airflow-worker"
+        "airflow-triggerer"
+        "airflow-apiserver"
+    )
+    local group8_additional=("adminer" "flower" "airflow-cli")
+    local group9_api=("mft-upload-api" "mft-display-api")
 
     # Get list of available services from docker-compose.yml
     local available_services
@@ -461,7 +485,7 @@ create_containers_sequentially() {
     local skipped=0
     local failed=0
 
-    # Функция для создания группы контейнеров
+    # Function to create a group of containers
     create_group() {
         local group_name=$1
         shift
@@ -469,7 +493,7 @@ create_containers_sequentially() {
         
         echo -e "\n${CYAN} Group: $group_name${NC}"
         
-        # Показываем сервисы в группе
+        # Show services in this group
         local group_list=()
         for service in "${group_services[@]}"; do
             if echo "$available_services" | grep -q "^$service$"; then
@@ -492,7 +516,7 @@ create_containers_sequentially() {
             for service in "${group_list[@]}"; do
                 echo -e "\n${BLUE} Creating container for: $service${NC}"
 
-                # Специальная обработка для mft-display-api
+                # Special handling for mft-display-api
                 if [ "$service" = "mft-display-api" ]; then
                     echo -e "\n${PURPLE} IMPORTANT: Before creating mft-display-api container${NC}"
                     echo -e "${PURPLE} You need to upload an Excel file through mft-upload-api first${NC}"
@@ -576,10 +600,11 @@ create_containers_sequentially() {
     create_group "Exporters (postgres-exporter-mft)" "${group2_exporters[@]}"
     create_group "ClamAV" "${group3_clamav[@]}"
     create_group "Monitoring (prometheus, grafana)" "${group4_monitoring[@]}"
-    create_group "Airflow Init" "${group5_airflow_init[@]}"
-    create_group "Airflow Core (scheduler, worker, triggerer, apiserver)" "${group6_airflow_core[@]}"
-    create_group "Additional Services (adminer, flower, airflow-cli)" "${group7_additional[@]}"
-    create_group "API Services (mft-upload-api, mft-display-api)" "${group8_api[@]}"
+    create_group "Logging Services (loki, promtail)" "${group5_logging[@]}"
+    create_group "Airflow Init" "${group6_airflow_init[@]}"
+    create_group "Airflow Core (scheduler, dag-processor, worker, triggerer, apiserver)" "${group7_airflow_core[@]}"
+    create_group "Additional Services (adminer, flower, airflow-cli)" "${group8_additional[@]}"
+    create_group "API Services (mft-upload-api, mft-display-api)" "${group9_api[@]}"
 
     echo -e "\n${GREEN} Container creation summary:${NC}"
     echo -e "  Created: $created | Skipped: $skipped | Failed: $failed"
@@ -741,6 +766,7 @@ show_next_steps() {
     echo -e "  Display API:       ${GREEN}http://localhost:5003${NC}"
     echo -e "  Grafana:           ${GREEN}http://localhost:3000${NC} (admin/grafana)"
     echo -e "  Prometheus:        ${GREEN}http://localhost:9090${NC}"
+    echo -e "  Loki:              ${GREEN}http://localhost:3100${NC}"
     echo -e "  Adminer:           ${GREEN}http://localhost:8081${NC}"
     echo -e "  Flower:            ${GREEN}http://localhost:5555${NC}"
 
@@ -751,6 +777,9 @@ show_next_steps() {
     echo -e "  View single service logs:            ${GREEN}docker-compose logs -f <service-name>${NC}"
     echo -e "  Test upload-api:                     ${GREEN}curl -F 'file=@data.xlsx' http://localhost:5002/upload-mft-excel${NC}"
     echo -e "  Test display-api:                    ${GREEN}curl http://localhost:5003/health${NC}"
+    echo -e "  Test Loki:                           ${GREEN}curl http://localhost:3100/ready${NC}"
+    echo -e "  Test Promtail:                       ${GREEN}curl http://localhost:9090/ready${NC}"
+    echo -e "  Query logs in Loki:                  ${GREEN}curl -G 'http://localhost:3100/loki/api/v1/query' --data-urlencode 'query={job=\"docker_logs\"}'${NC}"
     echo -e "  Enter upload-api:                    ${GREEN}docker exec -it mft_upload_api bash${NC}"
     echo -e "  Enter display-api:                   ${GREEN}docker exec -it mft_display_api bash${NC}"
     echo -e "  Enter airflow apiserver:             ${GREEN}docker exec -it airflow_apiserver bash${NC}"
@@ -759,6 +788,7 @@ show_next_steps() {
     echo -e "  Enter postgres:                      ${GREEN}docker exec -it airflow_db psql -U admin -d airflow${NC}"
     echo -e "  Enter redis:                         ${GREEN}docker exec -it airflow_redis redis-cli${NC}"
     echo -e "  Enter clamav:                        ${GREEN}docker exec -it clamav bash${NC}"
+    echo -e "  Enter loki:                          ${GREEN}docker exec -it loki sh${NC}"
     echo -e "  Stop everything:                     ${GREEN}docker-compose down${NC}"
     echo -e "  Stop everything (with volumes):      ${GREEN}docker-compose down -v${NC}"
     echo -e "  Create single service:               ${GREEN}docker-compose up -d <service-name>${NC}"

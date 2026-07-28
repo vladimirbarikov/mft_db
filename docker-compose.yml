@@ -255,15 +255,20 @@ services:
       - GF_INSTALL_PLUGINS=grafana-polystat-panel
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_TIMEZONE=Europe/Moscow
+      # Loki datasource will be added via provisioning
     volumes:
       - grafana_volume:/var/lib/grafana
       - ./config/monitoring/grafana/provisioning/datasources/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
       - ./config/monitoring/grafana/provisioning/dashboards/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml
       - ./config/monitoring/grafana/dashboards/dashboard_mft.json:/etc/grafana/dashboards/mft_dashboard.json
+      # ADD: Loki datasource provisioning
+      - ./config/monitoring/grafana/provisioning/datasources/loki-datasource.yml:/etc/grafana/provisioning/datasources/loki-datasource.yml
     ports:
       - "3000:3000"
     depends_on:
       prometheus:
+        condition: service_healthy
+      loki:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
@@ -274,6 +279,71 @@ services:
     networks:
       - mft_airflow_network
   
+  # ====== LOGGING SERVICES ======
+  # Loki - centralized log storage and query system
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    hostname: loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"          # HTTP API for queries
+      - "9095:9095"          # gRPC for internal communication
+    volumes:
+      - ./config/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-storage:/loki   # Persistent storage (Docker volume)
+    command: -config.file=/etc/loki/loki-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - mft_airflow_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+
+  # Promtail - log collector that scrapes logs from Docker containers
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    hostname: promtail
+    restart: unless-stopped
+    volumes:
+      - ./config/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Read Docker logs
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - mft_airflow_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
   postgres-exporter-mft:
     image: prometheuscommunity/postgres-exporter:v0.16.0
     container_name: postgres_exporter_mft
@@ -695,3 +765,6 @@ volumes:
     name: clamav_db_volume
   clamav_temp:
     name: clamav_temp_volume
+  # NEW: Loki storage
+  loki-storage:
+    name: loki-storage
