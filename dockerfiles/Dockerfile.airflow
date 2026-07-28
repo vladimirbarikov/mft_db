@@ -16,7 +16,8 @@ USER airflow
 
 # Install Python dependencies
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r /tmp/requirements_airflow.txt
+    pip install --no-cache-dir -r /tmp/requirements_airflow.txt && \
+    pip install apache-airflow-providers-fab
 
 # Copy project files
 COPY --chown=airflow:root ./dags /opt/airflow/dags

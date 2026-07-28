@@ -692,7 +692,7 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
     Trigger Airflow DAG with file content via REST API v2 using JWT authentication.
 
     This function implements the authentication flow required by Airflow 3.0.6:
-    1. First obtains a JWT access token using username/password via the /api/v2/auth/jwt endpoint
+    1. First obtains a JWT access token using username/password via the /auth/token endpoint
     2. Then uses the token to trigger the DAG via the /api/v2/dags/{dag_id}/dagRuns endpoint
 
     Unlike traditional file-based triggers, this function passes the entire file
@@ -727,30 +727,6 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
                 - details (str, optional): Additional error details from Airflow
                 - status_code (int, optional): HTTP status code if applicable
 
-    Raises:
-        Exception: Any unexpected exception is caught and returned as error dict
-
-    Example:
-        >>> file_info = {
-        ...     'safe_filename': 'data.xlsx',
-        ...     'file_content_b64': base64.b64encode(content).decode(),
-        ...     'original_filename': '2026-03-17_mft.xlsx',
-        ...     'file_hash': 'e9c42dc60399daa...',
-        ...     'file_size': 398104,
-        ...     'sheets': [{'name': 'mft', 'rows': 3316, 'cols': 32}],
-        ...     'total_rows': 3316
-        ... }
-        >>> success, response = trigger_airflow_dag(file_info)
-        >>> if success:
-        ...     print(f"DAG triggered successfully: {response['dag_run_id']}")
-        ... else:
-        ...     print(f"Failed to trigger DAG: {response['error']}")
-
-    Note:
-        This function is compatible with Airflow 3.0.6+ which uses JWT-based authentication.
-        The JWT token is obtained via the /api/v2/auth/jwt endpoint and must be
-        included as a Bearer token in subsequent API calls.
-
     Environment Variables Required:
         - AIRFLOW_API_URL: Base URL of Airflow API server
         - AIRFLOW_USER: Username for Airflow authentication
@@ -760,24 +736,29 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
     Timeouts:
         - JWT token request: 15 seconds
         - DAG trigger request: 30 seconds
-
-    Error Handling:
-        - Returns error dict for all failures instead of raising exceptions
-        - Network timeouts are caught and reported
-        - Connection errors are caught and reported
-        - Invalid JWT responses are caught and reported
     """
     try:
-        # 1. Get JWT token using username/password (Airflow 3.0.6)
-        token_url = f"{AIRFLOW_API_URL}/api/v2/auth/jwt"
+        # 1. Get JWT token using username/password
+        # IMPORTANT: In Airflow 3.0.6 with FAB Auth Manager, token endpoint is /auth/token
+        # NOT /api/v2/auth/token
+        token_url = f"{AIRFLOW_API_URL}/auth/token"
+        logger.info("Requesting JWT token from: %s", token_url)
+
         token_response = requests.post(
             token_url,
             json={"username": AIRFLOW_USER, "password": AIRFLOW_PASSWORD},
             timeout=15
         )
 
+        logger.info("Token response status: %d", token_response.status_code)
+
         # Check if token request was successful
-        if token_response.status_code != 200:
+        if token_response.status_code not in (200, 201):
+            logger.error(
+                "Token request failed: %d - %s",
+                token_response.status_code,
+                token_response.text
+            )
             return False, {
                 "error": "JWT token generation failed",
                 "details": token_response.text,
@@ -786,13 +767,24 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
 
         # Extract access_token from response
         token_data = token_response.json()
-        jwt_token = token_data.get('access_token')
+        logger.info("Token response keys: %s", list(token_data.keys()) if token_data else 'empty')
+
+        # Airflow 3.0.6 returns token in the format: {"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}
+        # But also handle other possible formats for compatibility
+        jwt_token = (
+            token_data.get('access_token') or
+            token_data.get('token') or
+            token_data.get('jwt')
+        )
 
         if not jwt_token:
+            logger.error("No token found in response: %s", token_data)
             return False, {
                 "error": "No access_token in JWT response",
                 "details": token_data
             }
+
+        logger.info("JWT token obtained successfully (length: %d chars)", len(jwt_token))
 
         # 2. Prepare DAG trigger request
         dag_url = f"{AIRFLOW_API_URL}/api/v2/dags/{DAG_ID}/dagRuns"
@@ -809,6 +801,7 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
         }
 
         # 3. Trigger the DAG
+        logger.info("Triggering DAG: %s at %s", DAG_ID, dag_url)
         dag_response = requests.post(
             dag_url,
             json=dag_payload,
@@ -816,10 +809,18 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
             timeout=30
         )
 
+        logger.info("DAG trigger response status: %d", dag_response.status_code)
+
         # Check if DAG trigger was successful
-        if dag_response.status_code == 200:
+        if dag_response.status_code in (200, 201):  # 201 Created is also valid
+            logger.info("DAG triggered successfully for file: %s", file_info.get('safe_filename', 'unknown'))
             return True, dag_response.json()
         else:
+            logger.error(
+                "DAG trigger failed: %d - %s",
+                dag_response.status_code,
+                dag_response.text
+            )
             return False, {
                 "error": f"DAG trigger failed with status {dag_response.status_code}",
                 "details": dag_response.text,
@@ -827,28 +828,38 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
             }
 
     except requests.exceptions.Timeout as e:
+        logger.error("Timeout connecting to Airflow API: %s", str(e))
         return False, {
             "error": "Timeout connecting to Airflow API",
             "details": str(e)
         }
     except requests.exceptions.ConnectionError as e:
+        logger.error("Connection error to Airflow API: %s", str(e))
         return False, {
             "error": "Connection error to Airflow API",
             "details": str(e)
         }
     except requests.exceptions.RequestException as e:
+        logger.error("Request error: %s - %s", type(e).__name__, str(e))
         return False, {
             "error": f"Request error: {type(e).__name__}",
             "details": str(e)
         }
     except ValueError as e:
         # This catches JSON decode errors
+        logger.error("Invalid JSON response from Airflow API: %s", str(e))
         return False, {
             "error": "Invalid response from Airflow API",
             "details": str(e)
         }
     except Exception as e:
         # Catch any other unexpected exceptions
+        logger.error(
+            "Unexpected error: %s - %s",
+            type(e).__name__,
+            str(e),
+            exc_info=True
+        )
         return False, {
             "error": f"Unexpected error: {type(e).__name__}",
             "details": str(e)
@@ -1000,7 +1011,6 @@ def upload_mft_excel():
         # Prepare metadata (NO FILE PATHS!)
         file_metadata = {
             'safe_filename': safe_filename,
-            'file_content_b64': base64.b64encode(file_content).decode('utf-8'),
             'timestamp': timestamp,
             'unique_id': unique_id,
             'original_filename': file.filename,

@@ -14,6 +14,9 @@ x-airflow-common:
     AIRFLOW__CELERY__BROKER_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
     AIRFLOW__CELERY_BROKER_TRANSPORT_OPTIONS__VISIBILITY_TIMEOUT: ${AIRFLOW__CELERY_BROKER_TRANSPORT_OPTIONS__VISIBILITY_TIMEOUT:-86400}
     
+    # ========== AIRFLOW 3.0.6 AUTH MANAGER ==========
+    AIRFLOW__CORE__AUTH_MANAGER: "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"
+
     # ========== AIRFLOW 3.0.6 API CONFIGURATION ==========
     AIRFLOW__API__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     
@@ -22,6 +25,9 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-change-me-in-production}
     AIRFLOW__API_AUTH__JWT_ALGORITHM: HS256
     AIRFLOW__API_AUTH__JWT_EXPIRATION_TIME: 3600
+
+    # ========== FAB AUTH SETTINGS ==========
+    # AIRFLOW__FAB__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     
     # ========== SECURITY ==========
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
@@ -376,6 +382,15 @@ services:
         echo "Initializing database..."
         airflow db migrate
 
+        echo "Creating admin user..."
+        airflow users create \
+          --username ${AIRFLOW_USER:-admin} \
+          --password ${AIRFLOW_PASSWORD:-airflow} \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com || true
+
         echo "Enabling mft_etl_pipeline DAG..."
         airflow dags unpause mft_etl_pipeline 2>/dev/null || true
 
@@ -386,14 +401,8 @@ services:
 
     environment:
       <<: *airflow-common-env
+      AIRFLOW__CORE__AUTH_MANAGER: "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"
       _AIRFLOW_DB_MIGRATE: 'true'
-      _AIRFLOW_WWW_USER_CREATE: 'true'
-      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_USER:-admin}
-      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD:-airflow}
-      _AIRFLOW_WWW_USER_EMAIL: admin@example.com
-      _AIRFLOW_WWW_USER_FIRSTNAME: Admin
-      _AIRFLOW_WWW_USER_LASTNAME: User
-      _AIRFLOW_WWW_USER_ROLE: Admin
       _PIP_ADDITIONAL_REQUIREMENTS: ''
     user: "0:0"
     volumes:
