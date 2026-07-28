@@ -1,28 +1,25 @@
 """
 Logging configuration module for MFT Database project.
+Optimized for containerized deployment with Grafana Loki.
 
-This module provides comprehensive logging configuration with support for:
-- Multiple log formats (simple, verbose, JSON, Airflow-specific)
-- File rotation based on size (5-20 MB)
-- Dedicated log directories for different components
-- Custom JSON formatter for structured logging (ELK/Logstash compatible)
-- Airflow task filtering with DAG/task context
-- Hierarchical logger configuration based on project structure
+This module provides logging configuration for Docker container environments where:
+- All logs are written to stdout (JSON format for Loki ingestion)
+- No local log files are created on the host filesystem
+- Airflow task context is preserved for structured logging
+- Multiple log formats are supported (console, JSON for Loki)
 
 Key components:
-1. CustomJsonFormatter - JSON-structured log output with custom fields support
+1. CustomJsonFormatter - JSON-structured log output compatible with Loki
 2. AirflowTaskFilter - Adds DAG/task context to Airflow-related logs
-3. LOGGING_CONFIG - Comprehensive dictionary configuration for logging
+3. LOGGING_CONFIG - Dictionary configuration with only console handlers
 4. get_logger() - Factory function for obtaining configured loggers
 
-Directory structure:
-    logs/
-    ├── api_logs/          # API endpoints logs (endpoints.*)
-    ├── airflow_logs/      # Airflow DAGs and tasks logs (dags.*, airflow.*)
-    ├── app_logs/          # Application and config modules logs (config.*)
-    ├── database_logs/     # Database operations logs (database.*)
-    ├── json_logs/         # JSON-formatted logs for analysis (all sources)
-    └── error_logs/        # Centralized ERROR and CRITICAL logs (all sources)
+Architecture decisions:
+- All logs go to stdout/stderr (no file-based logging)
+- JSON format for structured logging (Loki ingestion ready)
+- Single source of truth: container logs collected by Promtail
+- No log files on host system (security requirement)
+- Logs stored in Docker volumes, not accessible to users
 
 Usage:
     # In any module, use __name__ for automatic routing
@@ -39,91 +36,27 @@ Usage:
         }
     })
 
-Log directories created:
-    - logs/
-        - app_logs/         : Main application logs (DEBUG+)
-        - airflow_logs/     : Airflow-specific logs (INFO+/WARNING+)
-        - api_logs/         : API endpoint logs (INFO+)
-        - database_logs/    : Database-related operations (INFO+)
-        - json_logs/        : JSON-formatted logs for analysis (INFO+)
-        - error_logs/       : Centralized error logs
-
-Configuration features:
-    - Console output: INFO+ to stdout, WARNING+ to stderr
-    - File output for Airflow: WARNING+ between DAG runs, INFO+ during DAG execution
-    - Centralized error log: ALL WARNING+ messages from ALL sources
-    - File rotation: Daily at midnight with date-based filenames
-    - Log retention: 30 days for regular logs, 90 days for errors
-    - Backup format: app.log → app.log.2026-03-18 (automatically created at midnight)
-    - Encoding: UTF-8 for all files
-    - Thread/process safety: All handlers are thread-safe
-    - Error handling: Graceful fallback if configuration fails
-    - Moscow timezone (Europe/Moscow) for all timestamps
-    - UTC time also included in JSON logs for compatibility
-
-File rotation behavior:
-    - Each log type uses fixed filename (e.g., app.log)
-    - When size limit reached: app.log → app.log.1, new app.log created
-    - Old backups are automatically deleted when backupCount exceeded
-    - Examples:
-        * app.log (current), app.log.1 (oldest), app.log.5 (newest backup)
-        * Total files per type = backupCount + 1
-
-Version: 1.0.0
-Compatibility: Python 3.12.3
+Version: 2.0.0
+Compatibility: Python 3.12.3, Airflow 3.0+
 Maintainer: PLD Engineering Center
 Created: 2026-02-16
-Last Modified: 2026-03-18
+Last Modified: 2026-07-28
 License: MIT
 Status: Production
 """
 
 # ====== STANDARD IMPORTS ======
-from pathlib import Path
-import os
 import sys
 import logging
 import logging.config
-import logging.handlers  # Required for RotatingFileHandler in dictConfig
 import json
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 import zoneinfo
 
 # ====== CONSTANTS AND SETTINGS ======
-# Directory paths
-PROJECT_ROOT = Path(__file__).parents[1]
-LOG_DIR = PROJECT_ROOT / "logs"
-AIRFLOW_LOG_DIR = LOG_DIR / "airflow_logs"
-API_LOG_DIR = LOG_DIR / "api_logs"
-APP_LOG_DIR = LOG_DIR / "app_logs"
-DATABASE_LOG_DIR = LOG_DIR / "database_logs"
-JSON_LOG_DIR = LOG_DIR / "json_logs"
-ERROR_LOG_DIR = LOG_DIR / "error_logs"
-
 # Time settings
 MOSCOW_TZ = zoneinfo.ZoneInfo("Europe/Moscow")
-
-# ====== HELPER FUNCTIONS ======
-def ensure_log_dir(directory: Path) -> None:
-    """Create log directory if it doesn't exist."""
-    if not directory.exists():
-        directory.mkdir(parents=True, exist_ok=True)
-        # For Linux systems, set permissions 755 (rwxr-xr-x)
-        if sys.platform.startswith('linux'):
-            try:
-                # Permissions: owner can do everything,
-                # group and others can only read and execute
-                os.chmod(directory, 0o755)
-            except OSError as e:
-                # Print error but don't interrupt execution
-                print(f"Warning: Could not set permissions on {directory}: {e}", file=sys.stderr)
-
-
-def get_log_file_path(directory: Path, filename: str) -> str:
-    """Get full path to log file in specific directory."""
-    ensure_log_dir(directory)
-    return str(directory / filename)
 
 
 # ====== FORMATTERS ======
@@ -131,21 +64,40 @@ class MoscowTimeFormatter(logging.Formatter):
     """Formatter that converts timestamps to Moscow timezone."""
 
     def formatTime(self, record, datefmt=None):
-        """Convert record creation time to Moscow timezone."""
-        # Convert to Moscow time
+        """
+        Convert record creation time to Moscow timezone.
+
+        Args:
+            record: Log record containing creation timestamp
+            datefmt: Optional date format string
+
+        Returns:
+            Formatted timestamp string in Moscow timezone
+        """
         moscow_time = datetime.fromtimestamp(record.created, MOSCOW_TZ)
         if datefmt:
             return moscow_time.strftime(datefmt)
-        # Default format: YYYY-MM-DD HH:MM:SS
         return moscow_time.strftime('%Y-%m-%d %H:%M:%S')
 
 
 class CustomJsonFormatter(logging.Formatter):
-    """Custom formatter for JSON logs (ELK/Logstash compatible)."""
+    """
+    Custom formatter for JSON logs compatible with Loki.
+    
+    Produces structured JSON logs that Loki can parse and index.
+    Includes Airflow-specific fields when available.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format log record as JSON with timestamp in Moscow timezone."""
-        # Convert timestamp to Moscow time
+        """
+        Format log record as JSON with timestamp in Moscow timezone.
+
+        Args:
+            record: Log record to format
+
+        Returns:
+            JSON string representation of the log record
+        """
         moscow_time = datetime.fromtimestamp(record.created, MOSCOW_TZ)
         utc_time = datetime.fromtimestamp(record.created, timezone.utc)
 
@@ -162,6 +114,19 @@ class CustomJsonFormatter(logging.Formatter):
             "process": record.processName,
         }
 
+        # Add Airflow-specific context if available (using getattr for type safety)
+        dag_id = getattr(record, 'dag_id', None)
+        if dag_id is not None:
+            log_record["dag_id"] = dag_id
+
+        task_id = getattr(record, 'task_id', None)
+        if task_id is not None:
+            log_record["task_id"] = task_id
+
+        run_id = getattr(record, 'run_id', None)
+        if run_id is not None:
+            log_record["run_id"] = run_id
+
         # Add exceptions if present
         if record.exc_info:
             log_record["exception"] = self.formatException(record.exc_info)
@@ -170,9 +135,7 @@ class CustomJsonFormatter(logging.Formatter):
         try:
             custom_fields = getattr(record, 'custom_fields', None)
             if custom_fields:
-                # Verify it's actually a dictionary
                 if isinstance(custom_fields, dict):
-                    # Check serializability
                     try:
                         json.dumps(custom_fields, default=str)
                         log_record.update(custom_fields)
@@ -181,7 +144,6 @@ class CustomJsonFormatter(logging.Formatter):
                 else:
                     log_record["custom_data"] = str(custom_fields)
         except AttributeError:
-            # Ignore if attribute doesn't exist
             pass
 
         return json.dumps(log_record, ensure_ascii=False, default=str)
@@ -189,11 +151,23 @@ class CustomJsonFormatter(logging.Formatter):
 
 # ====== FILTERS ======
 class AirflowTaskFilter(logging.Filter):
-    """Filter that adds DAG/task context to Airflow log records."""
+    """
+    Filter that adds DAG/task context to Airflow log records.
+    
+    Ensures that all log records from Airflow components have
+    dag_id, task_id, and run_id attributes for structured logging.
+    """
 
-    def filter(self, record):
-        """Add dag_id, task_id and run_id attributes to record."""
-        # Add DAG and task information if available
+    def filter(self, record) -> bool:
+        """
+        Add dag_id, task_id and run_id attributes to record.
+
+        Args:
+            record: Log record to enhance with Airflow context
+
+        Returns:
+            Always returns True to include the record
+        """
         if not hasattr(record, 'dag_id'):
             record.dag_id = 'unknown'
         if not hasattr(record, 'task_id'):
@@ -205,6 +179,7 @@ class AirflowTaskFilter(logging.Filter):
 
 # ====== LOGGER CONFIGURATION ======
 # Main logging configuration dictionary
+# All handlers are console-based (stdout/stderr) for container deployment
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -234,115 +209,63 @@ LOGGING_CONFIG = {
         }
     },
     "handlers": {
-        # Console handlers
-        "console": {
+        # Primary handler - JSON format for Loki ingestion
+        "console_json": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "json",
+            "stream": "ext://sys.stdout",
+        },
+        # Verbose console output for development/debugging
+        "console_verbose": {
+            "class": "logging.StreamHandler",
+            "level": "INFO",
+            "formatter": "verbose",
+            "stream": "ext://sys.stdout",
+        },
+        # Simple console output for quick glances
+        "console_simple": {
             "class": "logging.StreamHandler",
             "level": "INFO",
             "formatter": "simple",
             "stream": "ext://sys.stdout",
         },
+        # Error console - WARNING+ to stderr
         "error_console": {
             "class": "logging.StreamHandler",
             "level": "WARNING",
             "formatter": "verbose",
             "stream": "ext://sys.stderr",
         },
-        # App logs
-        "app_file": {
-            "class": "logging.handlers.TimedRotatingFileHandler",
-            "level": "DEBUG",
-            "formatter": "verbose",
-            "filename": get_log_file_path(APP_LOG_DIR, "app.log"),
-            "when": "midnight",
-            "interval": 1,
-            "backupCount": 30,
-            "encoding": "utf8",
-            "delay": True,
-            "utc": False
-        },
-        # CENTRALIZED ERROR-ONLY logs (for all sources)
-        "error_file": {
-            "class": "logging.handlers.TimedRotatingFileHandler",
-            "level": "ERROR",
-            "formatter": "verbose",
-            "filename": get_log_file_path(ERROR_LOG_DIR, "errors.log"),
-            "when": "midnight",
-            "interval": 1,
-            "backupCount": 90,
-            "encoding": "utf8",
-            "delay": True,
-            "utc": False
-        },
-        # JSON logs
-        "json_file": {
-            "class": "logging.handlers.TimedRotatingFileHandler",
-            "level": "INFO",
-            "formatter": "json",
-            "filename": get_log_file_path(JSON_LOG_DIR, "json.log"),
-            "when": "midnight",
-            "interval": 1,
-            "backupCount": 30,
-            "encoding": "utf8",
-            "delay": True,
-            "utc": False
-        },
-        # Airflow-specific logs (in the airflow_logs directory)
-        "airflow_file": {
-            "class": "logging.handlers.TimedRotatingFileHandler",
+        # Airflow-specific console with task context
+        "console_airflow": {
+            "class": "logging.StreamHandler",
             "level": "INFO",
             "formatter": "airflow",
-            "filename": get_log_file_path(AIRFLOW_LOG_DIR, "airflow.log"),
-            "when": "midnight",
-            "interval": 1,
-            "backupCount": 30,
-            "encoding": "utf8",
-            "delay": True,
-            "utc": False,
-            "filters": ["airflow_task_filter"]
-        },
-        # Database logs (in the database_logs directory)
-        "database_file": {
-            "class": "logging.handlers.TimedRotatingFileHandler",
-            "level": "INFO",
-            "formatter": "verbose",
-            "filename": get_log_file_path(DATABASE_LOG_DIR, "database.log"),
-            "when": "midnight",
-            "interval": 1,
-            "backupCount": 30,
-            "encoding": "utf8",
-            "delay": True,
-            "utc": False
-        },
-        # API logs (in the api_logs directory)
-        "api_file": {
-            "class": "logging.handlers.TimedRotatingFileHandler",
-            "level": "INFO",
-            "formatter": "verbose",
-            "filename": get_log_file_path(API_LOG_DIR, "api.log"),
-            "maxBytes": 5 * 1024 * 1024,
-            "backupCount": 3,
-            "encoding": "utf8",
-            "delay": True,
+            "stream": "ext://sys.stdout",
+            "filters": ["airflow_task_filter"],
         },
     },
     "loggers": {
-        # Root logger
+        # Root logger - logs to JSON format for Loki
         "": {
             "level": "DEBUG",
-            "handlers": ["console", "app_file", "json_file", "error_file"],
+            "handlers": ["console_json"],
             "propagate": False
         },
-        # App logger
+
+        # Main application logger
         "__main__": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "json_file", "error_file"],
+            "handlers": ["console_json", "console_verbose"],
             "propagate": False,
         },
+
         # API endpoint loggers
         "endpoints": {
             "level": "INFO",
-            "handlers": ["console", "api_file", "json_file", "error_file"],
-            "propagate": True,  # True for inheritance
+            "handlers": ["console_json", "console_verbose"],
+            "propagate": False,
         },
         "endpoints.mft_upload_api": {
             "level": "INFO",
@@ -360,11 +283,12 @@ LOGGING_CONFIG = {
             "level": "INFO",
             "propagate": True,
         },
-        # DAG loggers
+
+        # DAG loggers with Airflow context
         "dags": {
             "level": "INFO",
-            "handlers": ["console", "airflow_file", "json_file", "error_file"],
-            "propagate": True,  # True for inheritance
+            "handlers": ["console_airflow", "console_json"],
+            "propagate": False,
         },
         "dags.bp_dag": {
             "level": "INFO",
@@ -374,11 +298,12 @@ LOGGING_CONFIG = {
             "level": "INFO",
             "propagate": True,
         },
+
         # Airflow task loggers
         "dags.tasks": {
             "level": "DEBUG",
-            "handlers": ["console", "app_file", "json_file", "error_file"],
-            "propagate": True,  # True for inheritance
+            "handlers": ["console_airflow", "console_json"],
+            "propagate": False,
         },
         "dags.tasks.bp_loader": {
             "level": "INFO",
@@ -412,69 +337,67 @@ LOGGING_CONFIG = {
             "level": "INFO",
             "propagate": True,
         },
-        # Database operation logger
+
+        # Database operations
         "database": {
             "level": "INFO",
-            "handlers": ["console", "database_file", "error_file"],
+            "handlers": ["console_json", "console_verbose"],
             "propagate": False,
         },
-        # Config module logger
+
+        # Config module
         "config": {
             "level": "INFO",
-            "handlers": ["console", "app_file", "json_file", "error_file"],
+            "handlers": ["console_json", "console_verbose"],
             "propagate": False,
         },
+
         # Airflow system loggers
         "airflow": {
             "level": "WARNING",
-            "handlers": ["airflow_file", "error_file"],
+            "handlers": ["console_airflow", "error_console"],
             "propagate": False,
         },
         "airflow.task": {
             "level": "INFO",
-            "handlers": ["airflow_file", "error_file"],
+            "handlers": ["console_airflow", "error_console"],
             "propagate": False,
         },
         "airflow.processor": {
             "level": "WARNING",
-            "handlers": ["airflow_file", "error_file"],
+            "handlers": ["console_airflow", "error_console"],
             "propagate": False,
         },
         "airflow.scheduler": {
             "level": "WARNING",
-            "handlers": ["airflow_file", "error_file"],
+            "handlers": ["console_airflow", "error_console"],
             "propagate": False,
         },
         "airflow.models.dagbag": {
             "level": "WARNING",
-            "handlers": ["airflow_file", "error_file"],
+            "handlers": ["console_airflow", "error_console"],
             "propagate": False,
         },
         "airflow.executors": {
             "level": "WARNING",
-            "handlers": ["airflow_file", "error_file"],
+            "handlers": ["console_airflow", "error_console"],
             "propagate": False,
         },
-        # Third-party library logger
+
+        # Third-party library loggers
         "sqlalchemy": {
             "level": "WARNING",
-            "handlers": ["database_file", "error_file"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
         "sqlalchemy.engine": {
             "level": "INFO",
-            "handlers": ["database_file", "error_file"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
         "requests": {
             "level": "WARNING",
-            "handlers": ["api_file", "error_file"],
-            "propagate": False,
-        },
-        # Special logger for all errors
-        "errors": {
-            "level": "WARNING",
-            "handlers": ["error_file"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
     }
@@ -484,51 +407,43 @@ LOGGING_CONFIG = {
 # ====== INITIALIZATION ======
 # Configure logging on module import
 try:
-    # Apply main configuration
     logging.config.dictConfig(LOGGING_CONFIG)
 except (ValueError, TypeError, KeyError) as e:
-    # Specific exceptions that dictConfig can raise
-    # Use print instead of logging as logging may not be configured
     print(f"Error configuring logging: {e}", file=sys.stderr)
-    # Fallback to basic logging
     logging.basicConfig(level=logging.INFO)
 else:
-    # Only create logger if configuration succeeded
     init_logger = logging.getLogger(__name__)
-    init_logger.debug("Logging initialized with timed rotating file handlers")
-    init_logger.debug("Log files: app.log, errors.log, json.log, airflow.log, database.log, api.log")
-    init_logger.debug("Rotation settings: daily at midnight with backup counts 30-90 days")
-    init_logger.debug("Project root: %s", PROJECT_ROOT)
-    init_logger.debug("Main log directory: %s", LOG_DIR)
-    init_logger.debug("Log directories created:")
-    init_logger.debug("  - Airflow logs: %s", AIRFLOW_LOG_DIR)
-    init_logger.debug("  - API logs: %s", API_LOG_DIR)
-    init_logger.debug("  - App logs: %s", APP_LOG_DIR)
-    init_logger.debug("  - Database logs: %s", DATABASE_LOG_DIR)
-    init_logger.debug("  - JSON logs: %s", JSON_LOG_DIR)
-    init_logger.debug("  - Error logs (CENTRALIZED): %s", ERROR_LOG_DIR)
-    init_logger.debug("Central error log collects ALL ERROR and higher messages from ALL sources")
+    init_logger.info("Logging initialized for container environment (stdout only)")
+    init_logger.info("All logs are output to stdout/stderr in JSON format")
+    init_logger.info("No local log files are created on host filesystem")
+    init_logger.info("Logs are collected by Promtail and stored in Loki (Docker volume)")
 
 
 # ====== PUBLIC INTERFACE ======
 def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
     Factory method for getting loggers.
+
     Use this method instead of calling logging.getLogger() directly.
-    
+    Ensures consistent configuration across all modules.
+
     Args:
         name: Logger name (usually __name__). If None, uses current module name.
 
     Returns:
         Configured logger instance with appropriate handlers based on name.
+
+    Example:
+        >>> logger = get_logger(__name__)
+        >>> logger.info("Module initialized")
     """
     if name is None:
         name = __name__
 
     logger_instance = logging.getLogger(name)
 
-    # Add custom attributes for Airflow
-    if 'airflow' in name.lower() or 'task' in name.lower():
+    # Add Airflow context filter if logger is Airflow-related
+    if 'airflow' in name.lower() or 'task' in name.lower() or 'dag' in name.lower():
         logger_instance.addFilter(AirflowTaskFilter())
 
     return logger_instance

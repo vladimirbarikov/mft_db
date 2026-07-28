@@ -27,6 +27,9 @@ xlrd>=2.0.0
 # ========== DATABASE ==========
 psycopg2-binary>=2.9.11
 
+# ========== LOGGING ==========
+structlog>=24.1.0
+
 # ========== UTILITIES ==========
 python-dotenv>=1.2.1
 requests>=2.32.5
