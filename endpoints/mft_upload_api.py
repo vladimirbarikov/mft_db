@@ -793,8 +793,17 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
             "Content-Type": "application/json"
         }
 
-        # Prepare payload with file information
+        # ========== FIX: Add required logical_date field ==========
+        # In Airflow 3.0.6, 'logical_date' is required for manual DAG runs
+        # Set to None to allow parallel runs without a specific date or use a specific datetime for backfilling
+        current_time = datetime.now(MOSCOW_TZ)
+        logical_date = current_time.isoformat()
+        # Alternatively, set to None to allow parallel runs:
+        # logical_date = None
+
+        # Prepare payload with file information AND required logical_date
         dag_payload = {
+            "logical_date": logical_date,  # REQUIRED in Airflow 3.0.6+
             "conf": {
                 "file_info": file_info
             }
@@ -802,6 +811,8 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
 
         # 3. Trigger the DAG
         logger.info("Triggering DAG: %s at %s", DAG_ID, dag_url)
+        logger.info("Payload: %s", dag_payload)  # Log payload for debugging (consider removing in production)
+
         dag_response = requests.post(
             dag_url,
             json=dag_payload,
