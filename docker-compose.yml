@@ -25,9 +25,6 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-change-me-in-production}
     AIRFLOW__API_AUTH__JWT_ALGORITHM: HS256
     AIRFLOW__API_AUTH__JWT_EXPIRATION_TIME: 3600
-
-    # ========== FAB AUTH SETTINGS ==========
-    # AIRFLOW__FAB__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     
     # ========== SECURITY ==========
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
@@ -50,6 +47,9 @@ x-airflow-common:
     AIRFLOW__CORE__ENABLE_XCOM_PICKLING: 'true'
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
     AIRFLOW__CORE__XCOM_MAX_SIZE: 52428800
+    
+    # ========== LOGGING ==========
+    AIRFLOW__LOGGING__JSON_FORMAT: 'true'
     
     # Time zone settings (Moscow Time)
     AIRFLOW__CORE__DEFAULT_TIMEZONE: 'Europe/Moscow'
