@@ -6,7 +6,7 @@ server:
 
 common:
   instance_addr: 0.0.0.0
-  path_prefix: /loki
+  path_prefix: /loki/data 
   storage:
     filesystem:
       chunks_directory: /loki/chunks
@@ -29,15 +29,17 @@ schema_config:
 limits_config:
   retention_period: 30d
   max_query_length: 720h
+  max_entries_limit_per_query: 5000
 
 compactor:
   working_directory: /loki/compactor
   compaction_interval: 10m
   retention_enabled: true
+  shared_store: filesystem
   delete_request_store: filesystem
 
 frontend:
-  max_outstanding_per_tenant: 2048
+  max_outstanding_per_tenant: 512
 
 querier:
-  max_concurrent: 10
+  max_concurrent: 2

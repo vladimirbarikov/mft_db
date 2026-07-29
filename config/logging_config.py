@@ -246,144 +246,95 @@ LOGGING_CONFIG = {
             "filters": ["airflow_task_filter"],
         },
     },
-    "loggers": {
-        # Root logger - logs to JSON format for Loki
+        "loggers": {
+        # Root logger
         "": {
             "level": "DEBUG",
             "handlers": ["console_json"],
             "propagate": False
         },
-
         # Main application logger
         "__main__": {
             "level": "INFO",
-            "handlers": ["console_json", "console_verbose"],
+            "handlers": ["console_json"],
             "propagate": False,
         },
-
         # API endpoint loggers
         "endpoints": {
             "level": "INFO",
-            "handlers": ["console_json", "console_verbose"],
+            "handlers": ["console_json"],
             "propagate": False,
         },
-        "endpoints.mft_upload_api": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "endpoints.mft_display_api": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "endpoints.mft_modify_api": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "endpoints.user_manager_api": {
-            "level": "INFO",
-            "propagate": True,
-        },
+        "endpoints.mft_upload_api": { "level": "INFO", "propagate": True },
+        "endpoints.mft_display_api": { "level": "INFO", "propagate": True },
+        "endpoints.mft_modify_api": { "level": "INFO", "propagate": True },
+        "endpoints.user_manager_api": { "level": "INFO", "propagate": True },
 
-        # DAG loggers with Airflow context
+        # DAG and Task loggers
         "dags": {
             "level": "INFO",
-            "handlers": ["console_airflow", "console_json"],
+            "handlers": ["console_json"], 
             "propagate": False,
         },
-        "dags.bp_dag": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "dags.mft_dag": {
-            "level": "INFO",
-            "propagate": True,
-        },
-
-        # Airflow task loggers
+        "dags.bp_dag": { "level": "INFO", "propagate": True },
+        "dags.mft_dag": { "level": "INFO", "propagate": True },
         "dags.tasks": {
             "level": "DEBUG",
-            "handlers": ["console_airflow", "console_json"],
+            "handlers": ["console_json"], 
             "propagate": False,
         },
-        "dags.tasks.bp_loader": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "dags.tasks.bp_mapper": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "dags.tasks.connector": {
-            "level": "DEBUG",
-            "propagate": True,
-        },
-        "dags.tasks.extractor": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "dags.tasks.mft_loader": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "dags.tasks.mft_mapper": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "dags.tasks.serializer": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "dags.tasks.transformer": {
-            "level": "INFO",
-            "propagate": True,
-        },
+        "dags.tasks.bp_loader": { "level": "INFO", "propagate": True },
+        "dags.tasks.bp_mapper": { "level": "INFO", "propagate": True },
+        "dags.tasks.connector": { "level": "DEBUG", "propagate": True },
+        "dags.tasks.extractor": { "level": "INFO", "propagate": True },
+        "dags.tasks.mft_loader": { "level": "INFO", "propagate": True },
+        "dags.tasks.mft_mapper": { "level": "INFO", "propagate": True },
+        "dags.tasks.serializer": { "level": "INFO", "propagate": True },
+        "dags.tasks.transformer": { "level": "INFO", "propagate": True },
 
         # Database operations
         "database": {
             "level": "INFO",
-            "handlers": ["console_json", "console_verbose"],
+            "handlers": ["console_json"],
             "propagate": False,
         },
-
         # Config module
         "config": {
             "level": "INFO",
-            "handlers": ["console_json", "console_verbose"],
+            "handlers": ["console_json"],
             "propagate": False,
         },
-
         # Airflow system loggers
         "airflow": {
             "level": "WARNING",
-            "handlers": ["console_airflow", "error_console"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
         "airflow.task": {
             "level": "INFO",
-            "handlers": ["console_airflow", "error_console"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
         "airflow.processor": {
             "level": "WARNING",
-            "handlers": ["console_airflow", "error_console"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
         "airflow.scheduler": {
             "level": "WARNING",
-            "handlers": ["console_airflow", "error_console"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
         "airflow.models.dagbag": {
             "level": "WARNING",
-            "handlers": ["console_airflow", "error_console"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
         "airflow.executors": {
             "level": "WARNING",
-            "handlers": ["console_airflow", "error_console"],
+            "handlers": ["console_json", "error_console"],
             "propagate": False,
         },
-
         # Third-party library loggers
         "sqlalchemy": {
             "level": "WARNING",
