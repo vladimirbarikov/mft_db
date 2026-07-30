@@ -16,8 +16,10 @@ USER airflow
 
 # Install Python dependencies
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r /tmp/requirements_airflow.txt && \
-    pip install apache-airflow-providers-fab
+    pip install --no-cache-dir \
+    -r /tmp/requirements_airflow.txt \
+    apache-airflow-providers-fab \
+    --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.0.6/constraints-3.12.txt"
 
 # Copy project files
 COPY --chown=airflow:root ./dags /opt/airflow/dags

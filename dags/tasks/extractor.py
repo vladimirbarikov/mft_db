@@ -32,13 +32,13 @@ Streaming Mode:
     - Environments where file system access is restricted
 
 Dependencies:
-    - Polars 1.0.0+ for efficient DataFrame operations
+    - Polars 1.32.3 for efficient DataFrame operations
     - OpenPyXL 3.1.0+ for Excel file processing
     - Apache Airflow 2.8.0+ (optional) for workflow integration
     - Python 3.12.3+ for type hints and modern features
 
 Version: 2.0.0
-Compatibility: Python 3.14.4+, Polars 1.36.1, OpenPyXL 3.1.5+
+Compatibility: Python 3.14.4+, Polars 1.32.3, OpenPyXL 3.1.5+
 Maintainer: PLD Engineering Center
 Created: 2025-10-20
 Last Modified: 2026-07-27

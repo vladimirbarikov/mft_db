@@ -7,7 +7,7 @@ Flask>=2.3.0
 Flask-Limiter>=3.12
 flask-cors>=6.0.2
 clamd>=1.0.2
-python-dotenv>=1.2.1
+python-dotenv==1.1.1
 
 # Production server (uncomment before production)
 # gunicorn>=23.0.0
@@ -21,10 +21,10 @@ oletools>=0.60.2
 # ========== Database ==========
 SQLAlchemy>=1.4.54
 SQLAlchemy-Utils>=0.42.0
-psycopg2-binary>=2.9.11
+psycopg2-binary==2.9.10
 
 # ========== Data processing ==========
-polars>=1.36.1
+polars==1.32.3
 xlsxwriter>=3.2.9
 
 # ========== Timezone handling ==========

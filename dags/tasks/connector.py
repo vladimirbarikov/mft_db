@@ -36,7 +36,7 @@ Architecture:
 Dependencies:
     - SQLAlchemy 1.4.54+: ORM and database abstraction layer
     - SQLAlchemy-Utils 0.41.1+: Database existence and creation utilities
-    - python-dotenv 1.0.0+: Environment variable management (optional but recommended)
+    - python-dotenv 1.1.1: Environment variable management (optional but recommended)
     - PostgreSQL 12+: Target database system
 
 Performance Considerations:

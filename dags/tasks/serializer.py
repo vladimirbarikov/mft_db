@@ -11,7 +11,7 @@ Uses Apache Arrow format for optimal performance and compatibility.
 For junction tables, use standard Python dict (JSON-serializable).
 For core entity tables (large datasets), use Arrow bytes serialization.
 
-Compatible with: Polars 1.36.1+, PyArrow 25.0.0+, Apache Airflow 3.0.6+
+Compatible with: Polars 1.32.3, PyArrow 18.1.0, Apache Airflow 3.0.6+
 """
 # Standard library imports
 from pathlib import Path

@@ -28,7 +28,7 @@ Architecture:
     pipelines to be built from simple, reusable components.
 
 Dependencies:
-    - Polars 1.0.0+ for efficient DataFrame operations and type casting
+    - Polars 1.32.3 for efficient DataFrame operations and type casting
     - PyPinyin 0.50.0+ for Chinese character to Pinyin conversion (optional fallback)
     - Python 3.12.3+ for type hints and modern string handling
     - Standard library: re for regex operations, sys for path management, pathlib for paths
@@ -121,7 +121,7 @@ Important Notes:
     - Empty strings become null in convert_to_string() only
 
 Version: 1.0.0
-Compatibility: Python 3.14.4+, Polars 1.36.1+, PyPinyin 0.55.0+
+Compatibility: Python 3.14.4+, Polars 1.32.3, PyPinyin 0.55.0+
 Maintainer: PLD Engineering Center
 Created: 2025-10-25
 Last Modified: 2026-03-11
