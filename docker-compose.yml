@@ -50,6 +50,8 @@ x-airflow-common:
     
     # ========== LOGGING ==========
     AIRFLOW__LOGGING__JSON_FORMAT: 'true'
+    AIRFLOW__LOGGING__FORWARD_TASK_LOGS_TO_STDOUT: 'True'
+    AIRFLOW__LOGGING__LOGGING_LEVEL: 'INFO'
     
     # Time zone settings (Moscow Time)
     AIRFLOW__CORE__DEFAULT_TIMEZONE: 'Europe/Moscow'
@@ -70,7 +72,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
     - ${AIRFLOW_PROJ_DIR:-.}/database:/opt/airflow/database
-    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+    # - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
   user: "${AIRFLOW_UID:-1000}:${AIRFLOW_GID:-0}"
@@ -278,17 +280,15 @@ services:
       start_period: 60s
     networks:
       - mft_airflow_network
-  
-  # ====== LOGGING SERVICES ======
-  # Loki - centralized log storage and query system
+
   loki:
     image: grafana/loki:3.6.12
     container_name: loki
     hostname: loki
     restart: unless-stopped
     ports:
-      - "3100:3100"          # HTTP API for queries
-      - "9095:9095"          # gRPC for internal communication
+      - "3100:3100"
+      - "9095:9095"
     volumes:
       - ./config/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - loki-storage:/loki   # Persistent storage (Docker volume)
@@ -309,18 +309,22 @@ services:
           memory: 256M
           cpus: '0.1'
 
-  # Promtail - log collector that scrapes logs from Docker containers
-  promtail:
-    image: grafana/promtail:3.0.0
-    container_name: promtail
-    hostname: promtail
-    user: "0:0"
+  alloy:
+    image: grafana/alloy:v1.18.0
+    container_name: alloy
+    hostname: alloy
     restart: unless-stopped
     volumes:
-      - ./config/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - ./config/alloy/alloy-config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    command: -config.file=/etc/promtail/promtail-config.yaml
+      - alloy-data:/var/lib/alloy
+    command:
+      - "run"
+      - "/etc/alloy/config.alloy"
+      - "--storage.path=/var/lib/alloy"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+    ports:
+      - "12345:12345"
     depends_on:
       loki:
         condition: service_started
@@ -334,10 +338,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: '0.25'
+          memory: 512M
+          cpus: '0.5'
         reservations:
-          memory: 128M
+          memory: 256M
           cpus: '0.1'
 
   postgres-exporter-mft:
@@ -761,6 +765,7 @@ volumes:
     name: clamav_db_volume
   clamav_temp:
     name: clamav_temp_volume
-  # NEW: Loki storage
   loki-storage:
     name: loki-storage
+  alloy-data:
+    name: alloy-data

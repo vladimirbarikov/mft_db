@@ -6,7 +6,7 @@ server:
 
 common:
   instance_addr: 0.0.0.0
-  path_prefix: /loki/data 
+  path_prefix: /loki/data
   storage:
     filesystem:
       chunks_directory: /loki/chunks
@@ -35,11 +35,5 @@ compactor:
   working_directory: /loki/compactor
   compaction_interval: 10m
   retention_enabled: true
-  shared_store: filesystem
+  retention_delete_delay: 2h
   delete_request_store: filesystem
-
-frontend:
-  max_outstanding_per_tenant: 512
-
-querier:
-  max_concurrent: 2

@@ -31,7 +31,7 @@
 #        * Infrastructure: postgres, redis, db
 #        * Exporters: postgres-exporter-mft (MFT only)
 #        * Monitoring: prometheus, grafana
-#        * Logging: loki, promtail
+#        * Logging: loki, alloy
 #        * Security: clamav
 #        * Additional: adminer, flower
 #      - 5-minute timeout per image, continues on error
@@ -44,7 +44,7 @@
 #        GROUP 2: Exporters (postgres-exporter-mft)
 #        GROUP 3: ClamAV (clamav)
 #        GROUP 4: Monitoring (prometheus, grafana)
-#        GROUP 5: Logging Services (loki, promtail)
+#        GROUP 5: Logging Services (loki, alloy)
 #        GROUP 6: Airflow Init (airflow-init)
 #        GROUP 7: Airflow Core (airflow-scheduler, airflow-dag-processor, airflow-worker, airflow-triggerer, airflow-apiserver)
 #        GROUP 8: Additional Services (adminer, flower, airflow-cli)
@@ -73,7 +73,7 @@
 #   - prometheus:            prometheus
 #   - grafana:               grafana
 #   - loki:                  loki
-#   - promtail:              promtail
+#   - alloy:                 alloy
 #   - clamav:                clamav
 #   - adminer:               adminer
 #   - flower:                airflow_flower
@@ -133,7 +133,7 @@
 #
 #   9. Create logging services only:
 #      ./build.sh --create-only loki
-#      ./build.sh --create-only promtail
+#      ./build.sh --create-only alloy
 #
 # TROUBLESHOOTING:
 #
@@ -151,8 +151,8 @@
 #
 #   If logs are not showing in Grafana:
 #     1. Check Loki is running: curl http://localhost:3100/ready
-#     2. Check Promtail is running: curl http://localhost:9090/ready
-#     3. Check logs in Loki: curl -G "http://localhost:3100/loki/api/v1/query" --data-urlencode 'query={job="docker_logs"}'
+#     2. Check Alloy is running: curl http://localhost:12345/ready
+#     3. Check logs in Loki: curl -G "http://localhost:3100/loki/api/v1/query" --data-urlencode 'query={container="airflow_scheduler"}'
 #     4. Check Grafana datasource: http://localhost:3000 → Configuration → Data Sources → Loki
 #
 #   To reset everything:
@@ -173,7 +173,7 @@
 #         - Removed airflow-webserver (not used in Airflow 3.0.6)
 #         - Added airflow-apiserver service
 #         - Added airflow-dag-processor to Airflow Core group
-#         - Added logging services: loki, promtail
+#         - Added logging services: loki, alloy
 #         - Updated service URLs (Adminer on 8081, Loki on 3100)
 
 # Colors for output
@@ -355,7 +355,6 @@ pull_images_sequentially() {
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
     # Array of services in correct order (excluding local ones)
-    # Updated: added loki and promtail for logging services
     local services=(
         "postgres"
         "redis"
@@ -364,7 +363,7 @@ pull_images_sequentially() {
         "prometheus"
         "grafana"
         "loki"
-        "promtail"
+        "alloy"
         "clamav"
         "adminer"
     )
@@ -454,12 +453,11 @@ create_containers_sequentially() {
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
     # Define services in dependency order based on docker-compose.yml
-    # Updated: added logging services (loki, promtail) and airflow-dag-processor
     local group1_infra=("postgres" "redis" "db")
     local group2_exporters=("postgres-exporter-mft")
     local group3_clamav=("clamav")
     local group4_monitoring=("prometheus" "grafana")
-    local group5_logging=("loki" "promtail")
+    local group5_logging=("loki" "alloy")
     local group6_airflow_init=("airflow-init")
     local group7_airflow_core=(
         "airflow-scheduler"
@@ -600,7 +598,7 @@ create_containers_sequentially() {
     create_group "Exporters (postgres-exporter-mft)" "${group2_exporters[@]}"
     create_group "ClamAV" "${group3_clamav[@]}"
     create_group "Monitoring (prometheus, grafana)" "${group4_monitoring[@]}"
-    create_group "Logging Services (loki, promtail)" "${group5_logging[@]}"
+    create_group "Logging Services (loki, alloy)" "${group5_logging[@]}"
     create_group "Airflow Init" "${group6_airflow_init[@]}"
     create_group "Airflow Core (scheduler, dag-processor, worker, triggerer, apiserver)" "${group7_airflow_core[@]}"
     create_group "Additional Services (adminer, flower, airflow-cli)" "${group8_additional[@]}"
@@ -778,7 +776,7 @@ show_next_steps() {
     echo -e "  Test upload-api:                     ${GREEN}curl -F 'file=@data.xlsx' http://localhost:5002/upload-mft-excel${NC}"
     echo -e "  Test display-api:                    ${GREEN}curl http://localhost:5003/health${NC}"
     echo -e "  Test Loki:                           ${GREEN}curl http://localhost:3100/ready${NC}"
-    echo -e "  Test Promtail:                       ${GREEN}curl http://localhost:9090/ready${NC}"
+    echo -e "  Test Alloy:                          ${GREEN}curl http://localhost:12345/ready${NC}"
     echo -e "  Query logs in Loki:                  ${GREEN}curl -G 'http://localhost:3100/loki/api/v1/query' --data-urlencode 'query={job=\"docker_logs\"}'${NC}"
     echo -e "  Enter upload-api:                    ${GREEN}docker exec -it mft_upload_api bash${NC}"
     echo -e "  Enter display-api:                   ${GREEN}docker exec -it mft_display_api bash${NC}"
@@ -789,6 +787,7 @@ show_next_steps() {
     echo -e "  Enter redis:                         ${GREEN}docker exec -it airflow_redis redis-cli${NC}"
     echo -e "  Enter clamav:                        ${GREEN}docker exec -it clamav bash${NC}"
     echo -e "  Enter loki:                          ${GREEN}docker exec -it loki sh${NC}"
+    echo -e "  Enter alloy:                         ${GREEN}docker exec -it alloy sh${NC}"
     echo -e "  Stop everything:                     ${GREEN}docker-compose down${NC}"
     echo -e "  Stop everything (with volumes):      ${GREEN}docker-compose down -v${NC}"
     echo -e "  Create single service:               ${GREEN}docker-compose up -d <service-name>${NC}"

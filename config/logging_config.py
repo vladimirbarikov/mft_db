@@ -17,7 +17,7 @@ Key components:
 Architecture decisions:
 - All logs go to stdout/stderr (no file-based logging)
 - JSON format for structured logging (Loki ingestion ready)
-- Single source of truth: container logs collected by Promtail
+- Single source of truth: container logs collected by Alloy
 - No log files on host system (security requirement)
 - Logs stored in Docker volumes, not accessible to users
 
@@ -367,7 +367,7 @@ else:
     init_logger.info("Logging initialized for container environment (stdout only)")
     init_logger.info("All logs are output to stdout/stderr in JSON format")
     init_logger.info("No local log files are created on host filesystem")
-    init_logger.info("Logs are collected by Promtail and stored in Loki (Docker volume)")
+    init_logger.info("Logs are collected by Alloy and stored in Loki (Docker volume)")
 
 
 # ====== PUBLIC INTERFACE ======

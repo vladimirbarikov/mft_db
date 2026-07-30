@@ -1,0 +1,53 @@
+// 1. Автоматический поиск всех запущенных Docker-контейнеров
+discovery.docker "mft_containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// 2. ФИЛЬТРАЦИЯ КОНТЕЙНЕРОВ: Оставляем только нужные сервисы
+discovery.relabel "mft_container_filter" {
+  targets = discovery.docker.mft_containers.targets
+
+  // Разрешаем только mft_db, наши API и все, что начинается с airflow
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(mft_db|mft_upload_api|mft_display_api|airflow_.*)"
+    action        = "keep"
+  }
+
+  // Записываем чистое имя контейнера в красивую метку "container" для Grafana
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+  }
+}
+
+// 3. Чтение логов только из отфильтрованных контейнеров
+loki.source.docker "mft_docker_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.mft_container_filter.output
+  forward_to = [loki.process.just_pass_logs.receiver]
+}
+
+// 4. ОБРАБОТКА ЛОГОВ: Просто передаем чистый лог без оберток
+loki.process "just_pass_logs" {
+  
+  // Извлекаем оригинальную строку текста/JSON, которую выдал контейнер
+  stage.json {
+    expressions = { "output_msg" = "log" }
+  }
+
+  // Передаем её на вывод в Grafana без изменений
+  stage.output {
+    source = "output_msg"
+  }
+
+  forward_to = [loki.write.mft_loki_endpoint.receiver]
+}
+
+// 5. Отправка логов в Loki
+loki.write "mft_loki_endpoint" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
