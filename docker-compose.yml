@@ -19,6 +19,8 @@ x-airflow-common:
 
     # ========== AIRFLOW 3.0.6 API CONFIGURATION ==========
     AIRFLOW__API__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API__BASE_URL: http://airflow-apiserver:8080
+    AIRFLOW__WEBSERVER__BASE_URL: http://airflow-apiserver:8080
     
     # ========== AIRFLOW 3.0.6 JWT AUTHENTICATION ==========
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.jwt'
@@ -39,6 +41,7 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW__CORE__DAG_PROCESSOR_MANAGER_SLEEP_TIME: ${AIRFLOW__CORE__DAG_PROCESSOR_MANAGER_SLEEP_TIME:-30}
     AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: ${AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT:-50}
+    AIRFLOW__DAG_PROCESSOR__DAGBAG_IMPORT_TIMEOUT: ${AIRFLOW__DAG_PROCESSOR__DAGBAG_IMPORT_TIMEOUT:-60}
     AIRFLOW__CORE__MIN_FILE_PROCESS_INTERVAL: ${AIRFLOW__CORE__MIN_FILE_PROCESS_INTERVAL:-30}
     AIRFLOW__CORE__DAG_PROCESSOR_SLEEP_TIME: ${AIRFLOW__CORE__DAG_PROCESSOR_SLEEP_TIME:-10}
     AIRFLOW__SCHEDULER__DAG_PROCESSOR_SLEEP_TIME: ${AIRFLOW__SCHEDULER__DAG_PROCESSOR_SLEEP_TIME:-10}
@@ -72,7 +75,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
     - ${AIRFLOW_PROJ_DIR:-.}/database:/opt/airflow/database
-    # - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
   user: "${AIRFLOW_UID:-1000}:${AIRFLOW_GID:-0}"
