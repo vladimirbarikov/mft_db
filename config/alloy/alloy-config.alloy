@@ -3,18 +3,16 @@ discovery.docker "mft_containers" {
   host = "unix:///var/run/docker.sock"
 }
 
-// 2. ФИЛЬТРАЦИЯ КОНТЕЙНЕРОВ: Оставляем только нужные сервисы
+// 2. ФИЛЬТРАЦИЯ КОНТЕЙНЕРОВ
 discovery.relabel "mft_container_filter" {
   targets = discovery.docker.mft_containers.targets
 
-  // Разрешаем только mft_db, наши API и все, что начинается с airflow
   rule {
     source_labels = ["__meta_docker_container_name"]
     regex         = "/?(mft_db|mft_upload_api|mft_display_api|airflow_.*)"
     action        = "keep"
   }
 
-  // Записываем чистое имя контейнера в красивую метку "container" для Grafana
   rule {
     source_labels = ["__meta_docker_container_name"]
     regex         = "/?(.*)"
@@ -22,24 +20,18 @@ discovery.relabel "mft_container_filter" {
   }
 }
 
-// 3. Чтение логов только из отфильтрованных контейнеров
+// 3. Чтение логов
 loki.source.docker "mft_docker_logs" {
   host       = "unix:///var/run/docker.sock"
   targets    = discovery.relabel.mft_container_filter.output
   forward_to = [loki.process.just_pass_logs.receiver]
 }
 
-// 4. ОБРАБОТКА ЛОГОВ: Просто передаем чистый лог без оберток
+// 4. ОБРАБОТКА ЛОГОВ: Просто передаем ВСЁ содержимое
 loki.process "just_pass_logs" {
-  
-  // Извлекаем оригинальную строку текста/JSON, которую выдал контейнер
-  stage.json {
-    expressions = { "output_msg" = "log" }
-  }
-
-  // Передаем её на вывод в Grafana без изменений
+  // Используем __line__ - сырой лог как есть
   stage.output {
-    source = "output_msg"
+    source = "__line__"
   }
 
   forward_to = [loki.write.mft_loki_endpoint.receiver]
