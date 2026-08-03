@@ -687,7 +687,10 @@ def generate_unique_filename(original_filename: str) -> tuple[str, str, str]:
     return safe_filename, timestamp, unique_id
 
 
-def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]]:
+def trigger_airflow_dag(
+        file_info: Dict[str, Any],
+        file_content_b64: str
+    ) -> Tuple[bool, Optional[Dict]]:
     """
     Trigger Airflow DAG with file content via REST API v2 using JWT authentication.
 
@@ -805,7 +808,8 @@ def trigger_airflow_dag(file_info: Dict[str, Any]) -> Tuple[bool, Optional[Dict]
         dag_payload = {
             "logical_date": logical_date,  # REQUIRED in Airflow 3.0.6+
             "conf": {
-                "file_info": file_info
+                "file_info": file_info,
+                "file_content": file_content_b64
             }
         }
 
@@ -998,6 +1002,10 @@ def upload_mft_excel():
 
         # Read into memory
         file_content = file.read()
+        file_content_b64 = base64.b64encode(file_content).decode('utf-8')
+
+        logger.info("File encoded to base64: %d chars", len(file_content_b64))
+
         file_size = len(file_content)
 
         # Virus scan
@@ -1038,7 +1046,7 @@ def upload_mft_excel():
         file_metadata_store.add(unique_id, file_metadata)
 
         # Trigger DAG
-        dag_success, dag_response = trigger_airflow_dag(file_metadata)
+        dag_success, dag_response = trigger_airflow_dag(file_metadata, file_content_b64)
 
         response_data = {
             'message': 'File uploaded successfully (streaming mode)',
