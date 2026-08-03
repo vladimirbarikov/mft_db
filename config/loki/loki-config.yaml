@@ -30,6 +30,8 @@ limits_config:
   retention_period: 30d
   max_query_length: 720h
   max_entries_limit_per_query: 5000
+  max_line_size: 1048576
+  max_line_size_truncate: true
 
 compactor:
   working_directory: /loki/compactor
