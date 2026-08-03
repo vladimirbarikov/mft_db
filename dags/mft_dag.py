@@ -192,16 +192,16 @@ def mft_etl_pipeline():
         - Retries: 3 with 5-minute delays
     """
 
-    # ========== EXTRACT PHASE ==========
 
+    # ========== EXTRACT PHASE ==========
     # Extract data for main Dataframe
     @task(task_id="extract_main_data")
-    def extract_main_data() -> bytes:
+    def extract_main_data() -> str:
         """
         Task extracts raw main data from Excel content provided by upload API.
 
         Receives base64-encoded file content from upload_api via DAG run conf,
-        decodes it to bytes, and creates the main Polars DataFrame.
+        decoes it to bytes, and creates the main Polars DataFrame.
         All processing is done in memory - no disk I/O.
         """
         context = get_current_context()
@@ -269,18 +269,27 @@ def mft_etl_pipeline():
             len(serialized_main_df)
         )
 
-        return serialized_main_df
+        # Converting bytes → base64 string for XCom
+        serialized_main_df_b64 = base64.b64encode(serialized_main_df).decode('utf-8')
+        logger.debug(
+            "Encoded serialized data to base64: %d chars.",
+            len(serialized_main_df_b64)
+        )
+
+        return serialized_main_df_b64
 
 
     # Extract data for core entity tables.
     @task(task_id="extract_supplier_data")
     def extract_supplier_data(
-        serialized_main_df: bytes
-    ) -> bytes:
+        serialized_main_df_b64: str
+    ) -> str:
         """Task extracts raw supplier-specific data"""
         logger.info(
             "Extracting supplier data..."
         )
+        # Decoding base64 → bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
 
         # Deserialize the DataFrame from bytes
         main_df = deserialize_df(serialized_main_df)
@@ -303,17 +312,24 @@ def mft_etl_pipeline():
             len(serialized_raw_supplier_df)
         )
 
-        return serialized_raw_supplier_df
+        # Converting bytes → base64 string for XCom
+        serialized_raw_supplier_df_b64 = base64.b64encode(serialized_raw_supplier_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_raw_supplier_df_b64))
+
+        return serialized_raw_supplier_df_b64
 
 
     @task(task_id="extract_part_data")
     def extract_part_data(
-        serialized_main_df: bytes
-    ) -> bytes:
+        serialized_main_df_b64: str
+    ) -> str:
         """Task extracts raw part-specific data"""
         logger.info(
             "Extracting part data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
 
         # Deserialize the DataFrame from bytes
         main_df = deserialize_df(serialized_main_df)
@@ -336,17 +352,24 @@ def mft_etl_pipeline():
             len(serialized_raw_part_df)
         )
 
-        return serialized_raw_part_df
+        # Converting bytes → base64 string for XCom
+        serialized_raw_part_df_b64 = base64.b64encode(serialized_raw_part_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_raw_part_df_b64))
+
+        return serialized_raw_part_df_b64
 
 
     @task(task_id="extract_box_data")
     def extract_box_data(
-        serialized_main_df: bytes
-    ) -> bytes:
+        serialized_main_df_b64: str
+    ) -> str:
         """Task extracts raw box-specific data"""
         logger.info(
             "Extracting box data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
 
         # Deserialize the DataFrame from bytes
         main_df = deserialize_df(serialized_main_df)
@@ -369,17 +392,24 @@ def mft_etl_pipeline():
             len(serialized_raw_box_df)
         )
 
-        return serialized_raw_box_df
+        # Converting bytes → base64 string for XCom
+        serialized_raw_box_df_b64 = base64.b64encode(serialized_raw_box_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_raw_box_df_b64))
+
+        return serialized_raw_box_df_b64
 
 
     @task(task_id="extract_pallet_data")
     def extract_pallet_data(
-        serialized_main_df: bytes
-    ) -> bytes:
+        serialized_main_df_b64: str
+    ) -> str:
         """Task extracts raw pallet-specific data"""
         logger.info(
             "Extracting pallet data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
 
         # Deserialize the DataFrame from bytes
         main_df = deserialize_df(serialized_main_df)
@@ -402,17 +432,24 @@ def mft_etl_pipeline():
             len(serialized_raw_pallet_df)
         )
 
-        return serialized_raw_pallet_df
+        # Converting bytes → base64 string for XCom
+        serialized_raw_pallet_df_b64 = base64.b64encode(serialized_raw_pallet_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_raw_pallet_df_b64))
+
+        return serialized_raw_pallet_df_b64
 
 
     @task(task_id="extract_model_data")
     def extract_model_data(
-        serialized_main_df: bytes
-    ) -> bytes:
+        serialized_main_df_b64: str
+    ) -> str:
         """Task extracts raw model-specific data"""
         logger.info(
             "Extracting model data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
 
         # Deserialize the DataFrame from bytes
         main_df = deserialize_df(serialized_main_df)
@@ -435,16 +472,24 @@ def mft_etl_pipeline():
             len(serialized_raw_model_df)
         )
 
-        return serialized_raw_model_df
+        # Converting bytes → base64 string for XCom
+        serialized_raw_model_df_b64 = base64.b64encode(serialized_raw_model_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_raw_model_df_b64))
+
+        return serialized_raw_model_df_b64
+
 
     @task(task_id="extract_configuration_data")
     def extract_configuration_data(
-        serialized_main_df: bytes
-    ) -> bytes:
+        serialized_main_df_b64: str
+    ) -> str:
         """Task extracts raw configuration-specific data"""
         logger.info(
             "Extracting configuration data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
 
         # Deserialize the DataFrame from bytes
         main_df = deserialize_df(serialized_main_df)
@@ -467,17 +512,24 @@ def mft_etl_pipeline():
             len(serialized_raw_configuration_df)
         )
 
-        return serialized_raw_configuration_df
+        # Converting bytes → base64 string for XCom
+        serialized_raw_configuration_df_b64 = base64.b64encode(serialized_raw_configuration_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_raw_configuration_df_b64))
+
+        return serialized_raw_configuration_df_b64
 
 
     @task(task_id="extract_workshop_data")
     def extract_workshop_data(
-        serialized_main_df: bytes
-    ) -> bytes:
+        serialized_main_df_b64: str
+    ) -> str:
         """Task extracts raw workshop-specific data"""
         logger.info(
             "Extracting workshop data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
 
         # Deserialize the DataFrame from bytes
         main_df = deserialize_df(serialized_main_df)
@@ -500,17 +552,24 @@ def mft_etl_pipeline():
             len(serialized_raw_workshop_df)
         )
 
-        return serialized_raw_workshop_df
+        # Converting bytes → base64 string for XCom
+        serialized_raw_workshop_df_b64 = base64.b64encode(serialized_raw_workshop_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_raw_workshop_df_b64))
+
+        return serialized_raw_workshop_df_b64
 
 
     @task(task_id="extract_line_data")
     def extract_line_data(
-        serialized_main_df: bytes
-    ) -> bytes:
+        serialized_main_df_b64: str
+    ) -> str:
         """Task extracts raw line-specific data"""
         logger.info(
             "Extracting line data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
 
         # Deserialize the DataFrame from bytes
         main_df = deserialize_df(serialized_main_df)
@@ -533,64 +592,95 @@ def mft_etl_pipeline():
             len(serialized_raw_line_df)
         )
 
-        return serialized_raw_line_df
+        # Converting bytes → base64 string for XCom
+        serialized_raw_line_df_b64 = base64.b64encode(serialized_raw_line_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_raw_line_df_b64))
+
+        return serialized_raw_line_df_b64
 
 
     # Extract data for junction tables (many-to-many relationships)
-    @task(task_id="extract_junction_data")
-    def extract_junction_data(
-        serialized_main_df: bytes
-    ) -> dict:
-        """Task extracts raw data for all junction tables"""
-        logger.info(
-            "Extracting raw junction tables data..."
-        )
+    @task(task_id="extract_part_to_box")
+    def extract_part_to_box(serialized_main_df_b64: str) -> str:
+        """Extract Part-to-Box junction data"""
+        logger.info("Extracting Part-to-Box junction data...")
 
-        # Deserialize the DataFrame from bytes
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
         main_df = deserialize_df(serialized_main_df)
 
-        # Extracting data for junction tables
-        raw_junction_df = main_df.select(
-            [
-                'PART_NUMBER', 'BOX_TYPE', 'BOX_LENGTH_MM',
-                'BOX_WIDTH_MM', 'BOX_HEIGHT_MM', 'PART_PER_BOX',
-                'CONFIGURATION', 'PART_PER_VEHICLE', 'LINE_CODE',
-                'PALLET_TYPE', 'PALLET_LENGTH_MM', 'PALLET_WIDTH_MM',
-                'PALLET_HEIGHT_MM', 'BOX_PER_PALLET', 'MODEL_CODE'
-            ]
-        )
+        # Extract Part-to-Box columns
+        df = main_df.select(PART_TO_BOX_COMPOSITE_COLS)
 
-        logger.info(
-            "Successfully extracted junction data.\n"
-            "Shape: %d rows, %d columns.\n"
-            "Columns: %s.",
-            raw_junction_df.height,
-            raw_junction_df.width,
-            ', '.join(raw_junction_df.columns),
-        )
+        # Serialize to base64
+        serialized_raw_part_to_box_df_b64 = base64.b64encode(serialize_df(df)).decode('utf-8')
+        logger.debug("Part-to-Box serialized to %d chars", len(serialized_raw_part_to_box_df_b64))
+        return serialized_raw_part_to_box_df_b64
 
-        # Creating a dictionary with data for each junction table
-        raw_junction_dict = {
-            'part_to_box': raw_junction_df.select(PART_TO_BOX_COMPOSITE_COLS),
-            'box_to_pallet': raw_junction_df.select(BOX_TO_PALLET_COMPOSITE_COLS),
-            'part_to_model': raw_junction_df.select(PART_TO_MODEL_COLS),
-            'part_to_line': raw_junction_df.select(PART_TO_LINE_COLS)
-        }
 
-        return raw_junction_dict
+    @task(task_id="extract_box_to_pallet")
+    def extract_box_to_pallet(serialized_main_df_b64: str) -> str:
+        """Extract Box-to-Pallet junction data"""
+        logger.info("Extracting Box-to-Pallet junction data...")
+
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
+        main_df = deserialize_df(serialized_main_df)
+
+        # Extract Box-to-Pallet columns
+        df = main_df.select(BOX_TO_PALLET_COMPOSITE_COLS)
+
+        # Serialize to base64
+        serialized_box_to_pallet_df_b64 = base64.b64encode(serialize_df(df)).decode('utf-8')
+        logger.debug("Box-to-Pallet serialized to %d chars", len(serialized_box_to_pallet_df_b64))
+        return serialized_box_to_pallet_df_b64
+
+
+    @task(task_id="extract_part_to_model")
+    def extract_part_to_model(serialized_main_df_b64: str) -> str:
+        """Extract Part-to-Model junction data"""
+        logger.info("Extracting Part-to-Model junction data...")
+
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
+        main_df = deserialize_df(serialized_main_df)
+
+        # Extract Part-to-Model columns
+        df = main_df.select(PART_TO_MODEL_COLS)
+
+        # Serialize to base64
+        serialized_part_to_model_df_b64 = base64.b64encode(serialize_df(df)).decode('utf-8')
+        logger.debug("Part-to-Model serialized to %d chars", len(serialized_part_to_model_df_b64))
+        return serialized_part_to_model_df_b64
+
+
+    @task(task_id="extract_part_to_line")
+    def extract_part_to_line(serialized_main_df_b64: str) -> str:
+        """Extract Part-to-Line junction data"""
+        logger.info("Extracting Part-to-Line junction data...")
+
+        serialized_main_df = base64.b64decode(serialized_main_df_b64)
+        main_df = deserialize_df(serialized_main_df)
+
+        # Extract Part-to-Line columns
+        df = main_df.select(PART_TO_LINE_COLS)
+
+        # Serialize to base64
+        serialized_part_to_line_df_b64 = base64.b64encode(serialize_df(df)).decode('utf-8')
+        logger.debug("Part-to-Line serialized to %d chars", len(serialized_part_to_line_df_b64))
+        return serialized_part_to_line_df_b64
 
 
     # ========== TRANSFORM PHASE ==========
-
     # Transform data for core entity tables.
     @task(task_id="transform_supplier_data")
     def transform_supplier_data(
-        serialized_raw_supplier_df: bytes
-    ) -> bytes:
+        serialized_raw_supplier_df_b64: str
+    ) -> str:
         """Transform supplier data with text cleaning, type conversion and removing duplicates."""
         logger.info(
             "Transforming supplier data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_raw_supplier_df = base64.b64decode(serialized_raw_supplier_df_b64)
 
         # Deserialize the DataFrame from bytes
         supplier_df = deserialize_df(serialized_raw_supplier_df)
@@ -638,17 +728,24 @@ def mft_etl_pipeline():
             len(serialized_transformed_supplier_df)
         )
 
-        return serialized_transformed_supplier_df
+        # Converting bytes → base64 string for XCom
+        serialized_transformed_supplier_df_b64 = base64.b64encode(serialized_transformed_supplier_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_transformed_supplier_df_b64))
+
+        return serialized_transformed_supplier_df_b64
 
 
     @task(task_id="transform_part_data")
     def transform_part_data(
-        serialized_raw_part_df: bytes
-    ) -> bytes:
+        serialized_raw_part_df_b64: str
+    ) -> str:
         """Transform part data with text cleaning, type conversion and removing duplicates."""
         logger.info(
             "Transforming part data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_raw_part_df = base64.b64decode(serialized_raw_part_df_b64)
 
         # Deserialize the DataFrame from bytes
         part_df = deserialize_df(serialized_raw_part_df)
@@ -691,17 +788,24 @@ def mft_etl_pipeline():
             len(serialized_transformed_part_df)
         )
 
-        return serialized_transformed_part_df
+        # Converting bytes → base64 string for XCom
+        serialized_transformed_part_df_b64 = base64.b64encode(serialized_transformed_part_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_transformed_part_df_b64))
+
+        return serialized_transformed_part_df_b64
 
 
     @task(task_id="transform_box_data")
     def transform_box_data(
-        serialized_raw_box_df: bytes
-    ) -> bytes:
+        serialized_raw_box_df_b64: str
+    ) -> str:
         """Transform box data with text cleaning, type conversion and removing duplicates."""
         logger.info(
             "Transforming box data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_raw_box_df = base64.b64decode(serialized_raw_box_df_b64)
 
         # Deserialize the DataFrame from bytes
         box_df = deserialize_df(serialized_raw_box_df)
@@ -749,17 +853,24 @@ def mft_etl_pipeline():
             len(serialized_transformed_box_df)
         )
 
-        return serialized_transformed_box_df
+        # Converting bytes → base64 string for XCom
+        serialized_transformed_box_df_b64 = base64.b64encode(serialized_transformed_box_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_transformed_box_df_b64))
+
+        return serialized_transformed_box_df_b64
 
 
     @task(task_id="transform_pallet_data")
     def transform_pallet_data(
-        serialized_raw_pallet_df: bytes
-    ) -> bytes:
+        serialized_raw_pallet_df_b64: str
+    ) -> str:
         """Transform pallet data with text cleaning, type conversion and removing duplicates."""
         logger.info(
             "Transforming pallet data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_raw_pallet_df = base64.b64decode(serialized_raw_pallet_df_b64)
 
         # Deserialize the DataFrame from bytes
         pallet_df = deserialize_df(serialized_raw_pallet_df)
@@ -807,17 +918,24 @@ def mft_etl_pipeline():
             len(serialized_transformed_pallet_df)
         )
 
-        return serialized_transformed_pallet_df
+        # Converting bytes → base64 string for XCom
+        serialized_transformed_pallet_df_b64 = base64.b64encode(serialized_transformed_pallet_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_transformed_pallet_df_b64))
+
+        return serialized_transformed_pallet_df_b64
 
 
     @task(task_id="transform_model_data")
     def transform_model_data(
-        serialized_raw_model_df: bytes
-    ) -> bytes:
+        serialized_raw_model_df_b64: str
+    ) -> str:
         """Transform model data with text cleaning, type conversion and removing duplicates."""
         logger.info(
             "Transforming model data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_raw_model_df = base64.b64decode(serialized_raw_model_df_b64)
 
         # Deserialize the DataFrame from bytes
         model_df = deserialize_df(serialized_raw_model_df)
@@ -852,17 +970,24 @@ def mft_etl_pipeline():
             len(serialized_transformed_model_df)
         )
 
-        return serialized_transformed_model_df
+        # Converting bytes → base64 string for XCom
+        serialized_transformed_model_df_b64 = base64.b64encode(serialized_transformed_model_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_transformed_model_df_b64))
+
+        return serialized_transformed_model_df_b64
 
 
     @task(task_id="transform_configuration_data")
     def transform_configuration_data(
-        serialized_raw_configuration_df: bytes
-    ) -> bytes:
+        serialized_raw_configuration_df_b64: str
+    ) -> str:
         """Transform model data with text cleaning, type conversion and removing duplicates."""
         logger.info(
             "Transforming model data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_raw_configuration_df = base64.b64decode(serialized_raw_configuration_df_b64)
 
         # Deserialize the DataFrame from bytes
         configuration_df = deserialize_df(serialized_raw_configuration_df)
@@ -902,17 +1027,24 @@ def mft_etl_pipeline():
             len(serialized_transformed_configuration_df)
         )
 
-        return serialized_transformed_configuration_df
+        # Converting bytes → base64 string for XCom
+        serialized_transformed_configuration_df_b64 = base64.b64encode(serialized_transformed_configuration_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_transformed_configuration_df_b64))
+
+        return serialized_transformed_configuration_df_b64
 
 
     @task(task_id="transform_workshop_data")
     def transform_workshop_data(
-        serialized_raw_workshop_df: bytes
-    ) -> bytes:
+        serialized_raw_workshop_df_b64: str
+    ) -> str:
         """Transform workshop data with text cleaning, type conversion and removing duplicates."""
         logger.info(
             "Transforming workshop data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_raw_workshop_df = base64.b64decode(serialized_raw_workshop_df_b64)
 
         # Deserialize the DataFrame from bytes
         workshop_df = deserialize_df(serialized_raw_workshop_df)
@@ -947,17 +1079,24 @@ def mft_etl_pipeline():
             len(serialized_transformed_workshop_df)
         )
 
-        return serialized_transformed_workshop_df
+        # Converting bytes → base64 string for XCom
+        serialized_transformed_workshop_df_b64 = base64.b64encode(serialized_transformed_workshop_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_transformed_workshop_df_b64))
+
+        return serialized_transformed_workshop_df_b64
 
 
     @task(task_id="transform_line_data")
     def transform_line_data(
-        serialized_raw_line_df: bytes
-    ) -> bytes:
+        serialized_raw_line_df_b64: str
+    ) -> str:
         """Transform line data with text cleaning, type conversion and removing duplicates."""
         logger.info(
             "Transforming line data..."
         )
+
+        # Decoding base64 → bytes
+        serialized_raw_line_df = base64.b64decode(serialized_raw_line_df_b64)
 
         # Deserialize the DataFrame from bytes
         line_df = deserialize_df(serialized_raw_line_df)
@@ -992,175 +1131,151 @@ def mft_etl_pipeline():
             len(serialized_transformed_line_df)
         )
 
-        return serialized_transformed_line_df
+        # Converting bytes → base64 string for XCom
+        serialized_transformed_line_df_b64 = base64.b64encode(serialized_transformed_line_df).decode('utf-8')
+        logger.debug("Encoded to base64: %d chars", len(serialized_transformed_line_df_b64))
+
+        return serialized_transformed_line_df_b64
 
 
     # Transform data for junction tables
-    @task(task_id="transform_junction_data")
-    def transform_junction_data(
-        raw_junction_dict: dict
-    ) -> dict:
-        """Transform all junction tables data."""
-        logger.info(
-            "Transforming junction tables data..."
-        )
+    @task(task_id="transform_part_to_box")
+    def transform_part_to_box(part_to_box_b64: str) -> str:
+        """Transform Part-to-Box junction table data."""
+        logger.info("Transforming Part-to-Box junction data...")
 
-        # Dictionary to keep transformed junction data
-        transformed_junction_dict = {}
+        # Decoding the DataFrame
+        df = deserialize_df(base64.b64decode(part_to_box_b64))
 
-        # Transforming Part-to-Box composite junction table
-        if 'part_to_box' in raw_junction_dict:
-            df = raw_junction_dict['part_to_box']
-
+        # Transform
+        if df is not None and not df.is_empty():
             # Drop rows where all values are missing/NaN
             df = df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
-            # Apply converting and cleaninig text
-            str_cols = [
-                'PART_NUMBER',
-                'BOX_TYPE'
-            ]
-
-            for col in str_cols:
+            # Apply converting and cleaning text
+            for col in ['PART_NUMBER', 'BOX_TYPE']:
                 df = convert_to_string(df, col)
                 df = basic_clean_text(df, col)
 
             # Apply converting to Int64
-            int_cols = [
-                'BOX_LENGTH_MM',
-                'BOX_WIDTH_MM',
-                'BOX_HEIGHT_MM',
-                'PART_PER_BOX'
-            ]
-
-            for col in int_cols:
+            for col in ['BOX_LENGTH_MM', 'BOX_WIDTH_MM', 'BOX_HEIGHT_MM', 'PART_PER_BOX']:
                 df = convert_to_int64(df, col)
 
-            # Removing duplicates across all PART_TO_BOX_COMPOSITE_COLS
-            transformed_part_to_box_df = df.unique(subset=PART_TO_BOX_COMPOSITE_COLS, keep='first')
+            # Remove duplicates
+            df = df.unique(subset=PART_TO_BOX_COMPOSITE_COLS, keep='first')
+            df = columns_to_lowercase(df)
+        else:
+            logger.warning("Part-to-Box junction table is empty")
+            df = pl.DataFrame()
 
-            # Keeping transformed junction Part-to-Box data
-            transformed_junction_dict['part_to_box'] = transformed_part_to_box_df
+        # Serialize back to base64
+        serialized_transformed_part_to_box_df_b64 = base64.b64encode(serialize_df(df)).decode('utf-8')
+        logger.debug("Transformed Part-to-Box serialized to %d chars", len(serialized_transformed_part_to_box_df_b64))
+        return serialized_transformed_part_to_box_df_b64
 
-        # Transforming Box-to-Pallet composite junction table
-        if 'box_to_pallet' in raw_junction_dict:
-            df = raw_junction_dict['box_to_pallet']
 
-            # Drop rows where all values are missing/NaN
+    @task(task_id="transform_box_to_pallet")
+    def transform_box_to_pallet(box_to_pallet_b64: str) -> str:
+        """Transform Box-to-Pallet junction table data."""
+        logger.info("Transforming Box-to-Pallet junction data...")
+
+        # Decoding the DataFrame
+        df = deserialize_df(base64.b64decode(box_to_pallet_b64))
+
+        # Transform
+        if df is not None and not df.is_empty():
             df = df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
-            # Apply converting and cleaninig text
-            str_cols = [
-                'PART_NUMBER',
-                'BOX_TYPE',
-                'PALLET_TYPE'
-            ]
-
-            for col in str_cols:
+            for col in ['PART_NUMBER', 'BOX_TYPE', 'PALLET_TYPE']:
                 df = convert_to_string(df, col)
                 df = basic_clean_text(df, col)
 
-            # Apply converting to Int64
-            int_cols = [
-                'BOX_LENGTH_MM', 'BOX_WIDTH_MM', 'BOX_HEIGHT_MM',
-                'PALLET_LENGTH_MM', 'PALLET_WIDTH_MM', 'PALLET_HEIGHT_MM',
-                'BOX_PER_PALLET'
-            ]
-            for col in int_cols:
+            for col in ['BOX_LENGTH_MM', 'BOX_WIDTH_MM', 'BOX_HEIGHT_MM',
+                        'PALLET_LENGTH_MM', 'PALLET_WIDTH_MM', 'PALLET_HEIGHT_MM',
+                        'BOX_PER_PALLET']:
                 df = convert_to_int64(df, col)
 
-            # Removing duplicates across all BOX_TO_PALLET_COMPOSITE_COLS
-            transformed_box_to_pallet_df = df.unique(
-                subset=BOX_TO_PALLET_COMPOSITE_COLS, keep='first'
-            )
+            df = df.unique(subset=BOX_TO_PALLET_COMPOSITE_COLS, keep='first')
+            df = columns_to_lowercase(df)
+        else:
+            logger.warning("Box-to-Pallet junction table is empty")
+            df = pl.DataFrame()
 
-            # Keeping transformed junction Box-to-Pallet data
-            transformed_junction_dict['box_to_pallet'] = transformed_box_to_pallet_df
+        # Serialize back to base64
+        serialized_transformed_box_to_pallet_df_b64 = base64.b64encode(serialize_df(df)).decode('utf-8')
+        logger.debug("Transformed Box-to-Pallet serialized to %d chars", len(serialized_transformed_box_to_pallet_df_b64))
+        return serialized_transformed_box_to_pallet_df_b64
 
-        # Transforming Part-to-Model junction table
-        if 'part_to_model' in raw_junction_dict:
-            df = raw_junction_dict['part_to_model']
 
-            # Drop rows where all values are missing/NaN
+    @task(task_id="transform_part_to_model")
+    def transform_part_to_model(part_to_model_b64: str) -> str:
+        """Transform Part-to-Model junction table data."""
+        logger.info("Transforming Part-to-Model junction data...")
+
+        # Decoding the DataFrame
+        df = deserialize_df(base64.b64decode(part_to_model_b64))
+
+        # Transform
+        if df is not None and not df.is_empty():
             df = df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
-            str_cols = [
-                'PART_NUMBER',
-                'MODEL_CODE',
-                'CONFIGURATION'
-            ]
-
-            # Apply converting and cleaninig text
-            for col in str_cols:
+            for col in ['PART_NUMBER', 'MODEL_CODE', 'CONFIGURATION']:
                 df = convert_to_string(df, col)
                 df = basic_clean_text(df, col)
 
-            # Apply converting to Int64
             df = convert_to_int64(df, 'PART_PER_VEHICLE')
+            df = df.unique(subset=PART_TO_MODEL_COLS, keep='first')
+            df = columns_to_lowercase(df)
+        else:
+            logger.warning("Part-to-Model junction table is empty")
+            df = pl.DataFrame()
 
-            # Removing duplicates across all PART_TO_MODEL_COLS
-            transformed_part_to_model_df = df.unique(subset=PART_TO_MODEL_COLS, keep='first')
+        # Serialize back to base64
+        serialized_transformed_part_to_model_df_b64 = base64.b64encode(serialize_df(df)).decode('utf-8')
+        logger.debug("Transformed Part-to-Model serialized to %d chars", len(serialized_transformed_part_to_model_df_b64))
+        return serialized_transformed_part_to_model_df_b64
 
-            # Keeping transformed junction Part-to-Model data
-            transformed_junction_dict['part_to_model'] = transformed_part_to_model_df
 
-        # Transforming Part-to-Line junction table
-        if 'part_to_line' in raw_junction_dict:
-            df = raw_junction_dict['part_to_line']
+    @task(task_id="transform_part_to_line")
+    def transform_part_to_line(part_to_line_b64: str) -> str:
+        """Transform Part-to-Line junction table data."""
+        logger.info("Transforming Part-to-Line junction data...")
 
-            # Drop rows where all values are missing/NaN
+        # Decoding the DataFrame
+        df = deserialize_df(base64.b64decode(part_to_line_b64))
+
+        # Transform
+        if df is not None and not df.is_empty():
             df = df.filter(pl.any_horizontal(pl.all().is_not_null()))
 
-            # Apply converting and cleaninig text
             for col in PART_TO_LINE_COLS:
                 df = convert_to_string(df, col)
                 df = basic_clean_text(df, col)
 
-            # Removing duplicates across all part_to_line_cols
-            transformed_part_to_line_df = df.unique(subset=PART_TO_LINE_COLS, keep='first')
+            df = df.unique(subset=PART_TO_LINE_COLS, keep='first')
+            df = columns_to_lowercase(df)
+        else:
+            logger.warning("Part-to-Line junction table is empty")
+            df = pl.DataFrame()
 
-            # Keeping transformed junction Part-to-Line data
-            transformed_junction_dict['part_to_line'] = transformed_part_to_line_df
-
-        # Convert all column names to lowercase in each junction table
-        for df_name, df in transformed_junction_dict.items():
-            transformed_junction_dict[df_name] = columns_to_lowercase(df)
-
-        logger.info(
-            "Successfully transformed junction data.\n"
-            "Junction tables: %s.\n"
-            "Shape of junction tables:\n"
-            "- part_to_box: %d rows, %d columns\n"
-            "- box_to_pallet: %d rows, %d columns\n"
-            "- part_to_model: %d rows, %d columns\n"
-            "- part_to_line: %d rows, %d columns",
-            ', '.join(transformed_junction_dict.keys()),
-            transformed_junction_dict.get('part_to_box', pl.DataFrame()).height,
-            transformed_junction_dict.get('part_to_box', pl.DataFrame()).width,
-            transformed_junction_dict.get('box_to_pallet', pl.DataFrame()).height,
-            transformed_junction_dict.get('box_to_pallet', pl.DataFrame()).width,
-            transformed_junction_dict.get('part_to_model', pl.DataFrame()).height,
-            transformed_junction_dict.get('part_to_model', pl.DataFrame()).width,
-            transformed_junction_dict.get('part_to_line', pl.DataFrame()).height,
-            transformed_junction_dict.get('part_to_line', pl.DataFrame()).width,
-        )
-
-        return transformed_junction_dict
+        # Serialize back to base64
+        serialized_transformed_part_to_line_df_b64 = base64.b64encode(serialize_df(df)).decode('utf-8')
+        logger.debug("Transformed Part-to-Line serialized to %d chars", len(serialized_transformed_part_to_line_df_b64))
+        return serialized_transformed_part_to_line_df_b64
 
 
     # ========== LOADING PHASE ==========
-
     # Separate tasks of loading core entity and junction tables in correct sequence
     @task(task_id="load_core_entity_tables")
     def load_core_tables_task(
-        serialized_transformed_supplier_df: bytes,
-        serialized_transformed_workshop_df: bytes,
-        serialized_transformed_model_df: bytes,
-        serialized_transformed_configuration_df: bytes,
-        serialized_transformed_box_df: bytes,
-        serialized_transformed_pallet_df: bytes,
-        serialized_transformed_line_df: bytes,
-        serialized_transformed_part_df: bytes
+        serialized_transformed_supplier_df_b64: str,
+        serialized_transformed_workshop_df_b64: str,
+        serialized_transformed_model_df_b64: str,
+        serialized_transformed_configuration_df_b64: str,
+        serialized_transformed_box_df_b64: str,
+        serialized_transformed_pallet_df_b64: str,
+        serialized_transformed_line_df_b64: str,
+        serialized_transformed_part_df_b64: str
     ) -> dict[str, int]:
         """
         Task loads ALL core entity tables in the correct dependency sequence.
@@ -1181,14 +1296,14 @@ def mft_etl_pipeline():
 
         # Deserializing all dataframes
         all_transformed_data = {
-            'transformed_supplier_df': deserialize_df(serialized_transformed_supplier_df),
-            'transformed_box_df': deserialize_df(serialized_transformed_box_df),
-            'transformed_pallet_df': deserialize_df(serialized_transformed_pallet_df),
-            'transformed_model_df': deserialize_df(serialized_transformed_model_df),
-            'transformed_configuration_df': deserialize_df(serialized_transformed_configuration_df),
-            'transformed_workshop_df': deserialize_df(serialized_transformed_workshop_df),
-            'transformed_line_df': deserialize_df(serialized_transformed_line_df),
-            'transformed_part_df': deserialize_df(serialized_transformed_part_df)
+            'transformed_supplier_df': deserialize_df(base64.b64decode(serialized_transformed_supplier_df_b64)),
+            'transformed_workshop_df': deserialize_df(base64.b64decode(serialized_transformed_workshop_df_b64)),
+            'transformed_model_df': deserialize_df(base64.b64decode(serialized_transformed_model_df_b64)),
+            'transformed_configuration_df': deserialize_df(base64.b64decode(serialized_transformed_configuration_df_b64)),
+            'transformed_box_df': deserialize_df(base64.b64decode(serialized_transformed_box_df_b64)),
+            'transformed_pallet_df': deserialize_df(base64.b64decode(serialized_transformed_pallet_df_b64)),
+            'transformed_line_df': deserialize_df(base64.b64decode(serialized_transformed_line_df_b64)),
+            'transformed_part_df': deserialize_df(base64.b64decode(serialized_transformed_part_df_b64))
         }
 
         # Check that all dataframes are not empty
@@ -1244,13 +1359,20 @@ def mft_etl_pipeline():
 
     @task(task_id="load_junction_tables")
     def load_junction_tables_task(
-        transformed_junction_dict: dict,
+        transformed_part_to_box_b64: str,
+        transformed_box_to_pallet_b64: str,
+        transformed_part_to_model_b64: str,
+        transformed_part_to_line_b64: str,
         core_entities_results: dict[str, int]
     ) -> dict[str, int]:
         """Load junction tables after all core entities are loaded"""
-        logger.info(
-            "Loading junction tables..."
-        )
+        logger.info("Loading junction tables...")
+
+        # Decoding all DataFrames
+        part_to_box_df = deserialize_df(base64.b64decode(transformed_part_to_box_b64))
+        box_to_pallet_df = deserialize_df(base64.b64decode(transformed_box_to_pallet_b64))
+        part_to_model_df = deserialize_df(base64.b64decode(transformed_part_to_model_b64))
+        part_to_line_df = deserialize_df(base64.b64decode(transformed_part_to_line_b64))
 
         # Check if all required core entities were loaded
         required_entities = {
@@ -1276,12 +1398,20 @@ def mft_etl_pipeline():
                 ', '.join(missing_entities)
             )
 
+        # Подготавливаем словарь для загрузки
+        junction_dict = {
+            'part_to_box': part_to_box_df,
+            'box_to_pallet': box_to_pallet_df,
+            'part_to_model': part_to_model_df,
+            'part_to_line': part_to_line_df
+        }
+
         # Uploading data to the database
         results = load_junction_tables(
-            junction_dict=transformed_junction_dict,
+            junction_dict=junction_dict,
             engine=None,
             preserve_cache=False
-            )
+        )
 
         # Logging of results
         if results:
@@ -1301,9 +1431,7 @@ def mft_etl_pipeline():
                 junction_total
             )
         else:
-            logger.error(
-                "Failed to load junction tables - empty results returned."
-            )
+            logger.error("Failed to load junction tables - empty results returned.")
             results = {}
 
         return results
@@ -1419,7 +1547,10 @@ def mft_etl_pipeline():
     extract_configuration_task = extract_configuration_data(main_task)  # type: ignore
     extract_workshop_task = extract_workshop_data(main_task)  # type: ignore
     extract_line_task = extract_line_data(main_task)  # type: ignore
-    extract_junction_task = extract_junction_data(main_task)  # type: ignore
+    extract_part_to_box_task = extract_part_to_box(main_task)  # type: ignore
+    extract_box_to_pallet_task = extract_box_to_pallet(main_task)  # type: ignore
+    extract_part_to_model_task = extract_part_to_model(main_task)  # type: ignore
+    extract_part_to_line_task = extract_part_to_line(main_task)  # type: ignore
 
     # TRANSFORM PHASE
     # Each transform task depends on the corresponding extract task
@@ -1431,25 +1562,32 @@ def mft_etl_pipeline():
     transform_configuration_task = transform_configuration_data(extract_configuration_task)  # type: ignore
     transform_workshop_task = transform_workshop_data(extract_workshop_task)  # type: ignore
     transform_line_task = transform_line_data(extract_line_task)  # type: ignore
-    transform_junction_task = transform_junction_data(extract_junction_task)  # type: ignore
+    transformed_part_to_box_task = transform_part_to_box(extract_part_to_box_task)  # type: ignore
+    transformed_box_to_pallet_task = transform_box_to_pallet(extract_box_to_pallet_task)  # type: ignore
+    transformed_part_to_model_task = transform_part_to_model(extract_part_to_model_task)  # type: ignore
+    transformed_part_to_line_task = transform_part_to_line(extract_part_to_line_task)  # type: ignore
+
 
     # LOADING PHASE
     # Loading all core entity tables in one task in the correct sequence
     load_core_entities_task = load_core_tables_task(
-        serialized_transformed_supplier_df = transform_supplier_task,  # type: ignore
-        serialized_transformed_box_df = transform_box_task,  # type: ignore
-        serialized_transformed_pallet_df = transform_pallet_task,  # type: ignore
-        serialized_transformed_model_df = transform_model_task,  # type: ignore
-        serialized_transformed_configuration_df = transform_configuration_task,  # type: ignore
-        serialized_transformed_workshop_df = transform_workshop_task,  # type: ignore
-        serialized_transformed_line_df = transform_line_task,  # type: ignore
-        serialized_transformed_part_df = transform_part_task  # type: ignore
+        serialized_transformed_supplier_df_b64 = transform_supplier_task,  # type: ignore
+        serialized_transformed_workshop_df_b64 = transform_workshop_task,  # type: ignore
+        serialized_transformed_model_df_b64 = transform_model_task,  # type: ignore
+        serialized_transformed_configuration_df_b64 = transform_configuration_task,  # type: ignore
+        serialized_transformed_box_df_b64 = transform_box_task,  # type: ignore
+        serialized_transformed_pallet_df_b64 = transform_pallet_task,  # type: ignore
+        serialized_transformed_line_df_b64 = transform_line_task,  # type: ignore
+        serialized_transformed_part_df_b64 = transform_part_task  # type: ignore
     )
 
     # Loading all the junction tables (depending on core entities)
     load_junction_entities_task = load_junction_tables_task(
-        transformed_junction_dict=transform_junction_task,  # type: ignore
-        core_entities_results=load_core_entities_task  # type: ignore
+        transformed_part_to_box_b64 = transformed_part_to_box_task,  # type: ignore
+        transformed_box_to_pallet_b64 = transformed_box_to_pallet_task,  # type: ignore
+        transformed_part_to_model_b64 = transformed_part_to_model_task,  # type: ignore
+        transformed_part_to_line_b64 = transformed_part_to_line_task,  # type: ignore
+        core_entities_results = load_core_entities_task  # type: ignore
     )
 
     # Validation of results
