@@ -86,7 +86,7 @@ from datetime import datetime, timedelta
 import pytz
 
 # Third-party imports
-import polars as pl
+# import polars as pl
 from airflow.exceptions import AirflowSkipException
 from airflow.sdk import DAG, dag, task, get_current_context
 
@@ -104,36 +104,36 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # Local imports
 from config import get_logger
-from config.columns_config import (
-    # CORE ENTITY TABLES COLUMNS
-    SUPPLIER_COLS, PART_COLS, BOX_COLS, PALLET_COLS,
-    MODEL_COLS, CONFIGURATION_COLS, WORKSHOP_COLS, LINE_COLS,
-    # JUNCTION TABLES COLUMNS
-    PART_TO_BOX_COMPOSITE_COLS, BOX_TO_PALLET_COMPOSITE_COLS,
-    PART_TO_MODEL_COLS, PART_TO_LINE_COLS
-)
+# from config.columns_config import (
+#     # CORE ENTITY TABLES COLUMNS
+#     SUPPLIER_COLS, PART_COLS, BOX_COLS, PALLET_COLS,
+#     MODEL_COLS, CONFIGURATION_COLS, WORKSHOP_COLS, LINE_COLS,
+#     # JUNCTION TABLES COLUMNS
+#     PART_TO_BOX_COMPOSITE_COLS, BOX_TO_PALLET_COMPOSITE_COLS,
+#     PART_TO_MODEL_COLS, PART_TO_LINE_COLS
+# )
 
-from dags.tasks.serializer import (
-    serialize_df,
-    deserialize_df
-)
-from dags.tasks.extractor import (
-    create_main_df,
-    create_specialized_df
-)
-from dags.tasks.transformer import (
-    columns_to_lowercase,
-    convert_to_int64,
-    convert_to_string,
-    convert_to_float,
-    basic_clean_text,
-    advanced_clean_text,
-    pinyin_conversion
-)
-from dags.tasks.mft_loader import (
-    load_core_entity_tables,
-    load_junction_tables
-)
+# from dags.tasks.serializer import (
+#     serialize_df,
+#     deserialize_df
+# )
+# from dags.tasks.extractor import (
+#     create_main_df,
+#     create_specialized_df
+# )
+# from dags.tasks.transformer import (
+#     columns_to_lowercase,
+#     convert_to_int64,
+#     convert_to_string,
+#     convert_to_float,
+#     basic_clean_text,
+#     advanced_clean_text,
+#     pinyin_conversion
+# )
+# from dags.tasks.mft_loader import (
+#     load_core_entity_tables,
+#     load_junction_tables
+# )
 
 # Logger setup
 logger = get_logger(__name__)
@@ -204,6 +204,13 @@ def mft_etl_pipeline():
         decoes it to bytes, and creates the main Polars DataFrame.
         All processing is done in memory - no disk I/O.
         """
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from dags.tasks.serializer import serialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_main_df  # pylint: disable=import-outside-toplevel
+
         context = get_current_context()
 
         dag_run = context.get('dag_run')
@@ -285,6 +292,14 @@ def mft_etl_pipeline():
         serialized_main_df_b64: str
     ) -> str:
         """Task extracts raw supplier-specific data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import SUPPLIER_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_specialized_df  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Extracting supplier data..."
         )
@@ -324,6 +339,14 @@ def mft_etl_pipeline():
         serialized_main_df_b64: str
     ) -> str:
         """Task extracts raw part-specific data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import PART_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_specialized_df  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Extracting part data..."
         )
@@ -364,6 +387,14 @@ def mft_etl_pipeline():
         serialized_main_df_b64: str
     ) -> str:
         """Task extracts raw box-specific data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import BOX_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_specialized_df  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Extracting box data..."
         )
@@ -404,6 +435,14 @@ def mft_etl_pipeline():
         serialized_main_df_b64: str
     ) -> str:
         """Task extracts raw pallet-specific data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import PALLET_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_specialized_df  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Extracting pallet data..."
         )
@@ -444,6 +483,14 @@ def mft_etl_pipeline():
         serialized_main_df_b64: str
     ) -> str:
         """Task extracts raw model-specific data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import MODEL_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_specialized_df  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Extracting model data..."
         )
@@ -484,6 +531,14 @@ def mft_etl_pipeline():
         serialized_main_df_b64: str
     ) -> str:
         """Task extracts raw configuration-specific data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import CONFIGURATION_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_specialized_df  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Extracting configuration data..."
         )
@@ -524,6 +579,14 @@ def mft_etl_pipeline():
         serialized_main_df_b64: str
     ) -> str:
         """Task extracts raw workshop-specific data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import WORKSHOP_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_specialized_df  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Extracting workshop data..."
         )
@@ -564,6 +627,14 @@ def mft_etl_pipeline():
         serialized_main_df_b64: str
     ) -> str:
         """Task extracts raw line-specific data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import LINE_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.extractor import create_specialized_df  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Extracting line data..."
         )
@@ -603,6 +674,13 @@ def mft_etl_pipeline():
     @task(task_id="extract_part_to_box")
     def extract_part_to_box(serialized_main_df_b64: str) -> str:
         """Extract Part-to-Box junction data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import PART_TO_BOX_COMPOSITE_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+
         logger.info("Extracting Part-to-Box junction data...")
 
         serialized_main_df = base64.b64decode(serialized_main_df_b64)
@@ -620,6 +698,13 @@ def mft_etl_pipeline():
     @task(task_id="extract_box_to_pallet")
     def extract_box_to_pallet(serialized_main_df_b64: str) -> str:
         """Extract Box-to-Pallet junction data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import BOX_TO_PALLET_COMPOSITE_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+
         logger.info("Extracting Box-to-Pallet junction data...")
 
         serialized_main_df = base64.b64decode(serialized_main_df_b64)
@@ -637,6 +722,13 @@ def mft_etl_pipeline():
     @task(task_id="extract_part_to_model")
     def extract_part_to_model(serialized_main_df_b64: str) -> str:
         """Extract Part-to-Model junction data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import PART_TO_MODEL_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+
         logger.info("Extracting Part-to-Model junction data...")
 
         serialized_main_df = base64.b64decode(serialized_main_df_b64)
@@ -654,6 +746,13 @@ def mft_etl_pipeline():
     @task(task_id="extract_part_to_line")
     def extract_part_to_line(serialized_main_df_b64: str) -> str:
         """Extract Part-to-Line junction data"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from config.columns_config import PART_TO_LINE_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+
         logger.info("Extracting Part-to-Line junction data...")
 
         serialized_main_df = base64.b64decode(serialized_main_df_b64)
@@ -675,6 +774,21 @@ def mft_etl_pipeline():
         serialized_raw_supplier_df_b64: str
     ) -> str:
         """Transform supplier data with text cleaning, type conversion and removing duplicates."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import SUPPLIER_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_string,
+            basic_clean_text,
+            advanced_clean_text,
+            pinyin_conversion
+        )
+
         logger.info(
             "Transforming supplier data..."
         )
@@ -740,6 +854,22 @@ def mft_etl_pipeline():
         serialized_raw_part_df_b64: str
     ) -> str:
         """Transform part data with text cleaning, type conversion and removing duplicates."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import PART_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_string,
+            convert_to_float,
+            basic_clean_text,
+            advanced_clean_text,
+            pinyin_conversion
+        )
+
         logger.info(
             "Transforming part data..."
         )
@@ -800,6 +930,21 @@ def mft_etl_pipeline():
         serialized_raw_box_df_b64: str
     ) -> str:
         """Transform box data with text cleaning, type conversion and removing duplicates."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import BOX_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_int64,
+            convert_to_string,
+            convert_to_float,
+            basic_clean_text
+        )
+
         logger.info(
             "Transforming box data..."
         )
@@ -865,6 +1010,21 @@ def mft_etl_pipeline():
         serialized_raw_pallet_df_b64: str
     ) -> str:
         """Transform pallet data with text cleaning, type conversion and removing duplicates."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import PALLET_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_int64,
+            convert_to_string,
+            convert_to_float,
+            basic_clean_text
+        )
+
         logger.info(
             "Transforming pallet data..."
         )
@@ -930,6 +1090,19 @@ def mft_etl_pipeline():
         serialized_raw_model_df_b64: str
     ) -> str:
         """Transform model data with text cleaning, type conversion and removing duplicates."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import MODEL_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_string,
+            basic_clean_text
+        )
+
         logger.info(
             "Transforming model data..."
         )
@@ -982,6 +1155,19 @@ def mft_etl_pipeline():
         serialized_raw_configuration_df_b64: str
     ) -> str:
         """Transform model data with text cleaning, type conversion and removing duplicates."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import CONFIGURATION_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_string,
+            basic_clean_text
+        )
+
         logger.info(
             "Transforming model data..."
         )
@@ -1039,6 +1225,19 @@ def mft_etl_pipeline():
         serialized_raw_workshop_df_b64: str
     ) -> str:
         """Transform workshop data with text cleaning, type conversion and removing duplicates."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import WORKSHOP_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_string,
+            basic_clean_text
+        )
+
         logger.info(
             "Transforming workshop data..."
         )
@@ -1091,6 +1290,19 @@ def mft_etl_pipeline():
         serialized_raw_line_df_b64: str
     ) -> str:
         """Transform line data with text cleaning, type conversion and removing duplicates."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import LINE_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_string,
+            basic_clean_text
+        )
+
         logger.info(
             "Transforming line data..."
         )
@@ -1142,6 +1354,20 @@ def mft_etl_pipeline():
     @task(task_id="transform_part_to_box")
     def transform_part_to_box(part_to_box_b64: str) -> str:
         """Transform Part-to-Box junction table data."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import PART_TO_BOX_COMPOSITE_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_int64,
+            convert_to_string,
+            basic_clean_text
+        )
+
         logger.info("Transforming Part-to-Box junction data...")
 
         # Decoding the DataFrame
@@ -1177,6 +1403,20 @@ def mft_etl_pipeline():
     @task(task_id="transform_box_to_pallet")
     def transform_box_to_pallet(box_to_pallet_b64: str) -> str:
         """Transform Box-to-Pallet junction table data."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import BOX_TO_PALLET_COMPOSITE_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_int64,
+            convert_to_string,
+            basic_clean_text
+        )
+
         logger.info("Transforming Box-to-Pallet junction data...")
 
         # Decoding the DataFrame
@@ -1210,6 +1450,20 @@ def mft_etl_pipeline():
     @task(task_id="transform_part_to_model")
     def transform_part_to_model(part_to_model_b64: str) -> str:
         """Transform Part-to-Model junction table data."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import PART_TO_MODEL_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_int64,
+            convert_to_string,
+            basic_clean_text
+        )
+
         logger.info("Transforming Part-to-Model junction data...")
 
         # Decoding the DataFrame
@@ -1239,6 +1493,19 @@ def mft_etl_pipeline():
     @task(task_id="transform_part_to_line")
     def transform_part_to_line(part_to_line_b64: str) -> str:
         """Transform Part-to-Line junction table data."""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        import polars as pl  # pylint: disable=import-outside-toplevel
+        from config.columns_config import PART_TO_LINE_COLS  # pylint: disable=import-outside-toplevel
+        from dags.tasks.serializer import serialize_df, deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.transformer import (  # pylint: disable=import-outside-toplevel
+            columns_to_lowercase,
+            convert_to_string,
+            basic_clean_text
+        )
+
         logger.info("Transforming Part-to-Line junction data...")
 
         # Decoding the DataFrame
@@ -1290,6 +1557,13 @@ def mft_etl_pipeline():
         7. Workshops (independent)
         8. Lines (depending on Workshops) - but it will be postponed due to Foregn Key
         """
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from dags.tasks.serializer import deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.mft_loader import load_core_entity_tables  # pylint: disable=import-outside-toplevel
+
         logger.info(
             "Loading all core entity tables in correct dependency sequence..."
         )
@@ -1366,6 +1640,13 @@ def mft_etl_pipeline():
         core_entities_results: dict[str, int]
     ) -> dict[str, int]:
         """Load junction tables after all core entities are loaded"""
+        # The import has been moved to a function in order to:
+        #  - Speed up DAG loading (from 30+ seconds to < 2 seconds)
+        #  - Reduce the load on the Scheduler
+        #  - Reduce memory consumption
+        from dags.tasks.serializer import deserialize_df  # pylint: disable=import-outside-toplevel
+        from dags.tasks.mft_loader import load_junction_tables  # pylint: disable=import-outside-toplevel
+
         logger.info("Loading junction tables...")
 
         # Decoding all DataFrames
