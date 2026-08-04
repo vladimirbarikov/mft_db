@@ -26,7 +26,7 @@ import os
 import uuid
 import tempfile
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from functools import wraps
 import zoneinfo
 
@@ -37,6 +37,7 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from sqlalchemy import String, and_
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import (
     SQLAlchemyError, IntegrityError, DataError, StatementError,
@@ -373,7 +374,7 @@ class DatabaseAPI:
         Returns:
             Dictionary with complete information for all matching parts
         """
-        def query(session):
+        def query(session) -> Dict[str, Any]:
 
             # Base query - start from the most granular level to get all combinations
             # This ensures that each row is a real combination.
@@ -449,6 +450,8 @@ class DatabaseAPI:
             for key, value in filters.items():
                 if value is None or value == "":
                     continue
+
+                str_value: Any
 
                 # Convert string values to lowercase for case-insensitive search
                 # because database stores everything in lowercase
@@ -735,7 +738,7 @@ class DatabaseAPI:
             query = query.distinct()
 
             # Executing the request
-            results = query.all()
+            results:List[Row] = query.all()
 
             # If nothing is found, return the message
             if not results:
@@ -747,9 +750,9 @@ class DatabaseAPI:
                 }
 
             # Convert the results to a flat table
-            result_data = []
+            result_data: List[Dict[str, Any]] = []
             for row in results:
-                row_dict = dict(zip(row.keys(), row))
+                row_dict: Dict[str, Any] = dict(zip(row._fields, row))
 
                 # Normalize the output
                 normalized_row = {}
