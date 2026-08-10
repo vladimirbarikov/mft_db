@@ -26,9 +26,6 @@ DATABASE ENUM TYPES, MODELS AND TABLES:
     - CONFIGURATION_ENUM:
         - comfort, elite, tech-plus, premium - Vehicle assembly levels.
         - no data - if no information about Configuration level.
-    - BREAKPOINT_ACTION_ENUM:
-        - replace, delete, add, update - Types of technical changes.
-        - no data - if no information about Breakpoint action.
 
 2. CORE ENTITY TABLES:
     - supplier_data      - Information about component suppliers
@@ -86,19 +83,15 @@ STORED INFORMATION:
    - Description of change
 
 7. CHANGE HISTORY (part_to_breakpoint):
-   - Links parts to breakpoints with model specificity
-   - Action type: replace, delete, add, update, no data
-   - Before-change values (snapshot from Excel):
-        * part_number_before_change
-        * supplier_name_before_change
-        * localization_before_change (uses LOCALIZATION_ENUM)
-        * line_name_before_change
-   - After-change references to current master data:
-        * supplier_id (SET NULL on delete, NULL for DELETE actions)
-        * line_id (SET NULL on delete, NULL for DELETE actions)
-   - Tracks model-specific part changes
-   - Composite primary key: (part_id, breakpoint_id, model_id)
-   - For DELETE action: supplier_id and line_id are NULL (no new supplier/line)
+   - Links part versions through technical changes (breakpoints)
+   - Each change is specific to a model (model_id)
+   - Type of change determined by presence of IDs:
+        * ADD: new_part_id IS NOT NULL, old_part_id IS NULL
+        * DELETE: new_part_id IS NULL, old_part_id IS NOT NULL
+        * UPDATE: new_part_id = old_part_id (same part)
+        * REPLACE: Two records (DELETE old + ADD new) in same breakpoint
+   - All part data accessed through relationships to part_data
+   - Composite primary key: (new_part_id, old_part_id, breakpoint_id, model_id)
 
 IMPLEMENTATION FEATURES:
     - UUID format: 32 hexadecimal characters + 4 hyphens = 36 characters total
@@ -126,23 +119,23 @@ RELATIONSHIP STRUCTURE:
     - Supplier (1) ↔ (N) Part (N) ↔ (N) Box (N) ↔ (N) Pallet
     - Part (N) ↔ (N) Model (with Configuration)
     - Part (N) ↔ (N) Line (N) ↔ (1) Workshop
-    - Part (N) ↔ (N) Breakpoint (change history) with Action type
+    - Part (N) ↔ (N) Breakpoint (change history) with model-specific versions
+    - Each PartToBreakpoint links new_part and old_part versions for a specific model
     - Configuration (1) ↔ (N) PartToModel (N) ↔ (1) Model
     - Model (1) ↔ (N) PartToBreakpoint (N) ↔ (1) Part (model-specific changes)
     - Supplier (1) ↔ (N) PartToBreakpoint (supplier change history)
     - Line (1) ↔ (N) PartToBreakpoint (line change history)
 
 CHANGE TRACKING (PartToBreakpoint):
-    - Composite PK: (part_id, breakpoint_id, model_id)
-    - Action field: replace/delete/add/update/no data
-    - Before values: part_number, supplier_name, localization, line_name (snapshots)
-    - After references: supplier_id, line_id (current master data)
-    - Enables complete audit trail of part evolution per model
-    - Business rules:
-        * DELETE action: supplier_id and line_id must be NULL
-        * REPLACE/UPDATE: supplier_id and line_id reference new values
-        * ADD action: before-change fields typically NULL
-        * Part soft deletion: is_active=False with deactivation breakpoint reference
+    - Composite PK: (new_part_id, old_part_id, breakpoint_id, model_id)
+    - new_part_id/old_part_id: References part_data versions
+    - breakpoint_id: References breakpoint_data
+    - model_id: References model_data (model-specific change)
+    - Type of change determined by presence of IDs:
+        * ADD: new_part_id NOT NULL, old_part_id NULL
+        * DELETE: new_part_id NULL, old_part_id NOT NULL
+        * UPDATE: new_part_id = old_part_id
+        * REPLACE: Two records per breakpoint
 
 DATABASE CONSTRAINTS SUMMARY:
     - Check Constraints:
@@ -205,7 +198,7 @@ MODEL_NAMES_ENUM = SqlEnum(
 )
 
 WORKSHOP_CODES_ENUM = SqlEnum(
-    'as', 'comp', 'paint', 'weld', 'stamp', 'en', 'no data',
+    'as', 'comp', 'paint', 'weld', 'stamp', 'engine', 'no data',
     name='workshop_codes'
 )
 
@@ -219,8 +212,8 @@ CONFIGURATION_ENUM = SqlEnum(
     name='configuration_types'
 )
 
-BREAKPOINT_ACTION_ENUM = SqlEnum(
-    'replace', 'delete', 'add', 'update', 'no data',
+BREAKPOINT_STATUS_ENUM = SqlEnum(
+    'approved', 'published', 'closed', 'no data',
     name='breakpoint_action'
 )
 
@@ -305,11 +298,10 @@ class PartData(Base):
         Index('idx_part_name', 'part_name'),
         Index('idx_part_weight', 'part_weight_kg'),
         Index('idx_part_supplier_id', 'supplier_id'),
-        Index('idx_part_active', 'is_active'),
         Index('idx_part_deactivated', 'deactivated_at'),
         {
             'comment': """
-            PURPOSE: Automotive component master data
+            PURPOSE: Automotive component master data with versioning support
             ---
             COLUMN DESCRIPTION:
             - part_id: Unique system identifier (PRT_ + 36-character UUID)
@@ -317,9 +309,12 @@ class PartData(Base):
             - part_name: Technical description
             - part_weight_kg: Weight in kilograms (precision 0.01)
             - supplier_id: References supplier_data
-            - is_active: Whether part is currently in production (soft delete flag)
+            - is_active: Computed property - True if part has at least one active model association
             - deactivated_at: When part was deactivated (if is_active=False)
             - deactivated_by_breakpoint_id: Which breakpoint caused deactivation
+            - original_part_id: First version of this part (for grouping versions)
+            - version_number: Version number (1, 2, 3, ...)
+            - created_at: When this version was created
             ---
             RELATIONSHIPS:
             - Many-to-Many with: ModelData, LineData, BoxData, BreakpointData
@@ -358,26 +353,34 @@ class PartData(Base):
     supplier_id = Column(
         String(40),
         ForeignKey('supplier_data.supplier_id', ondelete='RESTRICT'),
-        nullable=False,
-        comment="The supplier cannot be deleted if there are part-numbers!"
+        nullable=False
     )
-    is_active = Column(
-        Boolean,
-        nullable=False,
-        default=True,
-        server_default=text('true'),
-        comment="Whether part is currently in production. False = soft deleted"
-    )
+    # Versioning fields
     deactivated_at = Column(
         DateTime,
-        nullable=True,
-        comment="When part was deactivated (set when is_active becomes False)"
+        nullable=True
     )
     deactivated_by_breakpoint_id = Column(
         String(40),
         ForeignKey('breakpoint_data.breakpoint_id', ondelete='SET NULL'),
+        nullable=True
+    )
+    original_part_id = Column(
+        String(40),
+        ForeignKey('part_data.part_id', ondelete='SET NULL'),
         nullable=True,
-        comment="Which breakpoint caused this part to be deactivated"
+        comment="First version ID for grouping all versions of the same part"
+    )
+    version_number = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        comment="Version number (starts at 1 for original)"
+    )
+    created_at = Column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False
     )
     # Relationships
     supplier = relationship(
@@ -388,33 +391,65 @@ class PartData(Base):
     boxes = relationship(
         'PartToBox',
         back_populates='part',
-        lazy='selectin'
+        lazy='selectin',
+        cascade='all, delete-orphan'
     )
     models = relationship(
         'PartToModel',
         back_populates='part',
-        lazy='selectin'
+        lazy='selectin',
+        cascade='all, delete-orphan'
     )
     lines = relationship(
         'PartToLine',
         back_populates='part',
-        lazy='select'
+        lazy='select',
+        cascade='all, delete-orphan'
     )
     box_pallet_combinations = relationship(
         'BoxToPallet',
         back_populates='part',
-        lazy='selectin'
+        lazy='selectin',
+        cascade='all, delete-orphan'
     )
-    breakpoints = relationship(
+    new_versions = relationship(
         'PartToBreakpoint',
-        back_populates='part',
+        foreign_keys='PartToBreakpoint.new_part_id',
+        back_populates='new_part',
+        lazy='select'
+    )
+    old_versions = relationship(
+        'PartToBreakpoint',
+        foreign_keys='PartToBreakpoint.old_part_id',
+        back_populates='old_part',
         lazy='select'
     )
     deactivation_breakpoint = relationship(
         'BreakpointData',
         foreign_keys=[deactivated_by_breakpoint_id],
-        lazy='select'
+        lazy='joined'
     )
+    original_part = relationship(
+        'PartData',
+        remote_side=[part_id],
+        foreign_keys=[original_part_id],
+        lazy='joined'
+    )
+    # Property for checking activity
+    @property
+    def is_active(self):
+        """The part is active if there is at least one active connection to the model"""
+        return any(model.is_active for model in self.models)
+
+    @property
+    def active_models(self):
+        """List of models for which the part is active"""
+        return [model for model in self.models if model.is_active]
+
+    @property
+    def inactive_models(self):
+        """List of models for which the part is inactive"""
+        return [model for model in self.models if not model.is_active]
 
 
 class BoxData(Base):
@@ -934,8 +969,6 @@ class BreakpointData(Base):
         Index('idx_breakpoint_date', 'breakpoint_date'),
         Index('idx_input_date', 'input_date'),
         Index('idx_breakpoint_batch', 'batch'),
-        Index('idx_breakpoint_composite_date_number',
-              'breakpoint_date', 'breakpoint_number'),
         {
             'comment': """
             PURPOSE: Technical change management (breakpoints)
@@ -944,12 +977,15 @@ class BreakpointData(Base):
             - breakpoint_id: Unique system identifier (BPT_ + 36-character UUID)
             - input_date: When record was created
             - breakpoint_number: Engineering change identifier
+            - breakpoint_status: Execution status of breakpoint
             - breakpoint_date: When change takes effect
-            - batch: Number of batch the technical change occurred
+            - batch_plan: Planned batch number when the technical change occurred
+            - batch_fact: Real batch number when the technical change occurred
             - description: Cause and solution of the technical change
+            - solution: Solution description
             ---
             RELATIONSHIPS:
-            - Many-to-Many with: PartData (via part_to_breakpoint)
+            - Links to part versions via PartToBreakpoint
             ---
             BUSINESS RULES:
             - Tracks part changes before/after engineering changes
@@ -974,28 +1010,45 @@ class BreakpointData(Base):
         unique=True,
         nullable=False
     )
+    breakpoint_status = Column(
+        BREAKPOINT_STATUS_ENUM,
+        nullable=False
+    )
+    batch_plan = Column(
+        String(10),
+        nullable=True
+    )
+    batch_fact = Column(
+        String(10),
+        nullable=True
+    )
     breakpoint_date = Column(
         DateTime(),
         nullable=False
-    )
-    batch = Column(
-        String(10),
-        nullable=True
     )
     description = Column(
         Text,
         nullable=True
     )
+    solution = Column(
+        Text,
+        nullable=True
+    )
     # Relationships
-    parts = relationship(
+    part_transitions = relationship(
         'PartToBreakpoint',
         back_populates='breakpoint',
+        lazy='select'
+    )
+    deactivated_parts = relationship(
+        'PartData',
+        foreign_keys='PartData.deactivated_by_breakpoint_id',
+        back_populates='deactivation_breakpoint',
         lazy='select'
     )
 
 
 # ========== JUNCTION TABLES ==========
-
 class PartToBox(Base):
     '''
     Junction table used to organize many-to-many relationships
@@ -1122,6 +1175,7 @@ class PartToModel(Base):
         Index('idx_ptm_model_id', 'model_id'),
         Index('idx_ptm_configuration_id', 'configuration_id'),
         Index('idx_ptm_composite', 'part_id', 'model_id'),
+        Index('idx_ptm_active', 'is_active'),
         {
             'comment': """
             PURPOSE: Many-to-many relationship: Parts ↔ Vehicle Models with configuration
@@ -1131,11 +1185,17 @@ class PartToModel(Base):
             - model_id: References model_data
             - configuration_id: References configuration_data
             - part_per_vehicle: Quantity used per vehicle for this configuration
+            - is_active: Whether this part is active for this specific model
+            - deactivated_at: When this association was deactivated
+            - deactivated_by_breakpoint_id: Which breakpoint caused deactivation
             ---
             BUSINESS RULES:
             - Defines which parts go into which vehicle models with specific configuration
             - Different configurations may use different quantities of the same part
             - Used for BOM configuration and costing
+            - A part can be active for some models and inactive for others
+            - Universal parts have multiple active PartToModel records
+            - A part is considered "fully active" if it has at least one active PartToModel
             """
         },
     )
@@ -1159,6 +1219,24 @@ class PartToModel(Base):
         CheckConstraint('part_per_vehicle > 0'),
         nullable=True
     )
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text('true'),
+        comment="Whether this part is active for this specific model"
+    )
+    deactivated_at = Column(
+        DateTime,
+        nullable=True,
+        comment="When this association was deactivated"
+    )
+    deactivated_by_breakpoint_id = Column(
+        String(40),
+        ForeignKey('breakpoint_data.breakpoint_id', ondelete='SET NULL'),
+        nullable=True,
+        comment="Which breakpoint caused deactivation for this model"
+    )
     # Relationships
     part = relationship(
         'PartData',
@@ -1171,6 +1249,11 @@ class PartToModel(Base):
     configuration = relationship(
         'ConfigurationData',
         back_populates='part_models'
+    )
+    deactivation_breakpoint = relationship(
+        'BreakpointData',
+        foreign_keys=[deactivated_by_breakpoint_id],
+        lazy='joined'
     )
 
 
@@ -1227,117 +1310,78 @@ class PartToBreakpoint(Base):
     '''
     __tablename__ = 'part_to_breakpoint'
     __table_args__ = (
-        Index('idx_ptbkp_part_id', 'part_id'),
-        Index('idx_ptbkp_breakpoint_id', 'breakpoint_id'),
-        Index('idx_ptbkp_supplier_id', 'supplier_id'),
-        Index('idx_ptbkp_line_id', 'line_id'),
-        Index('idx_ptbkp_model_id', 'model_id'),
-        Index('idx_ptbkp_action', 'action'),
-        Index('idx_ptbkp_composite', 'part_id', 'breakpoint_id'),
+        Index('idx_ptbkp_new_part', 'new_part_id'),
+        Index('idx_ptbkp_old_part', 'old_part_id'),
+        Index('idx_ptbkp_breakpoint', 'breakpoint_id'),
+        Index('idx_ptbkp_model', 'model_id'),
+        Index('idx_ptbkp_model_breakpoint', 'model_id', 'breakpoint_id'),
+        UniqueConstraint('new_part_id', 'breakpoint_id', 'model_id',
+                         name='uq_ptbkp_unique'),
         {
             'comment': """
-            PURPOSE: Part change history across breakpoints
+            PURPOSE: Links part versions through technical changes (breakpoints)
             ---
             COLUMN DESCRIPTION:
-                - part_id: References part_data (the part being changed)
-                - breakpoint_id: References breakpoint_data (the change event)
-                - model_id: References model_data (which model this change applies to)
-                - action: Type of change (replace, delete, add, update)
-                - supplier_id: References supplier_data (new/current supplier) - NULL for DELETE
-                - line_id: References line_data (new/current line) - NULL for DELETE
-                - *_before_change: Values before engineering change (snapshots)
+            - new_part_id: New/current version of the part (references part_data)
+            - old_part_id: Previous version of the part (references part_data)  
+            - breakpoint_id: Technical change that caused this version transition
+            - model_id: Model this change applies to (CRITICAL for universal parts)
             ---
             BUSINESS RULES:
-                - Tracks part evolution over time per model
-                - The same part may have different changes for different models
-                - BEFORE values are snapshots from Excel at time of change
-                - AFTER values are references to current master data
-                - For DELETE action: supplier_id and line_id are NULL (no new supplier/line)
-                - For DELETE action: before-change fields contain the old values
-                - ACTION determines how to process the change:
-                    * replace: Old part replaced by new part number
-                    * delete: Part removed from production (soft delete)
-                    * add: New part introduced
-                    * update: Part attributes changed without part number change
+            - A breakpoint ALWAYS applies to a specific model
+            - Universal parts have multiple PartToBreakpoint records (one per model)
+            - Part is fully deactivated only when ALL model associations are inactive
+            - All part data (including all relationships) is stored in part_data
+            - All information accessed through part_data relationships
             """
         },
     )
-    part_id = Column(
+    new_part_id = Column(
         String(40),
         ForeignKey('part_data.part_id', ondelete='RESTRICT'),
         primary_key=True,
-        comment="The part-number cannot be deleted as it is included in the revision history!"
+        nullable=True,
+        comment="New/current version of the part (NULL for DELETE)"
+    )
+    old_part_id = Column(
+        String(40),
+        ForeignKey('part_data.part_id', ondelete='RESTRICT'),
+        primary_key=True,
+        nullable=True,
+        comment="Previous version of the part (NULL for ADD)"
     )
     breakpoint_id = Column(
         String(40),
         ForeignKey('breakpoint_data.breakpoint_id', ondelete='RESTRICT'),
         primary_key=True,
-        comment="The breakpoint cannot be deleted as it is included in the revision history!"
+        comment="Technical change that triggered this version transition"
     )
     model_id = Column(
         String(40),
         ForeignKey('model_data.model_id', ondelete='RESTRICT'),
         primary_key=True,
-        comment="The model cannot be deleted as it is included in the revision history!"
-    )
-    supplier_id = Column(
-        String(40),
-        ForeignKey('supplier_data.supplier_id', ondelete='SET NULL'),
-        nullable=True,
-        comment="New/current supplier. NULL for DELETE actions (part removed from production)."
-    )
-    line_id = Column(
-        String(40),
-        ForeignKey('line_data.line_id', ondelete='SET NULL'),
-        nullable=True,
-        comment="New/current line. NULL for DELETE actions (part removed from production)."
-    )
-    action = Column(
-        BREAKPOINT_ACTION_ENUM,
-        nullable=False
-    )
-    # Before-change snapshots
-    part_number_before_change = Column(
-        String(50),
-        nullable=True,
-        comment="Part number before change (snapshot). Always populated for DELETE."
-    )
-    supplier_name_before_change = Column(
-        String(200),
-        nullable=True,
-        comment="Supplier name before change (snapshot). Populated for DELETE/REPLACE/UPDATE."
-    )
-    localization_before_change = Column(
-        LOCALIZATION_ENUM,
-        nullable=True,
-        comment="Localization status before change (snapshot). NULL for ADD/NO DATA actions."
-    )
-    line_name_before_change = Column(
-        String(50),
-        nullable=True,
-        comment="Line name before change (snapshot). Populated for DELETE/REPLACE/UPDATE."
+        comment="Model this change applies to (must match PartToModel.model_id)"
     )
     # Relationships
-    part = relationship(
+    new_part = relationship(
         'PartData',
-        back_populates='breakpoints'
+        foreign_keys=[new_part_id],
+        back_populates='new_versions',
+        lazy='joined'
+    )
+    old_part = relationship(
+        'PartData',
+        foreign_keys=[old_part_id],
+        back_populates='old_versions',
+        lazy='joined'
     )
     breakpoint = relationship(
         'BreakpointData',
-        back_populates='parts'
+        back_populates='part_transitions',
+        lazy='joined'
     )
     model = relationship(
         'ModelData',
         foreign_keys=[model_id],
-        back_populates='breakpoint_changes'
-    )
-    supplier = relationship(
-        'SupplierData',
-        foreign_keys=[supplier_id],
-        back_populates='breakpoint_changes'
-    )
-    line = relationship(
-        'LineData',
-        foreign_keys=[line_id],
-        back_populates='breakpoint_changes'
+        lazy='joined'
     )
