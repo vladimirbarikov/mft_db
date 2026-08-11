@@ -36,7 +36,20 @@ CORE ENTITY TABLES COLUMNS (UPPERCASE for Excel extraction):
         - LINE_CODE, LINE_NAME, WORKSHOP_CODE
 
     BREAKPOINT_COLS: Columns for breakpoint entity table (technical changes)
-        - BREAKPOINT_NUMBER, BREAKPOINT_DATE, DESCRIPTION, BATCH
+        - BP_NO, STATUS, BATCH_PLAN, BATCH_FACT, CHANGE_DATE, BOM_PRODUCT,
+          DESCRIPTION, SOLUTION
+
+    PART_BEFORE_COLS (old parts):
+        - PART_NO_BEFORE, PART_NAME_BEFORE, CONFIGURATION, WORKSHOP_BEFORE,
+          WORKCENTER_NO_BEFORE, WORKCENTER_NAME_BEFORE, QUANTITY_PER_VEHICLE_BEFORE,
+          QUANTITY_PER_BOX_BEFORE, BOX_BEFORE, PALLET_BEFORE, DISPOSAL,
+          SUPPLIER_NAME_BEFORE, LOCALIZATION_BEFORE
+
+    PART_AFTER_COLS (new parts):
+        - PART_NO_AFTER, PART_NAME_AFTER, CONFIGURATION, WORKSHOP_AFTER,
+          WORKCENTER_NO_AFTER, WORKCENTER_NAME_AFTER, QUANTITY_PER_VEHICLE_AFTER,
+          QUANTITY_PER_BOX_AFTER, BOX_AFTER, PALLET_AFTER, INTERCHANGEABLE,
+          SUPPLIER_NAME_AFTER, LOCALIZATION_AFTER
 
 JUNCTION TABLES COLUMNS (UPPERCASE for Excel extraction):
 
@@ -56,10 +69,10 @@ JUNCTION TABLES COLUMNS (UPPERCASE for Excel extraction):
         - PART_NUMBER, LINE_CODE
 
     PART_TO_BREAKPOINT_COLS: Part-to-breakpoint junction (change history)
-        - PART_NUMBER, BREAKPOINT_NUMBER, MODEL_CODE, ACTION,
-          SUPPLIER_NAME, LINE_CODE, LINE_NAME_BEFORE_CHANGE,
-          PART_NUMBER_BEFORE_CHANGE, SUPPLIER_NAME_BEFORE_CHANGE,
-          LOCALIZATION_BEFORE_CHANGE
+        - PART_NO_BEFORE, PART_NO_AFTER, BP_NO, BOM_PRODUCT, SUPPLIER_NAME_BEFORE,
+          SUPPLIER_NAME_AFTER, WORKCENTER_NO_BEFORE, WORKCENTER_NO_AFTER, 
+          WORKCENTER_NAME_BEFORE, WORKCENTER_NAME_AFTER, WORKSHOP_BEFORE, WORKSHOP_AFTER,
+          LOCALIZATION_BEFORE, LOCALIZATION_AFTER
 
 MFT PIPELINE CONFIGURATION (for mft_dag.py, mft_mapper.py, mft_loader.py)
 
@@ -88,45 +101,43 @@ MFT PIPELINE CONFIGURATION (for mft_dag.py, mft_mapper.py, mft_loader.py)
 BP PIPELINE CONFIGURATION (for bp_dag.py, bp_mapper.py, bp_loader.py)
 
     BP_JUNCTION_REQUIRED: Required columns for breakpoint junction table
-        - part_to_breakpoint: part_number, breakpoint_number, model_code
+        - part_to_breakpoint: part_no_before, part_no_after, bp_no, bom_product
 
-    BP_LOOKUP_TABLES: Tables needed for ID lookups in BP pipeline
-        - supplier: SUPPLIER_COLS (supplier_name lookup)
-        - line: LINE_COLS (line_code lookup)
-        - part: PART_COLS (part_number lookup)
-        - breakpoint: ['breakpoint_number']
-        - model: ['model_code']
+    BP_JUNCTION_OPTIONAL: Optional columns for breakpoint junction table
+        - part_to_breakpoint: supplier_name_before, supplier_name_after,
+          workcenter_no_before, workcenter_no_after, workcenter_name_before,
+          workcenter_name_after, workshop_before, workshop_after,
+          localization_before, localization_after, box_before, box_after,
+          pallet_before, pallet_after
 
-BP MAPPER CONFIGURATION (for bp_mapper.py)
+    BP_TABLE_REQUIREMENTS: Required columns for BP pipeline core tables
+        - breakpoint_data, part_data_before, part_data_after
+
+    BP_ACTION_TYPES: Action types for breakpoint changes
+        - ADD: new_part_id NOT NULL, old_part_id NULL
+        - DELETE: new_part_id NULL, old_part_id NOT NULL
+        - UPDATE: new_part_id = old_part_id (same part)
+        - REPLACE: Two records (DELETE old + ADD new) in same breakpoint
 
     BP_REQUIRED_FIELDS_BY_ACTION: Required fields for each action type
-        - replace: PART_NUMBER_BEFORE_CHANGE, PART_NUMBER_AFTER_CHANGE,
-          LINE_CODE_BEFORE_CHANGE, LINE_CODE_AFTER_CHANGE,
-          SUPPLIER_NAME_AFTER_CHANGE
-        - delete: PART_NUMBER_BEFORE_CHANGE, LINE_CODE_BEFORE_CHANGE
-        - add: PART_NUMBER_AFTER_CHANGE, LINE_CODE_AFTER_CHANGE,
-          SUPPLIER_NAME_AFTER_CHANGE
-        - update: PART_NUMBER_BEFORE_CHANGE, DESCRIPTION
-        - no data: (none)
+        - ADD: part_no_after, part_name_after, configuration, workshop_after,
+          workcenter_no_after, workcenter_name_after, supplier_name_after,
+          localization_after, box_after, pallet_after
+        - DELETE: part_no_before, part_name_before, configuration, workshop_before,
+          workcenter_no_before, workcenter_name_before, supplier_name_before,
+          localization_before, box_before, pallet_before
+        - UPDATE: part_no_before, part_no_after, part_name_before, part_name_after,
+          configuration, workshop_before, workshop_after, workcenter_no_before,
+          workcenter_no_after, workcenter_name_before, workcenter_name_after,
+          supplier_name_before, supplier_name_after, localization_before,
+          localization_after, box_before, box_after, pallet_before, pallet_after
+        - REPLACE: part_no_before, part_no_after, part_name_before, part_name_after,
+          configuration, workshop_before, workshop_after, workcenter_no_before,
+          workcenter_no_after, workcenter_name_before, workcenter_name_after,
+          supplier_name_before, supplier_name_after, localization_before,
+          localization_after, box_before, box_after, pallet_before, pallet_after
 
-    BP_DEFAULT_VALUES: Default values for missing data
-        - localization: 'no data'
-        - action: 'no data'
-        - line_name_prefix: 'Auto-created line'
-        - part_name_prefix: 'Auto-created for breakpoint'
-        - workshop_default_code: 'as' (assembly workshop)
-
-    BP_VALIDATION_RULES: Validation rules for BP mapper
-        - composite_key_fields: ['part_id', 'breakpoint_id', 'model_id']
-        - nullable_fields_by_action: Action-specific nullable fields
-        - required_always: ['breakpoint_id', 'model_id', 'action']
-
-    BP_LOGGING_CONFIG: Logging configuration for BP mapper
-        - levels: Info/warning/error keywords
-        - batch_size_warning: 100 records
-        - log_stats: True
-
-DATABASE MODEL MAPPING:
+DATABASE MODEL MAPPING (MFT PIPELINE):
 
     Core Entity Tables:
         supplier_data        ←→ SUPPLIER_COLS
@@ -137,15 +148,23 @@ DATABASE MODEL MAPPING:
         configuration_data   ←→ CONFIGURATION_COLS
         workshop_data        ←→ WORKSHOP_COLS
         line_data            ←→ LINE_COLS
-        breakpoint_data      ←→ BREAKPOINT_COLS (used in BP pipeline)
     
     Junction Tables:
         part_to_box          ←→ Used only in MFT pipeline
         box_to_pallet        ←→ Used only in MFT pipeline
         part_to_model        ←→ Used only in MFT pipeline
         part_to_line         ←→ Used only in MFT pipeline
+
+
+DATABASE MODEL MAPPING (BREAKPOINT PIPELINE):
+
+    Core Entity Tables:
+        breakpoint_data      ←→ BREAKPOINT_COLS
+        parts_before_data    ←→ PART_BEFORE_COLS
+        parts_after_data     ←→ PART_AFTER_COLS
+
+    Junction Tables:
         part_to_breakpoint   ←→ Used only in BP pipeline
-                              (includes MODEL_CODE and ACTION for change tracking)
 
 ARCHITECTURE NOTES:
 
@@ -156,13 +175,20 @@ ARCHITECTURE NOTES:
         - Mapper performs only ID lookups, no business logic
         - Loader handles INSERT with ON CONFLICT DO NOTHING
 
-    BP Pipeline (CDC Pattern - Change Data Capture):
-        - Tracks engineering changes over time
-        - Creates new records in core tables (parts, lines, suppliers)
-        - Preserves historical snapshots (before-change values)
-        - Mapper contains ACTION-based business logic (replace/delete/add/update)
-        - Loader handles INSERT into part_to_breakpoint (history table)
-        - Supports time series analysis (which part was active when)
+    BP Pipeline (ETL Pattern):
+        - Dynamic data loading (breakpoints, parts before/after, junctions)
+        - Core tables may be created or updated during pipeline execution
+        - Supports four action types: ADD, DELETE, UPDATE, REPLACE
+        - Mapper determines action type based on presence of before/after data
+        - Mapper performs ID lookups and creates new records when needed
+        - Loader handles INSERT, UPDATE, and soft DELETE operations
+        - Versioning: Each part change creates new version in part_data
+        - Soft deactivation: Parts are deactivated via is_active=False in PartToModel
+        - Junction table part_to_breakpoint links old and new part versions
+        - Box and pallet records are looked up or created as needed
+        - All ID lookups use business keys (part_number, supplier_name, etc.)
+        - ENUM validation handled by enum_validator.py module
+        - Cascade: Breakpoint deactivation triggers part deactivation via FK relationships
 
 Version: 1.0.0
 Compatibility: Python 3.12.3
@@ -172,9 +198,10 @@ Last Modified: 2026-03-21
 License: MIT
 Status: Production
 """
+# ========== MFT PIPELINE CONFIGURATION ==========
+# For use in mft_dag.py, mft_mapper.py, and mft_loader.py
 
 # ========== CORE ENTITY TABLES COLUMNS (UPPERCASE for Excel extraction) ==========
-
 # Supplier entity columns
 SUPPLIER_COLS = [
     'SUPPLIER_NAME',
@@ -238,16 +265,7 @@ LINE_COLS = [
     'WORKSHOP_CODE',
 ]
 
-# Breakpoint entity columns (technical changes)
-BREAKPOINT_COLS = [
-    'BREAKPOINT_NUMBER',
-    'BREAKPOINT_DATE',
-    'DESCRIPTION',
-    'BATCH',
-]
-
 # ========== JUNCTION TABLES COLUMNS (UPPERCASE for Excel extraction) ==========
-
 # Part-to-Box junction columns (composite key includes box dimensions)
 PART_TO_BOX_COMPOSITE_COLS = [
     'PART_NUMBER',
@@ -285,23 +303,6 @@ PART_TO_LINE_COLS = [
     'PART_NUMBER',
     'LINE_CODE',
 ]
-
-# Part-to-Breakpoints junction columns
-PART_TO_BREAKPOINT_COLS = [
-    'PART_NUMBER',
-    'BREAKPOINT_NUMBER',
-    'MODEL_CODE',
-    'ACTION',
-    'SUPPLIER_NAME',
-    'LINE_CODE',
-    'LINE_NAME_BEFORE_CHANGE',
-    'PART_NUMBER_BEFORE_CHANGE',
-    'SUPPLIER_NAME_BEFORE_CHANGE',
-    'LOCALIZATION_BEFORE_CHANGE',
-]
-
-# ========== MFT PIPELINE CONFIGURATION ==========
-# For use in mft_dag.py, mft_mapper.py, and mft_loader.py
 
 # Special composite key columns that need custom handling
 MFT_COMPOSITE_COLUMNS = {'box_composite', 'pallet_composite'}
@@ -397,79 +398,231 @@ MFT_TABLE_REQUIREMENTS = {
         }
 
 # ========== BP PIPELINE CONFIGURATION ==========
-# For use in bp_dag.py, bp_mapper.py, and bp_loader.py
+# For use in bp_dag.py, bp_mapper.py and bp_loader.py
 
-# Required fields for each action type in part_to_breakpoint
-BP_REQUIRED_FIELDS_BY_ACTION = {
-    'replace': [
-        'PART_NUMBER_BEFORE_CHANGE',
-        'PART_NUMBER_AFTER_CHANGE',
-        'LINE_CODE_BEFORE_CHANGE',
-        'LINE_CODE_AFTER_CHANGE',
-        'SUPPLIER_NAME_AFTER_CHANGE'
-    ],
-    'delete': [
-        'PART_NUMBER_BEFORE_CHANGE',
-        'LINE_CODE_BEFORE_CHANGE'
-    ],
-    'add': [
-        'PART_NUMBER_AFTER_CHANGE',
-        'LINE_CODE_AFTER_CHANGE',
-        'SUPPLIER_NAME_AFTER_CHANGE'
-    ],
-    'update': [
-        'PART_NUMBER_BEFORE_CHANGE',
-        'DESCRIPTION'
-    ],
-    'no data': []  # No required fields, manual processing
-}
+# ========== CORE ENTITY TABLES COLUMNS (UPPERCASE for Excel extraction) ==========
+# Breakpoint entity columns
+BREAKPOINT_COLS = [
+    'BP_NO',
+    'STATUS',
+    'BATCH_PLAN',
+    'BATCH_FACT',
+    'CHANGE_DATE',
+    'BOM_PRODUCT',
+    'DESCRIPTION',
+    'SOLUTION',
+]
 
-# Default values for missing data
-BP_DEFAULT_VALUES = {
-    'localization': 'no data',
-    'action': 'no data',
-    'line_name_prefix': 'Auto-created line',
-    'part_name_prefix': 'Auto-created for breakpoint',
-    'workshop_default_code': 'as'  # Assembly workshop as default
-}
+# Parts before (old parts) entity columns
+PART_BEFORE_COLS = [
+    'PART_NO_BEFORE',
+    'PART_NAME_BEFORE',
+    'CONFIGURATION',
+    'WORKSHOP_BEFORE',
+    'WORKCENTER_NO_BEFORE',
+    'WORKCENTER_NAME_BEFORE',
+    'QUANTITY_PER_VEHICLE_BEFORE',
+    'QUANTITY_PER_BOX_BEFORE',
+    'BOX_BEFORE',
+    'PALLET_BEFORE',
+    'DISPOSAL',
+    'SUPPLIER_NAME_BEFORE',
+    'LOCALIZATION_BEFORE',
+]
 
-# Validation rules for BP mapper
-BP_VALIDATION_RULES = {
-    'composite_key_fields': ['part_id', 'breakpoint_id', 'model_id'],
-    'nullable_fields_by_action': {
-        'delete': ['supplier_id', 'line_id'],
-        'add': ['part_number_before_change', 'supplier_name_before_change', 
-                'localization_before_change', 'line_name_before_change'],
-        'no data': ['supplier_id', 'line_id', 'part_number_before_change']
-    },
-    'required_always': ['breakpoint_id', 'model_id', 'action']
-}
+# Parts after (new parts) entity columns
+PART_AFTER_COLS = [
+    'PART_NO_AFTER',
+    'PART_NAME_AFTER',
+    'CONFIGURATION',
+    'WORKSHOP_AFTER',
+    'WORKCENTER_NO_AFTER',
+    'WORKCENTER_NAME_AFTER',
+    'QUANTITY_PER_VEHICLE_AFTER',
+    'QUANTITY_PER_BOX_AFTER',
+    'BOX_AFTER',
+    'PALLET_AFTER',
+    'INTERCHANGEABLE',
+    'SUPPLIER_NAME_AFTER',
+    'LOCALIZATION_AFTER',
+]
 
-# Logging configuration for BP mapper
-BP_LOGGING_CONFIG = {
-    'levels': {
-        'info': ['Created new', 'Mapped', 'Processing', 'Updated'],
-        'warning': ['not found', 'missing', 'skipping'],
-        'error': ['Failed', 'Error']
-    },
-    'batch_size_warning': 100,  # Warn if processing more than this many records
-    'log_stats': True  # Log statistics after processing
-}
+# ========== JUNCTION TABLES COLUMNS (UPPERCASE for Excel extraction) ==========
+# Part-to-Breakpoints junction columns
+PART_TO_BREAKPOINT_COLS = [
+    'PART_NO_BEFORE',          # old_part_id lookup
+    'PART_NO_AFTER',           # new_part_id lookup
+    'BP_NO',                   # breakpoint_id lookup
+    'BOM_PRODUCT',             # model_id lookup
+    'SUPPLIER_NAME_BEFORE',    # validation supplier name
+    'SUPPLIER_NAME_AFTER',     # validation/creation new supplier name
+    'WORKCENTER_NO_BEFORE',    # validation line code
+    'WORKCENTER_NO_AFTER',     # validation/creation new line code
+    'WORKCENTER_NAME_BEFORE',  # validation line name
+    'WORKCENTER_NAME_AFTER',   # validation/creation new line name
+    'WORKSHOP_BEFORE',         # validation workshop code
+    'WORKSHOP_AFTER',          # validation/creation new workshop code
+    'LOCALIZATION_BEFORE',     # validation localization status
+    'LOCALIZATION_AFTER',      # validation/creation new localization status
+    'BOX_BEFORE',              # validation box dimensions
+    'BOX_AFTER',               # validation/creation new box
+    'PALLET_BEFORE',           # validation pallet dimensions
+    'PALLET_AFTER',            # validation/creation new pallet
+]
 
+# ========== BP JUNCTION CONFIGURATION ==========
 # Required columns for breakpoint junction table (in lowercase for mapper)
 BP_JUNCTION_REQUIRED = {
     'part_to_breakpoint': [
-        'part_number',
-        'breakpoint_number',
-        'model_code'
+        'part_no_before',
+        'part_no_after',
+        'bp_no',
+        'bom_product'
     ]
 }
 
-# Tables needed for ID lookups in BP pipeline
-BP_LOOKUP_TABLES = {
-    'supplier': SUPPLIER_COLS,
-    'line': LINE_COLS,
-    'part': PART_COLS,
-    'breakpoint': ['breakpoint_number'],
-    'model': ['model_code']
+# Optional columns for breakpoint junction table (in lowercase for mapper)
+BP_JUNCTION_OPTIONAL = {
+    'part_to_breakpoint': [
+        'supplier_name_before',
+        'supplier_name_after',
+        'workcenter_no_before',
+        'workcenter_no_after',
+        'workcenter_name_before',
+        'workcenter_name_after',
+        'workshop_before',
+        'workshop_after',
+        'localization_before',
+        'localization_after',
+        'box_before',
+        'box_after',
+        'pallet_before',
+        'pallet_after',
+        'disposal',
+        'interchangeable'
+    ]
+}
+
+# ========== BP TABLE REQUIREMENTS ==========
+# Expected columns for each core entity table type (in lowercase for loader)
+BP_TABLE_REQUIREMENTS = {
+    'breakpoint_data': [
+        'breakpoint_number',
+        'breakpoint_status',
+        'batch_plan',
+        'batch_fact',
+        'breakpoint_date',
+        'description',
+        'solution'
+    ],
+    'part_data_before': [
+        'part_number',
+        'part_name',
+        'configuration',
+        'workshop_before',
+        'workcenter_no_before',
+        'workcenter_name_before',
+        'quantity_per_vehicle_before',
+        'quantity_per_box_before',
+        'box_before',
+        'pallet_before',
+        'disposal',
+        'supplier_name_before',
+        'localization_before'
+    ],
+    'part_data_after': [
+        'part_number',
+        'part_name',
+        'configuration',
+        'workshop_after',
+        'workcenter_no_after',
+        'workcenter_name_after',
+        'quantity_per_vehicle_after',
+        'quantity_per_box_after',
+        'box_after',
+        'pallet_after',
+        'interchangeable',
+        'supplier_name_after',
+        'localization_after'
+    ]
+}
+
+# ========== BP ACTION TYPES ==========
+# Action types for breakpoint changes
+BP_ACTION_TYPES = {
+    'ADD': 'add',           # new_part_id NOT NULL, old_part_id NULL
+    'DELETE': 'delete',     # new_part_id NULL, old_part_id NOT NULL
+    'UPDATE': 'update',     # new_part_id = old_part_id (same part)
+    'REPLACE': 'replace'    # Two records (DELETE old + ADD new) in same breakpoint
+}
+
+# ========== BP REQUIRED FIELDS BY ACTION ==========
+# Required fields for each action type
+BP_REQUIRED_FIELDS_BY_ACTION = {
+    'ADD': [
+        'part_no_after',
+        'part_name_after',
+        'configuration',
+        'workshop_after',
+        'workcenter_no_after',
+        'workcenter_name_after',
+        'supplier_name_after',
+        'localization_after',
+        'box_after',
+        'pallet_after'
+    ],
+    'DELETE': [
+        'part_no_before',
+        'part_name_before',
+        'configuration',
+        'workshop_before',
+        'workcenter_no_before',
+        'workcenter_name_before',
+        'supplier_name_before',
+        'localization_before',
+        'box_before',
+        'pallet_before'
+    ],
+    'UPDATE': [
+        'part_no_before',
+        'part_no_after',
+        'part_name_before',
+        'part_name_after',
+        'configuration',
+        'workshop_before',
+        'workshop_after',
+        'workcenter_no_before',
+        'workcenter_no_after',
+        'workcenter_name_before',
+        'workcenter_name_after',
+        'supplier_name_before',
+        'supplier_name_after',
+        'localization_before',
+        'localization_after',
+        'box_before',
+        'box_after',
+        'pallet_before',
+        'pallet_after'
+    ],
+    'REPLACE': [
+        'part_no_before',
+        'part_no_after',
+        'part_name_before',
+        'part_name_after',
+        'configuration',
+        'workshop_before',
+        'workshop_after',
+        'workcenter_no_before',
+        'workcenter_no_after',
+        'workcenter_name_before',
+        'workcenter_name_after',
+        'supplier_name_before',
+        'supplier_name_after',
+        'localization_before',
+        'localization_after',
+        'box_before',
+        'box_after',
+        'pallet_before',
+        'pallet_after'
+    ]
 }
