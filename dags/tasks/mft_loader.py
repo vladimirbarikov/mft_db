@@ -145,7 +145,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from config import get_logger
 from config.columns_config import MFT_TABLE_REQUIREMENTS
 from dags.tasks.connector import initialize_database
-from dags.tasks.mft_mapper import create_mft_mapper
+from dags.tasks.mft_mapper import MFTObjectMapper, create_mft_mapper
 from database.database import (
     # Entity tables
     SupplierData, PartData, BoxData, PalletData,
@@ -397,7 +397,7 @@ def _process_dependent_entity_with_mapper(
     engine: Engine,
     df: pl.DataFrame,
     table_name: str,
-    mapper,
+    mapper: MFTObjectMapper,
     unique_cols,
     return_df: bool = False
 ) -> Optional[pl.DataFrame] | int:
@@ -812,7 +812,7 @@ def load_core_entity_tables(
 
 def _prepare_junction_dataframes(
     junction_dict: dict[str, pl.DataFrame],
-    mapper
+    mapper: MFTObjectMapper
 ) -> dict[str, dict[str, Any]]:
     """
     Prepare junction table DataFrames by replacing text values with foreign key IDs.
