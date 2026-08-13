@@ -144,8 +144,8 @@ moscow_tz = pytz.timezone('Europe/Moscow')
 # DAG configuration
 @dag(
     dag_id="mft_etl_pipeline",
-    schedule=None,  # Изменено с schedule_interval на schedule
-    start_date=datetime(2026, 2, 7, tzinfo=moscow_tz),  # Упрощенный способ указания timezone
+    schedule=None,
+    start_date=datetime(2026, 2, 7, tzinfo=moscow_tz),
     end_date=None,
     catchup=False,
     max_active_runs=1,
@@ -191,8 +191,6 @@ def mft_etl_pipeline():
         - Max active runs: 1
         - Retries: 3 with 5-minute delays
     """
-
-
     # ========== EXTRACT PHASE ==========
     # Extract data for main Dataframe
     @task(task_id="extract_main_data")
