@@ -14,6 +14,7 @@ Key Features:
     - Automatic handling of NULL values, case variations, and whitespace
     - Comprehensive logging with invalid value sampling
     - Support for all ENUM types in the database schema
+    - Support for BP pipeline columns (before/after variants, breakpoint status)
 
 Architecture:
     The module follows a simple functional design pattern:
@@ -24,14 +25,33 @@ Architecture:
 
 Configuration Source:
     This module imports ENUM types directly from database.py:
-        - LOCALIZATION_ENUM: Supplier localization status
+        - LOCALIZATION_ENUM: Supplier localization status (yes/no/no data)
         - PACKAGING_TYPE_ENUM: Returnable/non-returnable packaging
-        - MODEL_CODES_ENUM: Vehicle platform codes
-        - MODEL_NAMES_ENUM: Vehicle marketing names
-        - WORKSHOP_CODES_ENUM: Production workshop codes
-        - WORKSHOP_NAMES_ENUM: Full workshop names
-        - CONFIGURATION_ENUM: Vehicle trim levels
-        - BREAKPOINT_ACTION_ENUM: Engineering change types
+        - MODEL_CODES_ENUM: Vehicle platform codes (a01, a08, b02, etc.)
+        - MODEL_NAMES_ENUM: Vehicle marketing names (jolion, h3, f7, etc.)
+        - WORKSHOP_CODES_ENUM: Production workshop codes (as, comp, paint, etc.)
+        - WORKSHOP_NAMES_ENUM: Full workshop names (assembly, component, etc.)
+        - CONFIGURATION_ENUM: Vehicle trim levels (comfort, elite, tech-plus, premium)
+        - BREAKPOINT_STATUS_ENUM: Engineering change status types (approved, published, closed)
+
+Column Mapping Support:
+    The module supports both MFT and BP pipeline columns:
+    
+    MFT Pipeline:
+        - LOCALIZATION, localization
+        - BOX_TYPE, box_type, PALLET_TYPE, pallet_type
+        - MODEL_CODE, model_code, MODEL_NAME, model_name
+        - WORKSHOP_CODE, workshop_code, WORKSHOP_NAME, workshop_name
+        - CONFIGURATION, configuration
+    
+    BP Pipeline:
+        - localization_before, LOCALIZATION_BEFORE
+        - localization_after, LOCALIZATION_AFTER
+        - box_before, BOX_BEFORE, box_after, BOX_AFTER
+        - pallet_before, PALLET_BEFORE, pallet_after, PALLET_AFTER
+        - workshop_before, WORKSHOP_BEFORE, workshop_after, WORKSHOP_AFTER
+        - bom_product, BOM_PRODUCT
+        - breakpoint_status, STATUS, status
 
 Dependencies:
     - Polars for DataFrame operations
@@ -41,36 +61,45 @@ Dependencies:
 Usage Example:
     from dags.tasks.enum_validator import enum_validate
 
-    In transformation task
-        df = pl.DataFrame({"LOCALIZATION": ["yes", "no", "invalid", "YES", None]})
-        validated_df = enum_validate(df, "LOCALIZATION")
+    # MFT Pipeline usage
+    df = pl.DataFrame({"LOCALIZATION": ["yes", "no", "invalid", "YES", None]})
+    validated_df = enum_validate(df, "LOCALIZATION")
+    # Result: ["yes", "no", "no data", "yes", "no data"]
 
-    Result: invalid values replaced with 'no data'
-        ["yes", "no", "no data", "yes", "no data"]
+    # BP Pipeline usage
+    df = pl.DataFrame({
+        "breakpoint_status": ["approved", "published", "invalid", "closed"],
+        "workshop_before": ["as", "comp", "invalid", "paint"]
+    })
+    validated_df = enum_validate(df, "breakpoint_status")
+    validated_df = enum_validate(df, "workshop_before")
+    # Invalid values replaced with 'no data'
 
 Integration Notes:
-- Must be used AFTER convert_to_string() and basic_clean_text()
-- Can be used in both MFT and BP pipeline transformation phases
-- No database connection required (uses imported ENUM definitions only)
+    - Must be used AFTER convert_to_string() and basic_clean_text()
+    - Can be used in both MFT and BP pipeline transformation phases
+    - No database connection required (uses imported ENUM definitions only)
+    - Column names are case-sensitive, both UPPERCASE and lowercase supported
+    - BP pipeline columns with _before/_after suffixes are fully supported
 
 Performance Considerations:
-- Vectorized operations via Polars (no row-by-row loops)
-- Single pass per column with minimal temporary columns
-- Memory efficient with in-place updates where possible
-- Scales linearly to millions of rows
+    - Vectorized operations via Polars (no row-by-row loops)
+    - Single pass per column with minimal temporary columns
+    - Memory efficient with in-place updates where possible
+    - Scales linearly to millions of rows
 
 Error Handling:
-- Missing columns: Logs warning and returns DataFrame unchanged
-- No ENUM mapping: Logs debug and skips validation
-- Empty allowed values: Logs warning and skips validation
-- NULL values: Gracefully converted to empty strings
-- Invalid values: Replaced with 'no data', logged with samples
+    - Missing columns: Logs warning and returns DataFrame unchanged
+    - No ENUM mapping: Logs debug and skips validation
+    - Empty allowed values: Logs warning and skips validation
+    - NULL values: Gracefully converted to empty strings
+    - Invalid values: Replaced with 'no data', logged with samples
 
 Version: 1.0.0
 Compatibility: Python 3.14.4+, Polars 1.36.1
 Maintainer: PLD Engineering Center
 Created: 2026-03-18
-Last Modified: 2026-03-18
+Last Modified: 2026-08-13
 License: MIT
 Status: Production
 """
@@ -99,7 +128,7 @@ from database.database import (
     WORKSHOP_CODES_ENUM,
     WORKSHOP_NAMES_ENUM,
     CONFIGURATION_ENUM,
-    BREAKPOINT_ACTION_ENUM
+    BREAKPOINT_STATUS_ENUM
 )
 
 # Logger setup
@@ -112,18 +141,30 @@ _COLUMN_TO_ENUM = {
     # LOCALIZATION_ENUM mappings
     'LOCALIZATION': LOCALIZATION_ENUM,
     'localization': LOCALIZATION_ENUM,
-    'LOCALIZATION_BEFORE_CHANGE': LOCALIZATION_ENUM,
-    'localization_before_change': LOCALIZATION_ENUM,
+    'localization_before': LOCALIZATION_ENUM,
+    'LOCALIZATION_BEFORE': LOCALIZATION_ENUM,
+    'localization_after': LOCALIZATION_ENUM,
+    'LOCALIZATION_AFTER': LOCALIZATION_ENUM,
 
     # PACKAGING_TYPE_ENUM mappings
     'BOX_TYPE': PACKAGING_TYPE_ENUM,
     'box_type': PACKAGING_TYPE_ENUM,
     'PALLET_TYPE': PACKAGING_TYPE_ENUM,
     'pallet_type': PACKAGING_TYPE_ENUM,
+    'box_before': PACKAGING_TYPE_ENUM,
+    'BOX_BEFORE': PACKAGING_TYPE_ENUM,
+    'box_after': PACKAGING_TYPE_ENUM,
+    'BOX_AFTER': PACKAGING_TYPE_ENUM,
+    'pallet_before': PACKAGING_TYPE_ENUM,
+    'PALLET_BEFORE': PACKAGING_TYPE_ENUM,
+    'pallet_after': PACKAGING_TYPE_ENUM,
+    'PALLET_AFTER': PACKAGING_TYPE_ENUM,
 
     # MODEL_CODES_ENUM mappings
     'MODEL_CODE': MODEL_CODES_ENUM,
     'model_code': MODEL_CODES_ENUM,
+    'bom_product': MODEL_CODES_ENUM,
+    'BOM_PRODUCT': MODEL_CODES_ENUM,
 
     # MODEL_NAMES_ENUM mappings
     'MODEL_NAME': MODEL_NAMES_ENUM,
@@ -132,6 +173,10 @@ _COLUMN_TO_ENUM = {
     # WORKSHOP_CODES_ENUM mappings
     'WORKSHOP_CODE': WORKSHOP_CODES_ENUM,
     'workshop_code': WORKSHOP_CODES_ENUM,
+    'workshop_before': WORKSHOP_CODES_ENUM,
+    'WORKSHOP_BEFORE': WORKSHOP_CODES_ENUM,
+    'workshop_after': WORKSHOP_CODES_ENUM,
+    'WORKSHOP_AFTER': WORKSHOP_CODES_ENUM,
 
     # WORKSHOP_NAMES_ENUM mappings
     'WORKSHOP_NAME': WORKSHOP_NAMES_ENUM,
@@ -141,9 +186,10 @@ _COLUMN_TO_ENUM = {
     'CONFIGURATION': CONFIGURATION_ENUM,
     'configuration': CONFIGURATION_ENUM,
 
-    # BREAKPOINT_ACTION_ENUM mappings
-    'ACTION': BREAKPOINT_ACTION_ENUM,
-    'action': BREAKPOINT_ACTION_ENUM,
+    # BREAKPOINT_STATUS_ENUM mappings
+    'breakpoint_status': BREAKPOINT_STATUS_ENUM,
+    'STATUS': BREAKPOINT_STATUS_ENUM,
+    'status': BREAKPOINT_STATUS_ENUM,
 }
 
 
