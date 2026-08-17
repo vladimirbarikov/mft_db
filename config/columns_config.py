@@ -469,28 +469,6 @@ BP_JUNCTION_REQUIRED = {
     ]
 }
 
-# Optional columns for breakpoint junction table (in lowercase for mapper)
-BP_JUNCTION_OPTIONAL = {
-    'part_to_breakpoint': [
-        'supplier_name_before',
-        'supplier_name_after',
-        'workcenter_no_before',
-        'workcenter_no_after',
-        'workcenter_name_before',
-        'workcenter_name_after',
-        'workshop_before',
-        'workshop_after',
-        'localization_before',
-        'localization_after',
-        'box_before',
-        'box_after',
-        'pallet_before',
-        'pallet_after',
-        'disposal',
-        'interchangeable'
-    ]
-}
-
 # ========== BP TABLE REQUIREMENTS ==========
 # Expected columns for each core entity table type (in lowercase for loader)
 BP_TABLE_REQUIREMENTS = {

@@ -20,7 +20,6 @@ Key Features:
 Configuration Source:
     This module uses constants from columns_config.py:
         - BP_JUNCTION_REQUIRED: Required columns for BP junction table
-        - BP_JUNCTION_OPTIONAL: Optional columns for BP junction table
 
 Architecture:
     The module follows a caching-first approach:
@@ -197,10 +196,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # Local imports
 from config import get_logger
-from config.columns_config import (
-    BP_JUNCTION_REQUIRED,
-    BP_JUNCTION_OPTIONAL
-)
+from config.columns_config import BP_JUNCTION_REQUIRED
 from dags.tasks.connector import initialize_database
 from database.database import (
     SupplierData, PartData, BoxData, PalletData,
@@ -215,10 +211,22 @@ logger = get_logger(__name__)
 class BPObjectMapper:
     """
     Main mapper class for converting BP external identifiers to database primary keys.
-    
+
     Provides unified interface for mapping text values and composite keys to
     database IDs with intelligent caching.
-    
+
+    CRITICAL: This mapper ONLY processes junction table fields:
+        - part_no_before → old_part_id
+        - part_no_after → new_part_id  
+        - bp_no → breakpoint_id
+        - bom_product → model_id
+
+    All other part attributes (supplier, packaging, line, workshop, localization)
+    are processed separately by PART_BEFORE_COLS and PART_AFTER_COLS.
+
+    Provides unified interface for mapping text values and composite keys to
+    database IDs with intelligent caching.
+
     Examples:
         >>> mapper = create_bp_mapper()
         >>> breakpoint_id = mapper.get_breakpoint_id('BP-2026-001')
@@ -844,7 +852,10 @@ class BPObjectMapper:
         junction_type: str = 'part_to_breakpoint'
     ) -> list[dict[str, Any]]:
         """
-        Map breakpoint junction records with composite packaging support.
+        Map breakpoint junction records to database IDs.
+    
+        NOTE: This only maps the junction table fields (part_no_before, part_no_after,
+        bp_no, bom_product). All other fields are handled by the loader.
         
         Args:
             bp_df: Polars DataFrame with breakpoint junction data
@@ -852,7 +863,8 @@ class BPObjectMapper:
                 
         Returns:
             List of dicts with database IDs ready for insertion
-            
+            Each dict contains: breakpoint_id, model_id, old_part_id, new_part_id
+        
         Examples:
             >>> records = mapper.map_breakpoint_records(df)
         """
@@ -917,246 +929,55 @@ class BPObjectMapper:
         Map a single breakpoint junction record.
         
         Args:
-            record: Dict with part_no_before, part_no_after, bp_no, bom_product,
-                and optional fields (supplier_name_before, supplier_name_after, etc.)
+            record: Dict with part_no_before, part_no_after, bp_no, bom_product only
         
         Returns:
-            Dict with breakpoint_id, old_part_id, new_part_id, model_id,
-            and optional IDs (supplier_id_before, supplier_id_after, etc.)
-            or None if mapping fails
+            Dict with breakpoint_id, model_id, old_part_id, new_part_id only
         """
         try:
-            # Check for all required columns
+            # Проверяем только обязательные колонки
             required_cols = BP_JUNCTION_REQUIRED['part_to_breakpoint']
             for col in required_cols:
                 if col not in record:
-                    logger.debug(
-                        "Missing required column '%s' in breakpoint record",
-                        col
-                    )
+                    logger.debug("Missing required column '%s' in breakpoint record", col)
                     return None
 
-            # Get breakpoint_id from bp_no
+            # Получаем breakpoint_id
             breakpoint_id = self.get_breakpoint_id(record['bp_no'])
             if not breakpoint_id:
-                logger.warning(
-                    "No breakpoint_id found for bp_no: %s",
-                    record['bp_no']
-                )
+                logger.warning("No breakpoint_id found for bp_no: %s", record['bp_no'])
                 return None
 
-            # Get model_id from bom_product (model_code)
+            # Получаем model_id
             model_id = self.get_model_id_by_code(record['bom_product'])
             if not model_id:
-                logger.warning(
-                    "No model_id found for bom_product: %s",
-                    record['bom_product']
-                )
+                logger.warning("No model_id found for bom_product: %s", record['bom_product'])
                 return None
 
-            # Get old_part_id from part_no_before (if present)
+            # Получаем old_part_id
             old_part_id = None
             if record.get('part_no_before'):
                 old_part_id = self.get_part_id_by_number(record['part_no_before'])
                 if not old_part_id:
-                    logger.warning(
-                        "No part_id found for part_no_before: %s",
-                        record['part_no_before']
-                    )
-                    # Don't return None - old_part can be NULL for ADD
+                    logger.warning("No part_id found for part_no_before: %s", record['part_no_before'])
 
-            # Get new_part_id from part_no_after (if present)
+            # Получаем new_part_id
             new_part_id = None
             if record.get('part_no_after'):
                 new_part_id = self.get_part_id_by_number(record['part_no_after'])
                 if not new_part_id:
-                    logger.warning(
-                        "No part_id found for part_no_after: %s",
-                        record['part_no_after']
-                    )
-                    # Don't return None - new_part can be NULL for DELETE
+                    logger.warning("No part_id found for part_no_after: %s", record['part_no_after'])
 
-            # Create result with required fields
-            result = {
+            # Возвращаем только 4 поля
+            return {
                 'breakpoint_id': breakpoint_id,
                 'model_id': model_id,
                 'old_part_id': old_part_id,
                 'new_part_id': new_part_id
             }
 
-            # Map optional fields using configuration
-            optional_cols = BP_JUNCTION_OPTIONAL['part_to_breakpoint']
-
-            # Define mapping rules for optional fields
-            # Format: (source_field, target_field, mapping_function)
-            optional_mappings = [
-                # Supplier mappings
-                ('supplier_name_before', 'supplier_id_before', self.get_supplier_id_by_name),
-                ('supplier_name_after', 'supplier_id_after', self.get_supplier_id_by_name),
-
-                # Line mappings (workcenter)
-                ('workcenter_no_before', 'line_id_before', self.get_line_id_by_code),
-                ('workcenter_no_after', 'line_id_after', self.get_line_id_by_code),
-
-                # Workcenter names (pass through)
-                ('workcenter_name_before', 'workcenter_name_before', None),
-                ('workcenter_name_after', 'workcenter_name_after', None),
-
-                # Workshop mappings
-                ('workshop_before', 'workshop_id_before', self.get_workshop_id_by_code),
-                ('workshop_after', 'workshop_id_after', self.get_workshop_id_by_code),
-
-                # Localization (store as-is for validation)
-                ('localization_before', 'localization_before', None),
-                ('localization_after', 'localization_after', None),
-
-                # Box mappings (composite keys)
-                ('box_before', 'box_id_before', self._get_box_id_from_record),
-                ('box_after', 'box_id_after', self._get_box_id_from_record),
-
-                # Pallet mappings (composite keys)
-                ('pallet_before', 'pallet_id_before', self._get_pallet_id_from_record),
-                ('pallet_after', 'pallet_id_after', self._get_pallet_id_from_record),
-
-                # Additional pass-through fields
-                ('disposal', 'disposal', None),
-                ('interchangeable', 'interchangeable', None),
-            ]
-
-            # Process each optional mapping
-            for source_field, target_field, mapping_func in optional_mappings:
-                # Check if field exists in record and is not None/empty
-                if source_field in optional_cols and record.get(source_field):
-                    value = record[source_field]
-
-                    if mapping_func:
-                        # Apply mapping function to get ID
-                        mapped_value = mapping_func(value)
-                        if mapped_value:
-                            result[target_field] = mapped_value
-                        else:
-                            logger.debug(
-                                "No %s found for %s: %s",
-                                target_field, source_field, value
-                            )
-                    else:
-                        # Pass through value (for localization, disposal, interchangeable)
-                        result[target_field] = value
-
-            return result
-
-        except (KeyError, ValueError, TypeError) as e:
-            logger.debug("Error mapping breakpoint record: %s", e)
-            return None
-
-        except Exception as unexpected_error:
-            logger.error(
-                "Unexpected error mapping breakpoint record: %s",
-                unexpected_error
-            )
-            return None
-
-    def _get_box_id_from_record(self, box_data: Any) -> Optional[str]:
-        """
-        Extract box_id from various box data formats.
-        
-        Args:
-            box_data: Can be tuple (type, length, width, height),
-                    dict with keys, or None
-                
-        Returns:
-            box_id or None
-        """
-        if not box_data:
-            return None
-
-        try:
-            if isinstance(box_data, (tuple, list)) and len(box_data) == 4:
-                box_type, length, width, height = box_data
-                # Ensure all values are not None and have correct types
-                if all([box_type, length is not None, width is not None, height is not None]):
-                    return self.get_box_id_by_dimensions(
-                        str(box_type), 
-                        int(length), 
-                        int(width), 
-                        int(height)
-                    )
-
-            elif isinstance(box_data, dict):
-                box_type = box_data.get('type')
-                length = box_data.get('length')
-                width = box_data.get('width')
-                height = box_data.get('height')
-                
-                # Explicitly check each value is not None
-                if (box_type is not None and length is not None and 
-                    width is not None and height is not None):
-                    return self.get_box_id_by_dimensions(
-                        str(box_type), 
-                        int(length), 
-                        int(width), 
-                        int(height)
-                    )
-
-            else:
-                logger.debug("Unsupported box_data format: %s", type(box_data))
-
-            return None
-
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.debug("Error extracting box_id from data: %s", e)
-            return None
-
-
-    def _get_pallet_id_from_record(self, pallet_data: Any) -> Optional[str]:
-        """
-        Extract pallet_id from various pallet data formats.
-        
-        Args:
-            pallet_data: Can be tuple (type, length, width, height),
-                        dict with keys, or None
-                
-        Returns:
-            pallet_id or None
-        """
-        if not pallet_data:
-            return None
-
-        try:
-            if isinstance(pallet_data, (tuple, list)) and len(pallet_data) == 4:
-                pallet_type, length, width, height = pallet_data
-                # Ensure all values are not None and have correct types
-                if all([pallet_type, length is not None, width is not None, height is not None]):
-                    return self.get_pallet_id_by_dimensions(
-                        str(pallet_type), 
-                        int(length), 
-                        int(width), 
-                        int(height)
-                    )
-
-            elif isinstance(pallet_data, dict):
-                pallet_type = pallet_data.get('type')
-                length = pallet_data.get('length')
-                width = pallet_data.get('width')
-                height = pallet_data.get('height')
-                
-                # Explicitly check each value is not None
-                if (pallet_type is not None and length is not None and 
-                    width is not None and height is not None):
-                    return self.get_pallet_id_by_dimensions(
-                        str(pallet_type), 
-                        int(length), 
-                        int(width), 
-                        int(height)
-                    )
-
-            else:
-                logger.debug("Unsupported pallet_data format: %s", type(pallet_data))
-
-            return None
-
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.debug("Error extracting pallet_id from data: %s", e)
+        except Exception as e:
+            logger.error("Error mapping breakpoint record: %s", e)
             return None
 
     # ========== CACHE MANAGEMENT ==========
