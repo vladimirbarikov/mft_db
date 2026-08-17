@@ -214,7 +214,7 @@ CONFIGURATION_ENUM = SqlEnum(
 
 BREAKPOINT_STATUS_ENUM = SqlEnum(
     'approved', 'published', 'closed', 'no data',
-    name='breakpoint_action'
+    name='breakpoint_status'
 )
 
 # ========== CORE ENTITY TABLES ==========
@@ -298,7 +298,7 @@ class PartData(Base):
         Index('idx_part_name', 'part_name'),
         Index('idx_part_weight', 'part_weight_kg'),
         Index('idx_part_supplier_id', 'supplier_id'),
-        Index('idx_part_deactivated', 'deactivated_at'),
+        Index('idx_part_deactivated', 'deactivated_by_breakpoint_id'),
         {
             'comment': """
             PURPOSE: Automotive component master data with versioning support
@@ -310,8 +310,8 @@ class PartData(Base):
             - part_weight_kg: Weight in kilograms (precision 0.01)
             - supplier_id: References supplier_data
             - is_active: Computed property - True if part has at least one active model association
-            - deactivated_at: When part was deactivated (if is_active=False)
             - deactivated_by_breakpoint_id: Which breakpoint caused deactivation
+              (deactivated_at is computed from breakpoint_date)
             - original_part_id: First version of this part (for grouping versions)
             - version_number: Version number (1, 2, 3, ...)
             - created_at: When this version was created
@@ -326,6 +326,8 @@ class PartData(Base):
             - Each part has exactly one supplier
             - Parts are never physically deleted, only deactivated (soft delete)
             - Historical data in part_to_breakpoint remains valid
+            - deactivated_at is ALWAYS derived from breakpoint_date
+            - Single source of truth: breakpoint_data.breakpoint_date
             """
         },
     )
@@ -356,14 +358,11 @@ class PartData(Base):
         nullable=False
     )
     # Versioning fields
-    deactivated_at = Column(
-        DateTime,
-        nullable=True
-    )
     deactivated_by_breakpoint_id = Column(
         String(40),
         ForeignKey('breakpoint_data.breakpoint_id', ondelete='SET NULL'),
-        nullable=True
+        nullable=True,
+        comment="References the breakpoint that caused deactivation. Deactivation date is derived from breakpoint_date."
     )
     original_part_id = Column(
         String(40),
@@ -427,7 +426,8 @@ class PartData(Base):
     deactivation_breakpoint = relationship(
         'BreakpointData',
         foreign_keys=[deactivated_by_breakpoint_id],
-        lazy='joined'
+        lazy='joined',
+        back_populates='deactivated_parts'
     )
     original_part = relationship(
         'PartData',
@@ -435,11 +435,51 @@ class PartData(Base):
         foreign_keys=[original_part_id],
         lazy='joined'
     )
-    # Property for checking activity
+    # Properties
+    @property
+    def deactivated_at(self):
+        """
+        Part deactivation date.
+        
+        ALWAYS taken from breakpoint_data.breakpoint_date,
+        which guarantees a single source of truth.
+        
+        Returns:
+            datetime or None: The effective date of the breakpoint
+                             that deactivated the part
+        """
+        if self.deactivated_by_breakpoint_id and self.deactivation_breakpoint:
+            return self.deactivation_breakpoint.breakpoint_date
+        return None
+
     @property
     def is_active(self):
-        """The part is active if there is at least one active connection to the model"""
+        """
+        Part is active if there is at least one active connection to a model.
+        
+        Note: A part can be active for some models and inactive for others.
+        """
         return any(model.is_active for model in self.models)
+
+    @property
+    def deactivated_by(self):
+        """
+        Returns the BreakpointData object that caused the deactivation.
+        
+        Returns:
+            BreakpointData or None: The breakpoint that caused deactivation
+        """
+        return self.deactivation_breakpoint
+
+    @property
+    def is_fully_deactivated(self):
+        """
+        Checks if the part is fully deactivated (for all models).
+        
+        Returns:
+            bool: True if there are no active connections to models
+        """
+        return not self.is_active
 
     @property
     def active_models(self):
@@ -450,6 +490,26 @@ class PartData(Base):
     def inactive_models(self):
         """List of models for which the part is inactive"""
         return [model for model in self.models if not model.is_active]
+
+    @property
+    def deactivation_info(self):
+        """
+        Complete deactivation information.
+        
+        Returns:
+            dict: Contains breakpoint, date and reason for deactivation
+        """
+        if not self.deactivated_by_breakpoint_id:
+            return None
+
+        return {
+            'breakpoint_id': self.deactivated_by_breakpoint_id,
+            'breakpoint_number': self.deactivation_breakpoint.breakpoint_number if self.deactivation_breakpoint else None,
+            'deactivated_at': self.deactivated_at,
+            'breakpoint_status': self.deactivation_breakpoint.breakpoint_status if self.deactivation_breakpoint else None,
+            'description': self.deactivation_breakpoint.description if self.deactivation_breakpoint else None,
+            'solution': self.deactivation_breakpoint.solution if self.deactivation_breakpoint else None,
+        }
 
 
 class BoxData(Base):
@@ -968,7 +1028,8 @@ class BreakpointData(Base):
         Index('idx_breakpoint_number', 'breakpoint_number'),
         Index('idx_breakpoint_date', 'breakpoint_date'),
         Index('idx_input_date', 'input_date'),
-        Index('idx_breakpoint_batch', 'batch'),
+        Index('idx_breakpoint_batch_plan', 'batch_plan'),
+        Index('idx_breakpoint_batch_fact', 'batch_fact'),
         {
             'comment': """
             PURPOSE: Technical change management (breakpoints)
@@ -986,6 +1047,8 @@ class BreakpointData(Base):
             ---
             RELATIONSHIPS:
             - Links to part versions via PartToBreakpoint
+            - Links to deactivated parts via PartData.deactivated_by_breakpoint_id
+            - Links to deactivated part-model associations via PartToModel.deactivated_by_breakpoint_id
             ---
             BUSINESS RULES:
             - Tracks part changes before/after engineering changes
@@ -1043,6 +1106,12 @@ class BreakpointData(Base):
     deactivated_parts = relationship(
         'PartData',
         foreign_keys='PartData.deactivated_by_breakpoint_id',
+        back_populates='deactivation_breakpoint',
+        lazy='selectin'
+    )
+    deactivated_part_models = relationship(
+        'PartToModel',
+        foreign_keys='PartToModel.deactivated_by_breakpoint_id',
         back_populates='deactivation_breakpoint',
         lazy='select'
     )
@@ -1226,11 +1295,6 @@ class PartToModel(Base):
         server_default=text('true'),
         comment="Whether this part is active for this specific model"
     )
-    deactivated_at = Column(
-        DateTime,
-        nullable=True,
-        comment="When this association was deactivated"
-    )
     deactivated_by_breakpoint_id = Column(
         String(40),
         ForeignKey('breakpoint_data.breakpoint_id', ondelete='SET NULL'),
@@ -1253,8 +1317,16 @@ class PartToModel(Base):
     deactivation_breakpoint = relationship(
         'BreakpointData',
         foreign_keys=[deactivated_by_breakpoint_id],
-        lazy='joined'
+        lazy='joined',
+        back_populates='deactivated_part_models'
     )
+    # Properties
+    @property
+    def deactivated_at(self):
+        """Deactivation date derived from breakpoint_date"""
+        if self.deactivated_by_breakpoint_id and self.deactivation_breakpoint:
+            return self.deactivation_breakpoint.breakpoint_date
+        return None
 
 
 class PartToLine(Base):
