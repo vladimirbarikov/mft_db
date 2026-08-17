@@ -426,6 +426,7 @@ PART_BEFORE_COLS = [
     'QUANTITY_PER_BOX_BEFORE',
     'BOX_BEFORE',
     'PALLET_BEFORE',
+    'BOX_PER_PALLET_BEFORE',
     'DISPOSAL',
     'SUPPLIER_NAME_BEFORE',
     'LOCALIZATION_BEFORE',
@@ -444,6 +445,7 @@ PART_AFTER_COLS = [
     'QUANTITY_PER_BOX_AFTER',
     'BOX_AFTER',
     'PALLET_AFTER',
+    'BOX_PER_PALLET_AFTER',
     'INTERCHANGEABLE',
     'SUPPLIER_NAME_AFTER',
     'LOCALIZATION_AFTER',
@@ -493,6 +495,7 @@ BP_TABLE_REQUIREMENTS = {
         'quantity_per_box_before',
         'box_before',
         'pallet_before',
+        'box_per_pallet_before',
         'disposal',
         'supplier_name_before',
         'localization_before'
@@ -509,6 +512,7 @@ BP_TABLE_REQUIREMENTS = {
         'quantity_per_box_after',
         'box_after',
         'pallet_after',
+        'box_per_pallet_after',
         'interchangeable',
         'supplier_name_after',
         'localization_after'
@@ -538,7 +542,8 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
         'supplier_name_after',
         'localization_after',
         'box_after',
-        'pallet_after'
+        'pallet_after',
+        'box_per_pallet_after',
     ],
     'DELETE': [
         'part_no_before',
@@ -551,7 +556,8 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
         'supplier_name_before',
         'localization_before',
         'box_before',
-        'pallet_before'
+        'pallet_before',
+        'box_per_pallet_before',
     ],
     'UPDATE': [
         'part_no_before',
@@ -573,7 +579,9 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
         'box_before',
         'box_after',
         'pallet_before',
-        'pallet_after'
+        'pallet_after',
+        'box_per_pallet_before',
+        'box_per_pallet_after',
     ],
     'REPLACE': [
         'part_no_before',
@@ -595,6 +603,8 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
         'box_before',
         'box_after',
         'pallet_before',
-        'pallet_after'
+        'pallet_after',
+        'box_per_pallet_before',
+        'box_per_pallet_after',
     ]
 }
