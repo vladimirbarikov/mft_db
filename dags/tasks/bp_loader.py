@@ -204,7 +204,7 @@ logger = get_logger(__name__)
 
 
 # ============================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С БД
+# DATABASE HELPER FUNCTIONS
 # ============================================================================
 
 def _bulk_insert_with_returning(
@@ -215,7 +215,17 @@ def _bulk_insert_with_returning(
     conflict_cols: List[str]
 ) -> List[Any]:
     """
-    Выполняет массовый INSERT с RETURNING.
+    Execute bulk INSERT with RETURNING.
+
+    Args:
+        connection: Database connection
+        model_class: SQLAlchemy model class
+        values_list: List of dicts with values to insert
+        returning_col: Column to return after insert
+        conflict_cols: Columns to use for ON CONFLICT DO NOTHING
+
+    Returns:
+        List of returned values (IDs)
     """
     try:
         stmt = pg_insert(model_class.__table__).values(values_list).returning(returning_col)
@@ -239,7 +249,17 @@ def _insert_with_returning(
     conflict_cols: List[str]
 ) -> Optional[str]:
     """
-    Выполняет INSERT с RETURNING и обработкой конфликтов.
+    Execute INSERT with RETURNING and conflict handling.
+
+    Args:
+        connection: Database connection
+        model_class: SQLAlchemy model class
+        values: Dict with values to insert
+        returning_col: Column to return after insert
+        conflict_cols: Columns to use for ON CONFLICT DO NOTHING
+
+    Returns:
+        Returned value (ID) or None
     """
     try:
         stmt = pg_insert(model_class.__table__).values([values]).returning(returning_col)
@@ -262,7 +282,16 @@ def _insert_without_returning(
     conflict_cols: List[str]
 ) -> bool:
     """
-    Выполняет INSERT без RETURNING (для junction таблиц).
+    Execute INSERT without RETURNING (for junction tables).
+
+    Args:
+        connection: Database connection
+        model_class: SQLAlchemy model class
+        values: Dict with values to insert
+        conflict_cols: Columns to use for ON CONFLICT DO NOTHING
+
+    Returns:
+        True if successful, False otherwise
     """
     try:
         stmt = pg_insert(model_class.__table__).values([values])
@@ -283,14 +312,14 @@ def _validate_breakpoint_columns(
     table_name: str
 ) -> bool:
     """
-    Проверяет наличие обязательных колонок в DataFrame для breakpoint_data.
+    Validate required columns in DataFrame for breakpoint_data.
 
     Args:
-        df: Polars DataFrame для проверки
-        table_name: Имя таблицы ('breakpoint_data')
+        df: Polars DataFrame to validate
+        table_name: Table name ('breakpoint_data')
 
     Returns:
-        True если все обязательные колонки присутствуют, иначе False
+        True if all required columns present, False otherwise
     """
     if table_name in BP_TABLE_REQUIREMENTS:
         required_cols = BP_TABLE_REQUIREMENTS[table_name]
@@ -311,14 +340,14 @@ def _validate_action_fields(
     action: str
 ) -> bool:
     """
-    Проверяет наличие обязательных полей для данного типа действия.
+    Validate required fields for the given action type.
 
     Args:
-        record: Запись с данными
-        action: Тип действия ('ADD', 'DELETE', 'UPDATE', 'REPLACE')
+        record: Record with data
+        action: Action type ('ADD', 'DELETE', 'UPDATE', 'REPLACE')
 
     Returns:
-        True если все обязательные поля присутствуют, иначе False
+        True if all required fields present, False otherwise
     """
     if action not in BP_REQUIRED_FIELDS_BY_ACTION:
         logger.error("Unknown action type: %s", action)
@@ -336,39 +365,46 @@ def _validate_action_fields(
 
     return True
 
+
 def _parse_composite_key(composite_data: Any) -> Optional[Tuple[str, int, int, int]]:
     """
-    Парсит составной ключ для box или pallet из различных форматов.
+    Parse composite key for box or pallet from various formats.
+
+    Args:
+        composite_data: Tuple, dict, or string representing composite key
+
+    Returns:
+        Parsed tuple (type, length, width, height) or None
     """
     if not composite_data:
         return None
 
     try:
-        # Если это tuple или list
+        # If it's a tuple or list
         if isinstance(composite_data, (tuple, list)) and len(composite_data) == 4:
             p_type, l, w, h = composite_data
-            # Прямая проверка каждого элемента для тайп-чекера
+            # Direct check of each element for type checker
             if p_type is not None and l is not None and w is not None and h is not None:
                 return str(p_type), int(l), int(w), int(h)
 
             logger.debug("Composite key contains None values: %s", composite_data)
             return None
 
-        # Если это dict
+        # If it's a dict
         if isinstance(composite_data, dict):
             pack_type = composite_data.get('type')
             length = composite_data.get('length')
             width = composite_data.get('width')
             height = composite_data.get('height')
 
-            # Явное сужение типов без использования all()
+            # Explicit type narrowing without using all()
             if pack_type is not None and length is not None and width is not None and height is not None:
                 return str(pack_type), int(length), int(width), int(height)
 
             logger.debug("Composite dict contains None values: %s", composite_data)
             return None
 
-        # Если это строка в формате "type length-width-height"
+        # If it's a string in format "type length-width-height"
         if isinstance(composite_data, str):
             parts = composite_data.split()
             if len(parts) == 2:
@@ -386,22 +422,22 @@ def _parse_composite_key(composite_data: Any) -> Optional[Tuple[str, int, int, i
 
 
 # ============================================================================
-# ENTITY SERVICE - централизованный сервис для работы с сущностями
+# ENTITY SERVICE - centralized service for entity operations
 # ============================================================================
 
 class EntityService:
     """
-    Сервис для создания/получения сущностей в рамках одной транзакции.
+    Service for creating/retrieving entities within a single transaction.
 
-    Использует BPObjectMapper ТОЛЬКО для чтения (ID-резолвинг).
-    Создание и изменение сущностей - ответственность этого сервиса.
+    Uses BPObjectMapper ONLY for READ operations (ID resolution).
+    Entity creation and modification are the responsibility of this service.
     """
 
     def __init__(self, connection, mapper: BPObjectMapper):
         self.connection = connection
         self.mapper = mapper
 
-        # Кеш созданных сущностей в рамках транзакции
+        # Cache of created entities within transaction
         self._supplier_cache: Dict[str, str] = {}
         self._workshop_cache: Dict[str, str] = {}
         self._line_cache: Dict[str, str] = {}
@@ -412,28 +448,34 @@ class EntityService:
         self._model_cache: Dict[str, str] = {}
         self._configuration_cache: Dict[str, str] = {}
 
-    # ========================================================================
-    # READ METHODS (получение ID через маппер, без создания)
-    # ========================================================================
-
+    # READ METHODS (ID retrieval via mapper, no creation)
     def get_part_id(self, part_number: str) -> Optional[str]:
         """
-        Получает part_id по номеру части через маппер (READ-ONLY).
+        Get part_id by part number via mapper (READ-ONLY).
+
+        Args:
+            part_number: Part number to look up
+
+        Returns:
+            part_id or None
         """
         if not part_number:
             return None
         return self.mapper.get_part_id_by_number(part_number)
 
-    # ========================================================================
-    # ENSURE METHODS (проверка через маппер + прямой запрос при необходимости)
-    # ========================================================================
-
+    # ENSURE METHODS (check via mapper + direct query if needed)
     def ensure_model(self, model_code: str) -> Optional[str]:
         """
-        Проверяет существование модели и возвращает model_id.
-        
-        Сначала проверяет через маппер (кеш), если не найден - делает прямой запрос к БД.
-        Модели должны быть предварительно загружены через MFT pipeline.
+        Check model existence and return model_id.
+
+        First checks via mapper (cache), if not found - performs direct DB query.
+        Models must be pre-loaded via MFT pipeline.
+
+        Args:
+            model_code: Model code to look up
+
+        Returns:
+            model_id or None
         """
         if not model_code:
             return None
@@ -441,14 +483,14 @@ class EntityService:
         if model_code in self._model_cache:
             return self._model_cache[model_code]
 
-        # Сначала проверяем через маппер (кеш)
+        # First check via mapper (cache)
         model_id = self.mapper.get_model_id_by_code(model_code)
         if model_id:
             self._model_cache[model_code] = model_id
             logger.debug("Model found via mapper: %s -> %s", model_code, model_id)
             return model_id
 
-        # Если не найден в кеше маппера - делаем прямой запрос
+        # If not found in mapper cache - perform direct query
         try:
             stmt = select(ModelData.model_id).where(
                 ModelData.model_code == model_code
@@ -467,10 +509,15 @@ class EntityService:
 
     def ensure_configuration(self, configuration: str) -> Optional[str]:
         """
-        Проверяет существование конфигурации и возвращает configuration_id.
-        
-        Сначала проверяет через маппер (кеш), если не найден - делает прямой запрос к БД.
-        Конфигурации должны быть предварительно загружены через MFT pipeline.
+        Create or retrieve configuration_id.
+
+        First checks via mapper (READ-ONLY), if not found - creates new.
+
+        Args:
+            configuration: Configuration name
+
+        Returns:
+            configuration_id or None
         """
         if not configuration:
             return None
@@ -478,14 +525,14 @@ class EntityService:
         if configuration in self._configuration_cache:
             return self._configuration_cache[configuration]
 
-        # Сначала проверяем через маппер (кеш)
+        # First check via mapper (cache)
         config_id = self.mapper.get_configuration_id(configuration)
         if config_id:
             self._configuration_cache[configuration] = config_id
             logger.debug("Configuration found via mapper: %s -> %s", configuration, config_id)
             return config_id
 
-        # Если не найден в кеше маппера - делаем прямой запрос
+        # If not found in mapper cache - perform direct query
         try:
             stmt = select(ConfigurationData.configuration_id).where(
                 ConfigurationData.configuration == configuration
@@ -504,9 +551,16 @@ class EntityService:
 
     def ensure_supplier(self, name: str, localization: str = 'no data') -> Optional[str]:
         """
-        Создает или получает supplier_id.
+        Create or retrieve supplier_id.
 
-        Сначала проверяет через маппер (READ-ONLY), если не найден - создает новый.
+        First checks via mapper (READ-ONLY), if not found - creates new.
+
+        Args:
+            name: Supplier name
+            localization: Supplier localization (default: 'no data')
+
+        Returns:
+            supplier_id or None
         """
         if not name:
             return None
@@ -516,13 +570,13 @@ class EntityService:
             return self._supplier_cache[cache_key]
 
         try:
-            # Сначала проверяем через маппер (READ-ONLY)
+            # First check via mapper (READ-ONLY)
             supplier_id = self.mapper.get_supplier_id_by_name(name)
             if supplier_id:
                 self._supplier_cache[cache_key] = supplier_id
                 return supplier_id
 
-            # Если не найден - создаем нового (WRITE)
+            # If not found - create new (WRITE)
             values: Dict[str, Any] = {
                 'supplier_name': name,
                 'localization': localization
@@ -550,9 +604,15 @@ class EntityService:
 
     def ensure_workshop(self, code: str) -> Optional[str]:
         """
-        Создает или получает workshop_id.
+        Create or retrieve workshop_id.
 
-        Сначала проверяет через маппер (READ-ONLY), если не найден - создает новый.
+        First checks via mapper (READ-ONLY), if not found - creates new.
+
+        Args:
+            code: Workshop code
+
+        Returns:
+            workshop_id or None
         """
         if not code:
             return None
@@ -561,13 +621,13 @@ class EntityService:
             return self._workshop_cache[code]
 
         try:
-            # Сначала проверяем через маппер (READ-ONLY)
+            # First check via mapper (READ-ONLY)
             workshop_id = self.mapper.get_workshop_id_by_code(code)
             if workshop_id:
                 self._workshop_cache[code] = workshop_id
                 return workshop_id
 
-            # Если не найден - создаем новый (WRITE)
+            # If not found - create new (WRITE)
             values: Dict[str, Any] = {'workshop_code': code}
 
             result = _insert_with_returning(
@@ -592,9 +652,17 @@ class EntityService:
 
     def ensure_line(self, code: str, name: Optional[str], workshop_code: str) -> Optional[str]:
         """
-        Создает или получает line_id.
+        Create or retrieve line_id.
 
-        Сначала проверяет через маппер (READ-ONLY), если не найден - создает новый.
+        First checks via mapper (READ-ONLY), if not found - creates new.
+
+        Args:
+            code: Line code
+            name: Line name (optional)
+            workshop_code: Workshop code
+
+        Returns:
+            line_id or None
         """
         if not code or not workshop_code:
             return None
@@ -604,13 +672,13 @@ class EntityService:
             return self._line_cache[cache_key]
 
         try:
-            # Сначала проверяем через маппер (READ-ONLY)
+            # First check via mapper (READ-ONLY)
             line_id = self.mapper.get_line_id_by_code(code)
             if line_id:
                 self._line_cache[cache_key] = line_id
                 return line_id
 
-            # Если не найден - создаем новый (WRITE)
+            # If not found - create new (WRITE)
             workshop_id = self.ensure_workshop(workshop_code)
             if not workshop_id:
                 logger.error("Cannot create line: workshop %s not found", workshop_code)
@@ -650,9 +718,20 @@ class EntityService:
         stacking: Optional[int] = None,
     ) -> Optional[str]:
         """
-        Создает или получает box_id.
+        Create or retrieve box_id.
 
-        Сначала проверяет через маппер (READ-ONLY), если не найден - создает новый.
+        First checks via mapper (READ-ONLY), if not found - creates new.
+
+        Args:
+            box_type: Box type ('returnable' or 'non-returnable')
+            length_mm: Length in millimeters
+            width_mm: Width in millimeters
+            height_mm: Height in millimeters
+            weight_kg: Box weight in kg (optional)
+            stacking: Stacking limit (optional)
+
+        Returns:
+            box_id or None
         """
         if not box_type or not all([length_mm, width_mm, height_mm]):
             return None
@@ -662,7 +741,7 @@ class EntityService:
             return self._box_cache[cache_key]
 
         try:
-            # Сначала проверяем через маппер (READ-ONLY)
+            # First check via mapper (READ-ONLY)
             box_id = self.mapper.get_box_id_by_dimensions(
                 box_type, length_mm, width_mm, height_mm
             )
@@ -670,7 +749,7 @@ class EntityService:
                 self._box_cache[cache_key] = box_id
                 return box_id
 
-            # Если не найден - создаем новый (WRITE)
+            # If not found - create new (WRITE)
             values: Dict[str, Any] = {
                 'box_type': box_type,
                 'box_length_mm': length_mm,
@@ -714,9 +793,20 @@ class EntityService:
         stacking: Optional[int] = None,
     ) -> Optional[str]:
         """
-        Создает или получает pallet_id.
+        Create or retrieve pallet_id.
 
-        Сначала проверяет через маппер (READ-ONLY), если не найден - создает новый.
+        First checks via mapper (READ-ONLY), if not found - creates new.
+
+        Args:
+            pallet_type: Pallet type ('returnable' or 'non-returnable')
+            length_mm: Length in millimeters
+            width_mm: Width in millimeters
+            height_mm: Height in millimeters
+            weight_kg: Pallet weight in kg (optional)
+            stacking: Stacking limit (optional)
+
+        Returns:
+            pallet_id or None
         """
         if not pallet_type or not all([length_mm, width_mm, height_mm]):
             return None
@@ -726,7 +816,7 @@ class EntityService:
             return self._pallet_cache[cache_key]
 
         try:
-            # Сначала проверяем через маппер (READ-ONLY)
+            # First check via mapper (READ-ONLY)
             pallet_id = self.mapper.get_pallet_id_by_dimensions(
                 pallet_type, length_mm, width_mm, height_mm
             )
@@ -734,7 +824,7 @@ class EntityService:
                 self._pallet_cache[cache_key] = pallet_id
                 return pallet_id
 
-            # Если не найден - создаем новый (WRITE)
+            # If not found - create new (WRITE)
             values: Dict[str, Any] = {
                 'pallet_type': pallet_type,
                 'pallet_length_mm': length_mm,
@@ -779,9 +869,21 @@ class EntityService:
         solution: Optional[str] = None,
     ) -> Optional[str]:
         """
-        Создает или получает breakpoint с данными.
+        Create or retrieve breakpoint with data.
 
-        Сначала проверяет через маппер (READ-ONLY), если не найден - создает новый.
+        First checks via mapper (READ-ONLY), if not found - creates new.
+
+        Args:
+            breakpoint_number: Breakpoint number
+            status: Breakpoint status
+            change_date: Change date
+            batch_plan: Batch plan
+            batch_fact: Batch fact
+            description: Description
+            solution: Solution
+
+        Returns:
+            breakpoint_id or None
         """
         if not breakpoint_number:
             return None
@@ -790,14 +892,14 @@ class EntityService:
             return self._breakpoint_cache[breakpoint_number]
 
         try:
-            # Сначала проверяем через маппер (READ-ONLY)
+            # First check via mapper (READ-ONLY)
             breakpoint_id = self.mapper.get_breakpoint_id(breakpoint_number)
             if breakpoint_id:
                 self._breakpoint_cache[breakpoint_number] = breakpoint_id
                 logger.debug("Breakpoint already exists: %s -> %s", breakpoint_number, breakpoint_id)
                 return breakpoint_id
 
-            # Подготавливаем change_date
+            # Prepare change_date
             if change_date:
                 if isinstance(change_date, str):
                     try:
@@ -808,7 +910,7 @@ class EntityService:
             else:
                 change_date = datetime.now()
 
-            # Если не найден - создаем новый (WRITE)
+            # If not found - create new (WRITE)
             values: Dict[str, Any] = {
                 'breakpoint_number': breakpoint_number,
                 'breakpoint_status': status,
@@ -856,9 +958,17 @@ class EntityService:
         supplier_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Получает существующую часть или создает новую (версия 1).
+        Get existing part or create new one (version 1).
 
-        Сначала проверяет через маппер (READ-ONLY), если не найден - создает новый.
+        First checks via mapper (READ-ONLY), if not found - creates new.
+
+        Args:
+            part_number: Part number
+            part_name: Part name (optional)
+            supplier_id: Supplier ID (optional)
+
+        Returns:
+            Part info dict with part_id, original_part_id, version_number, is_new
         """
         if not part_number:
             return None
@@ -867,10 +977,10 @@ class EntityService:
             return self._part_cache[part_number]
 
         try:
-            # Сначала проверяем через маппер (READ-ONLY)
+            # First check via mapper (READ-ONLY)
             part_id = self.mapper.get_part_id_by_number(part_number)
             if part_id:
-                # Получаем дополнительную информацию
+                # Get additional info
                 stmt = select(
                     PartData.original_part_id,
                     PartData.version_number,
@@ -887,7 +997,7 @@ class EntityService:
                     self._part_cache[part_number] = part_info
                     return part_info
 
-            # Если не найден - создаем новый (WRITE)
+            # If not found - create new (WRITE)
             values: Dict[str, Any] = {
                 'part_number': part_number,
                 'version_number': 1,
@@ -902,7 +1012,7 @@ class EntityService:
                 PartData,
                 [values],
                 PartData.part_id,
-                []  # Нет конфликтов, т.к. мы уже проверили существование
+                []  # No conflicts, we already checked existence
             )
 
             if not results:
@@ -911,7 +1021,7 @@ class EntityService:
 
             part_id = results[0]
 
-            # Обновляем original_part_id на себя
+            # Update original_part_id to self
             update_stmt = text("""
                 UPDATE part_data
                 SET original_part_id = :part_id
@@ -941,7 +1051,18 @@ class EntityService:
         part_name: Optional[str] = None,
         supplier_id: Optional[str] = None,
     ) -> Optional[str]:
-        """Создает новую версию существующей части с блокировкой."""
+        """
+        Create a new version of an existing part with locking.
+
+        Args:
+            part_number: New part number
+            original_part_id: Original part ID
+            part_name: Part name (optional)
+            supplier_id: Supplier ID (optional)
+
+        Returns:
+            New part_id or None
+        """
         if not part_number or not original_part_id:
             return None
 
@@ -974,7 +1095,7 @@ class EntityService:
                 PartData,
                 [values],
                 PartData.part_id,
-                []  # Нет конфликтов, т.к. это новая версия
+                []  # No conflicts, this is a new version
             )
 
             if results:
@@ -991,7 +1112,7 @@ class EntityService:
             return None
 
     # ========================================================================
-    # JUNCTION TABLE METHODS (WRITE операции)
+    # JUNCTION TABLE METHODS (WRITE operations)
     # ========================================================================
 
     def activate_part_for_model(
@@ -1003,14 +1124,17 @@ class EntityService:
         breakpoint_id: str,
     ) -> bool:
         """
-        Активирует часть для модели (PartToModel).
+        Activate part for model (PartToModel).
 
         Args:
-            part_id: ID части
-            model_id: ID модели
-            configuration_id: ID конфигурации
-            part_per_vehicle: Количество на автомобиль
-            breakpoint_id: ID breakpoint, вызвавшего активацию (для логирования)
+            part_id: Part ID
+            model_id: Model ID
+            configuration_id: Configuration ID
+            part_per_vehicle: Quantity per vehicle
+            breakpoint_id: Breakpoint ID that triggered activation (for logging)
+
+        Returns:
+            True if successful, False otherwise
         """
         try:
             values: Dict[str, Any] = {
@@ -1045,12 +1169,15 @@ class EntityService:
         breakpoint_id: str,
     ) -> bool:
         """
-        Деактивирует часть для модели.
+        Deactivate part for model.
 
         Args:
-            part_id: ID части
-            model_id: ID модели
-            breakpoint_id: ID breakpoint, вызвавшего деактивацию
+            part_id: Part ID
+            model_id: Model ID
+            breakpoint_id: Breakpoint ID that triggered deactivation
+
+        Returns:
+            True if successful, False otherwise
         """
         try:
             update_stmt = text("""
@@ -1093,12 +1220,15 @@ class EntityService:
         part_per_box: Optional[int] = None,
     ) -> bool:
         """
-        Создает связь PartToBox (если не существует).
+        Create PartToBox relationship (if not exists).
 
         Args:
-            part_id: ID части
-            box_id: ID ящика
-            part_per_box: Количество деталей в ящике
+            part_id: Part ID
+            box_id: Box ID
+            part_per_box: Parts per box
+
+        Returns:
+            True if successful, False otherwise
         """
         try:
             values: Dict[str, Any] = {
@@ -1128,13 +1258,16 @@ class EntityService:
         box_per_pallet: Optional[int] = None,
     ) -> bool:
         """
-        Создает связь BoxToPallet (если не существует).
+        Create BoxToPallet relationship (if not exists).
 
         Args:
-            part_id: ID части
-            box_id: ID ящика
-            pallet_id: ID паллеты
-            box_per_pallet: Количество ящиков на паллете
+            part_id: Part ID
+            box_id: Box ID
+            pallet_id: Pallet ID
+            box_per_pallet: Boxes per pallet
+
+        Returns:
+            True if successful, False otherwise
         """
         try:
             values: Dict[str, Any] = {
@@ -1162,11 +1295,14 @@ class EntityService:
         line_id: str,
     ) -> bool:
         """
-        Создает связь PartToLine (если не существует).
+        Create PartToLine relationship (if not exists).
 
         Args:
-            part_id: ID части
-            line_id: ID линии
+            part_id: Part ID
+            line_id: Line ID
+
+        Returns:
+            True if successful, False otherwise
         """
         try:
             values: Dict[str, Any] = {
@@ -1192,7 +1328,18 @@ class EntityService:
         breakpoint_id: str,
         model_id: str,
     ) -> bool:
-        """Создает запись в part_to_breakpoint."""
+        """
+        Create record in part_to_breakpoint.
+
+        Args:
+            new_part_id: New part ID (can be None)
+            old_part_id: Old part ID (can be None)
+            breakpoint_id: Breakpoint ID
+            model_id: Model ID
+
+        Returns:
+            True if successful, False otherwise
+        """
         try:
             values: Dict[str, Any] = {
                 'new_part_id': new_part_id,
@@ -1214,15 +1361,15 @@ class EntityService:
 
 
 # ============================================================================
-# ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ BREAKPOINT
+# MAIN BREAKPOINT PROCESSING LOGIC
 # ============================================================================
 
 def _determine_action_type(record: Dict[str, Any]) -> str:
     """
-    Определяет тип действия на основе наличия before/after данных.
+    Determine action type based on presence of before/after data.
 
     Returns:
-        Одна из констант BP_ACTION_TYPES: 'ADD', 'DELETE', 'UPDATE', 'REPLACE'
+        One of BP_ACTION_TYPES constants: 'ADD', 'DELETE', 'UPDATE', 'REPLACE'
     """
     has_before = bool(record.get('part_no_before'))
     has_after = bool(record.get('part_no_after'))
@@ -1241,7 +1388,7 @@ def _determine_action_type(record: Dict[str, Any]) -> str:
 
 
 def _get_record_value(record: Dict[str, Any], field: str, default: Any = None) -> Any:
-    """Безопасно получает значение из записи."""
+    """Safely get value from record."""
     return record.get(field, default)
 
 
@@ -1252,19 +1399,19 @@ def _create_part_relations(
     prefix: str
 ) -> bool:
     """
-    Создает все связи для части (PartToBox, BoxToPallet, PartToLine).
+    Create all relationships for a part (PartToBox, BoxToPallet, PartToLine).
     
     Args:
         service: EntityService
-        part_id: ID части
-        record: Запись с данными
-        prefix: 'before' или 'after'
+        part_id: Part ID
+        record: Record with data
+        prefix: 'before' or 'after'
     
     Returns:
-        True если все связи созданы успешно
+        True if all relationships created successfully
     """
     try:
-        # Получаем параметры из записи
+        # Get parameters from record
         workshop_code = _get_record_value(record, f'workshop_{prefix}')
         workcenter_no = _get_record_value(record, f'workcenter_no_{prefix}')
         workcenter_name = _get_record_value(record, f'workcenter_name_{prefix}')
@@ -1273,7 +1420,7 @@ def _create_part_relations(
         quantity_per_box = _get_record_value(record, f'quantity_per_box_{prefix}')
         box_per_pallet = _get_record_value(record, f'box_per_pallet_{prefix}')
 
-        # Создаем/проверяем Workshop
+        # Create/check Workshop
         workshop_id = None
         if workshop_code:
             workshop_id = service.ensure_workshop(workshop_code)
@@ -1281,14 +1428,14 @@ def _create_part_relations(
                 logger.error("Failed to ensure workshop: %s", workshop_code)
                 return False
 
-        # Создаем/проверяем Line
+        # Create/check Line
         line_id = None
         if workcenter_no and workshop_code:
             line_id = service.ensure_line(workcenter_no, workcenter_name, workshop_code)
             if not line_id:
                 logger.error("Failed to ensure line: %s", workcenter_no)
 
-        # Создаем/проверяем Box
+        # Create/check Box
         box_id = None
         if box_data:
             parsed_box = _parse_composite_key(box_data)
@@ -1298,7 +1445,7 @@ def _create_part_relations(
                 if not box_id:
                     logger.error("Failed to ensure box: %s", box_data)
 
-        # Создаем/проверяем Pallet
+        # Create/check Pallet
         pallet_id = None
         if pallet_data:
             parsed_pallet = _parse_composite_key(pallet_data)
@@ -1308,7 +1455,7 @@ def _create_part_relations(
                 if not pallet_id:
                     logger.error("Failed to ensure pallet: %s", pallet_data)
 
-        # Создаем связи
+        # Create relationships
         if box_id:
             if not service.ensure_part_to_box(part_id, box_id, quantity_per_box):
                 logger.error("Failed to create PartToBox for part %s", part_id)
@@ -1339,10 +1486,10 @@ def _process_add_action(
     model_id: str,
 ) -> bool:
     """
-    Обрабатывает ADD действие.
+    Process ADD action.
     
     ADD: part_no_before NULL, part_no_after NOT NULL.
-    Создается новая часть со всеми связями.
+    Creates a new part with all relationships.
     """
     part_number_after = _get_record_value(record, 'part_no_after')
     part_name_after = _get_record_value(record, 'part_name_after')
@@ -1352,14 +1499,14 @@ def _process_add_action(
     localization_after = _get_record_value(record, 'localization_after', 'no data')
 
     try:
-        # Получаем supplier_id через сервис (создает если не существует)
+        # Get supplier_id via service (creates if not exists)
         supplier_id = None
         if supplier_name_after:
             supplier_id = service.ensure_supplier(supplier_name_after, localization_after)
             if not supplier_id:
                 logger.warning("Could not create/find supplier %s", supplier_name_after)
 
-        # Получаем или создаем часть
+        # Get or create part
         part_info = service.get_or_create_part(
             part_number_after,
             part_name_after,
@@ -1371,25 +1518,25 @@ def _process_add_action(
 
         part_id = part_info['part_id']
 
-        # Получаем configuration_id через сервис
+        # Get configuration_id via service
         configuration_id = service.ensure_configuration(configuration)
         if not configuration_id:
             logger.error("Configuration not found: %s", configuration)
             return False
 
-        # Создаем все связи для новой части (PartToBox, BoxToPallet, PartToLine)
+        # Create all relationships for new part (PartToBox, BoxToPallet, PartToLine)
         if not _create_part_relations(service, part_id, record, 'after'):
             logger.error("Failed to create relations for part %s", part_id)
             return False
 
-        # Активируем часть для модели
+        # Activate part for model
         if not service.activate_part_for_model(
             part_id, model_id, configuration_id, part_per_vehicle, breakpoint_id
         ):
             logger.error("Failed to activate part %s for model", part_id)
             return False
 
-        # Создаем запись в part_to_breakpoint
+        # Create record in part_to_breakpoint
         if not service.create_part_to_breakpoint(part_id, None, breakpoint_id, model_id):
             logger.error("Failed to create part_to_breakpoint for ADD")
             return False
@@ -1410,26 +1557,26 @@ def _process_delete_action(
     model_id: str,
 ) -> bool:
     """
-    Обрабатывает DELETE действие.
+    Process DELETE action.
     
     DELETE: part_no_before NOT NULL, part_no_after NULL.
-    Часть деактивируется для указанной модели. Связи не меняются.
+    Part is deactivated for the specified model. Relationships remain unchanged.
     """
     part_number_before = _get_record_value(record, 'part_no_before')
 
     try:
-        # Получаем part_id через маппер
+        # Get part_id via mapper
         part_id = service.get_part_id(part_number_before)
         if not part_id:
             logger.error("Part not found: %s", part_number_before)
             return False
 
-        # Деактивируем часть для модели (только для указанной модели)
+        # Deactivate part for model (only for specified model)
         if not service.deactivate_part_for_model(part_id, model_id, breakpoint_id):
             logger.warning("Failed to deactivate part %s for model (may already be inactive)",
                          part_id)
 
-        # Создаем запись в part_to_breakpoint
+        # Create record in part_to_breakpoint
         if not service.create_part_to_breakpoint(None, part_id, breakpoint_id, model_id):
             logger.error("Failed to create part_to_breakpoint for DELETE")
             return False
@@ -1450,11 +1597,11 @@ def _process_update_action(
     model_id: str,
 ) -> bool:
     """
-    Обрабатывает UPDATE действие.
+    Process UPDATE action.
     
     UPDATE: part_no_before NOT NULL, part_no_after NOT NULL, same part_number.
-    Создается новая версия части со всеми связями.
-    Старая версия деактивируется для указанной модели.
+    Creates a new version of the part with all relationships.
+    Old version is deactivated for the specified model.
     """
     part_number_before = _get_record_value(record, 'part_no_before')
     part_number_after = _get_record_value(record, 'part_no_after')
@@ -1465,26 +1612,26 @@ def _process_update_action(
     localization_after = _get_record_value(record, 'localization_after', 'no data')
 
     try:
-        # Получаем old_part_id через маппер
+        # Get old_part_id via mapper
         old_part_id = service.get_part_id(part_number_before)
         if not old_part_id:
             logger.error("Old part not found: %s", part_number_before)
             return False
 
-        # Получаем original_part_id из старой части
+        # Get original_part_id from old part
         stmt = select(PartData.original_part_id).where(PartData.part_id == old_part_id)
         original_part_id = service.connection.execute(stmt).scalar_one_or_none()
         if not original_part_id:
             original_part_id = old_part_id
 
-        # Получаем supplier_id через сервис (создает если не существует)
+        # Get supplier_id via service (creates if not exists)
         supplier_id = None
         if supplier_name_after:
             supplier_id = service.ensure_supplier(supplier_name_after, localization_after)
             if not supplier_id:
                 logger.warning("Could not create/find supplier %s", supplier_name_after)
 
-        # Создаем новую версию части
+        # Create new version of part
         new_part_id = service.create_new_part_version(
             part_number_after,
             original_part_id,
@@ -1495,29 +1642,29 @@ def _process_update_action(
             logger.error("Failed to create new version of part %s", part_number_after)
             return False
 
-        # Получаем configuration_id через сервис
+        # Get configuration_id via service
         configuration_id = service.ensure_configuration(configuration)
         if not configuration_id:
             logger.error("Configuration not found: %s", configuration)
             return False
 
-        # Создаем все связи для новой версии части (PartToBox, BoxToPallet, PartToLine)
+        # Create all relationships for new version of part (PartToBox, BoxToPallet, PartToLine)
         if not _create_part_relations(service, new_part_id, record, 'after'):
             logger.error("Failed to create relations for new version of part %s", new_part_id)
             return False
 
-        # Активируем новую версию для модели
+        # Activate new version for model
         if not service.activate_part_for_model(
             new_part_id, model_id, configuration_id, part_per_vehicle, breakpoint_id
         ):
             logger.error("Failed to activate new part %s for model", new_part_id)
             return False
 
-        # Деактивируем старую версию для модели (только для указанной модели)
+        # Deactivate old version for model (only for specified model)
         if not service.deactivate_part_for_model(old_part_id, model_id, breakpoint_id):
             logger.warning("Failed to deactivate old part %s for model", old_part_id)
 
-        # Создаем запись в part_to_breakpoint
+        # Create record in part_to_breakpoint
         if not service.create_part_to_breakpoint(new_part_id, old_part_id, breakpoint_id, model_id):
             logger.error("Failed to create part_to_breakpoint for UPDATE")
             return False
@@ -1539,32 +1686,32 @@ def _process_replace_action(
     model_id: str,
 ) -> bool:
     """
-    Обрабатывает REPLACE действие.
+    Process REPLACE action.
     
     REPLACE: part_no_before NOT NULL, part_no_after NOT NULL, different part_number.
-    Сначала DELETE (деактивация старой части), затем ADD (создание новой части).
+    First DELETE (deactivate old part), then ADD (create new part).
     """
     part_number_before = _get_record_value(record, 'part_no_before')
     part_number_after = _get_record_value(record, 'part_no_after')
 
     try:
-        # ШАГ 1: DELETE - деактивируем старую часть
+        # STEP 1: DELETE - deactivate old part
         old_part_id = service.get_part_id(part_number_before)
         if not old_part_id:
             logger.error("Old part not found: %s", part_number_before)
             return False
 
-        # Деактивируем старую часть для модели
+        # Deactivate old part for model
         if not service.deactivate_part_for_model(old_part_id, model_id, breakpoint_id):
             logger.warning("Failed to deactivate old part %s for model", old_part_id)
 
-        # Создаем запись в part_to_breakpoint для DELETE (new_part_id = NULL)
+        # Create record in part_to_breakpoint for DELETE (new_part_id = NULL)
         if not service.create_part_to_breakpoint(None, old_part_id, breakpoint_id, model_id):
             logger.error("Failed to create part_to_breakpoint for DELETE (REPLACE)")
             return False
 
-        # ШАГ 2: ADD - создаем новую часть
-        # Используем _process_add_action для создания новой части со всеми связями
+        # STEP 2: ADD - create new part
+        # Use _process_add_action to create new part with all relationships
         add_success = _process_add_action(record, service, breakpoint_id, model_id)
         if not add_success:
             logger.error("Failed to create new part in REPLACE action")
@@ -1587,7 +1734,7 @@ def _process_single_breakpoint(
     engine: Engine,
     mapper: BPObjectMapper,
 ) -> Dict[str, Any]:
-    """Обрабатывает один breakpoint в одной транзакции."""
+    """Process a single breakpoint in one transaction."""
     result = {
         'success': False,
         'breakpoint_id': None,
@@ -1677,7 +1824,7 @@ def _process_single_breakpoint(
 
 
 def _disable_foreign_keys(engine: Engine) -> None:
-    """Отключает внешние ключи для производительности."""
+    """Disable foreign key constraints for performance."""
     try:
         with engine.begin() as connection:
             connection.execute(text('SET session_replication_role = replica;'))
@@ -1687,7 +1834,7 @@ def _disable_foreign_keys(engine: Engine) -> None:
 
 
 def _enable_foreign_keys(engine: Engine) -> None:
-    """Включает внешние ключи обратно."""
+    """Enable foreign key constraints back."""
     try:
         with engine.begin() as connection:
             connection.execute(text('SET session_replication_role = DEFAULT;'))
@@ -1698,7 +1845,7 @@ def _enable_foreign_keys(engine: Engine) -> None:
 
 
 # ============================================================================
-# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ
+# MAIN LOADING FUNCTION
 # ============================================================================
 
 def load_bp_pipeline(
@@ -1706,7 +1853,17 @@ def load_bp_pipeline(
     engine: Optional[Engine] = None,
     preserve_mapper_cache: bool = False,
 ) -> Dict[str, Any]:
-    """Основная функция для загрузки BP Pipeline."""
+    """
+    Main function to load BP Pipeline data.
+
+    Args:
+        transformed_data: Dictionary with 'breakpoint_df' and 'junction_df'
+        engine: Optional SQLAlchemy engine
+        preserve_mapper_cache: If True, keep mapper cache after loading
+
+    Returns:
+        Dict with loading statistics and results
+    """
     logger.info("Starting BP Pipeline loading...")
 
     if engine is None:
@@ -1770,7 +1927,7 @@ def load_bp_pipeline(
             'total_actions': {'ADD': 0, 'DELETE': 0, 'UPDATE': 0, 'REPLACE': 0},
         }
 
-    # Пре-загрузка кешей маппера (как в mft_loader.py)
+    # Pre-load mapper caches (same as in mft_loader.py)
     try:
         logger.info("Pre-loading ID mappings...")
         mapper.get_breakpoint_mapping()
@@ -1889,7 +2046,18 @@ def load_bp_pipeline(
 def create_bp_loader(
     engine: Optional[Engine] = None
 ) -> Callable[[Dict[str, pl.DataFrame]], Dict[str, Any]]:
-    """Фабрика для создания функции загрузки BP с предварительно настроенным engine."""
+    """
+    Factory to create BP loading function with pre-configured engine.
+
+    Args:
+        engine: Optional SQLAlchemy engine
+
+    Returns:
+        BP loader function
+
+    Raises:
+        RuntimeError: If database initialization fails
+    """
     if engine is None:
         engine = initialize_database(create_tables=False)
         if not engine:
