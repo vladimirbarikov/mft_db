@@ -417,6 +417,7 @@ BREAKPOINT_COLS = [
 PART_BEFORE_COLS = [
     'PART_NO_BEFORE',
     'PART_NAME_BEFORE',
+    'BOM_PRODUCT',
     'CONFIGURATION',
     'WORKSHOP_BEFORE',
     'WORKCENTER_NO_BEFORE',
@@ -434,6 +435,7 @@ PART_BEFORE_COLS = [
 PART_AFTER_COLS = [
     'PART_NO_AFTER',
     'PART_NAME_AFTER',
+    'BOM_PRODUCT',
     'CONFIGURATION',
     'WORKSHOP_AFTER',
     'WORKCENTER_NO_AFTER',
@@ -454,20 +456,6 @@ PART_TO_BREAKPOINT_COLS = [
     'PART_NO_AFTER',           # new_part_id lookup
     'BP_NO',                   # breakpoint_id lookup
     'BOM_PRODUCT',             # model_id lookup
-    'SUPPLIER_NAME_BEFORE',    # validation old supplier name
-    'SUPPLIER_NAME_AFTER',     # validation/creation new supplier name
-    'WORKCENTER_NO_BEFORE',    # validation old line code
-    'WORKCENTER_NO_AFTER',     # validation/creation new line code
-    'WORKCENTER_NAME_BEFORE',  # validation old line name
-    'WORKCENTER_NAME_AFTER',   # validation/creation new line name
-    'WORKSHOP_BEFORE',         # validation old workshop code
-    'WORKSHOP_AFTER',          # validation/creation new workshop code
-    'LOCALIZATION_BEFORE',     # validation old localization status
-    'LOCALIZATION_AFTER',      # validation/creation new localization status
-    'BOX_BEFORE',              # validation old box dimensions
-    'BOX_AFTER',               # validation/creation new box
-    'PALLET_BEFORE',           # validation old pallet dimensions
-    'PALLET_AFTER',            # validation/creation new pallet
 ]
 
 # ========== BP JUNCTION CONFIGURATION ==========
@@ -518,6 +506,7 @@ BP_TABLE_REQUIREMENTS = {
     'part_data_before': [
         'part_number',
         'part_name',
+        'bom_product',
         'configuration',
         'workshop_before',
         'workcenter_no_before',
@@ -533,6 +522,7 @@ BP_TABLE_REQUIREMENTS = {
     'part_data_after': [
         'part_number',
         'part_name',
+        'bom_product',
         'configuration',
         'workshop_after',
         'workcenter_no_after',
@@ -562,6 +552,7 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
     'ADD': [
         'part_no_after',
         'part_name_after',
+        'bom_product',
         'configuration',
         'workshop_after',
         'workcenter_no_after',
@@ -574,6 +565,7 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
     'DELETE': [
         'part_no_before',
         'part_name_before',
+        'bom_product',
         'configuration',
         'workshop_before',
         'workcenter_no_before',
@@ -588,6 +580,7 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
         'part_no_after',
         'part_name_before',
         'part_name_after',
+        'bom_product',
         'configuration',
         'workshop_before',
         'workshop_after',
@@ -609,6 +602,7 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
         'part_no_after',
         'part_name_before',
         'part_name_after',
+        'bom_product',
         'configuration',
         'workshop_before',
         'workshop_after',
