@@ -935,40 +935,40 @@ class BPObjectMapper:
             Dict with breakpoint_id, model_id, old_part_id, new_part_id only
         """
         try:
-            # Проверяем только обязательные колонки
+            # Validate only required columns
             required_cols = BP_JUNCTION_REQUIRED['part_to_breakpoint']
             for col in required_cols:
                 if col not in record:
                     logger.debug("Missing required column '%s' in breakpoint record", col)
                     return None
 
-            # Получаем breakpoint_id
+            # Get breakpoint_id
             breakpoint_id = self.get_breakpoint_id(record['bp_no'])
             if not breakpoint_id:
                 logger.warning("No breakpoint_id found for bp_no: %s", record['bp_no'])
                 return None
 
-            # Получаем model_id
+            # Get model_id
             model_id = self.get_model_id_by_code(record['bom_product'])
             if not model_id:
                 logger.warning("No model_id found for bom_product: %s", record['bom_product'])
                 return None
 
-            # Получаем old_part_id
+            # Get old_part_id
             old_part_id = None
             if record.get('part_no_before'):
                 old_part_id = self.get_part_id_by_number(record['part_no_before'])
                 if not old_part_id:
                     logger.warning("No part_id found for part_no_before: %s", record['part_no_before'])
 
-            # Получаем new_part_id
+            # Get new_part_id
             new_part_id = None
             if record.get('part_no_after'):
                 new_part_id = self.get_part_id_by_number(record['part_no_after'])
                 if not new_part_id:
                     logger.warning("No part_id found for part_no_after: %s", record['part_no_after'])
 
-            # Возвращаем только 4 поля
+            # Return only 4 fields
             return {
                 'breakpoint_id': breakpoint_id,
                 'model_id': model_id,
