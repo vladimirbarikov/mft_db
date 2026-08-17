@@ -976,8 +976,20 @@ class BPObjectMapper:
                 'new_part_id': new_part_id
             }
 
-        except Exception as e:
-            logger.error("Error mapping breakpoint record: %s", e)
+        except KeyError as e:
+            logger.error("Missing expected key in breakpoint record: %s", e)
+            return None
+        except ValueError as e:
+            logger.error("Invalid value in breakpoint record: %s", e)
+            return None
+        except TypeError as e:
+            logger.error("Wrong data type in breakpoint record: %s", e)
+            return None
+        except AttributeError as e:
+            logger.error("Missing attribute in breakpoint record: %s", e)
+            return None
+        except Exception as unexpected_error:
+            logger.error("Unexpected error mapping breakpoint record: %s", unexpected_error)
             return None
 
     # ========== CACHE MANAGEMENT ==========
