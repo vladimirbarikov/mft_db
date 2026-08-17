@@ -1473,8 +1473,28 @@ def _create_part_relations(
 
         return True
 
-    except Exception as e:
-        logger.error("Error creating part relations for part %s: %s", part_id, e)
+    except KeyError as e:
+        logger.error("Missing expected key in record for part %s: %s", part_id, e)
+        logger.debug(traceback.format_exc())
+        return False
+    except ValueError as e:
+        logger.error("Invalid value in record for part %s: %s", part_id, e)
+        logger.debug(traceback.format_exc())
+        return False
+    except TypeError as e:
+        logger.error("Wrong data type in record for part %s: %s", part_id, e)
+        logger.debug(traceback.format_exc())
+        return False
+    except AttributeError as e:
+        logger.error("Missing attribute for part %s: %s", part_id, e)
+        logger.debug(traceback.format_exc())
+        return False
+    except SQLAlchemyError as e:
+        logger.error("Database error creating relations for part %s: %s", part_id, e)
+        logger.debug(traceback.format_exc())
+        return False
+    except Exception as unexpected_error:
+        logger.error("Unexpected error creating part relations for part %s: %s", part_id, unexpected_error)
         logger.debug(traceback.format_exc())
         return False
 
@@ -1544,8 +1564,28 @@ def _process_add_action(
         logger.info("ADD processed successfully: part %s", part_number_after)
         return True
 
-    except Exception as e:
-        logger.error("Error processing ADD action: %s", e)
+    except KeyError as e:
+        logger.error("Missing key in record for ADD action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except ValueError as e:
+        logger.error("Invalid value in record for ADD action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except TypeError as e:
+        logger.error("Wrong data type in record for ADD action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except AttributeError as e:
+        logger.error("Missing attribute for ADD action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except SQLAlchemyError as e:
+        logger.error("Database error in ADD action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except Exception as unexpected_error:
+        logger.error("Unexpected error processing ADD action: %s", unexpected_error)
         logger.debug(traceback.format_exc())
         return False
 
@@ -1584,8 +1624,28 @@ def _process_delete_action(
         logger.info("DELETE processed successfully: part %s", part_number_before)
         return True
 
-    except Exception as e:
-        logger.error("Error processing DELETE action: %s", e)
+    except KeyError as e:
+        logger.error("Missing key in record for DELETE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except ValueError as e:
+        logger.error("Invalid value in record for DELETE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except TypeError as e:
+        logger.error("Wrong data type in record for DELETE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except AttributeError as e:
+        logger.error("Missing attribute for DELETE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except SQLAlchemyError as e:
+        logger.error("Database error in DELETE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except Exception as unexpected_error:
+        logger.error("Unexpected error processing DELETE action: %s", unexpected_error)
         logger.debug(traceback.format_exc())
         return False
 
@@ -1673,8 +1733,28 @@ def _process_update_action(
                    part_number_before, part_number_after)
         return True
 
-    except Exception as e:
-        logger.error("Error processing UPDATE action: %s", e)
+    except KeyError as e:
+        logger.error("Missing key in record for UPDATE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except ValueError as e:
+        logger.error("Invalid value in record for UPDATE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except TypeError as e:
+        logger.error("Wrong data type in record for UPDATE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except AttributeError as e:
+        logger.error("Missing attribute for UPDATE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except SQLAlchemyError as e:
+        logger.error("Database error in UPDATE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except Exception as unexpected_error:
+        logger.error("Unexpected error processing UPDATE action: %s", unexpected_error)
         logger.debug(traceback.format_exc())
         return False
 
@@ -1721,8 +1801,28 @@ def _process_replace_action(
                    part_number_before, part_number_after)
         return True
 
-    except Exception as e:
-        logger.error("Error processing REPLACE action: %s", e)
+    except KeyError as e:
+        logger.error("Missing key in record for REPLACE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except ValueError as e:
+        logger.error("Invalid value in record for REPLACE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except TypeError as e:
+        logger.error("Wrong data type in record for REPLACE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except AttributeError as e:
+        logger.error("Missing attribute for REPLACE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except SQLAlchemyError as e:
+        logger.error("Database error in REPLACE action: %s", e)
+        logger.debug(traceback.format_exc())
+        return False
+    except Exception as unexpected_error:
+        logger.error("Unexpected error processing REPLACE action: %s", unexpected_error)
         logger.debug(traceback.format_exc())
         return False
 
@@ -1751,7 +1851,7 @@ def _process_single_breakpoint(
             if breakpoint_record:
                 bp_df = pl.DataFrame([breakpoint_record])
                 if not _validate_breakpoint_columns(bp_df, 'breakpoint_data'):
-                    raise RuntimeError(f"Breakpoint {breakpoint_number} has missing required columns")
+                    raise ValueError(f"Breakpoint {breakpoint_number} has missing required columns")
 
             service = EntityService(connection, mapper)
 
@@ -1777,7 +1877,7 @@ def _process_single_breakpoint(
                     break
 
             if not model_code:
-                raise RuntimeError(f"No bom_product found for breakpoint {breakpoint_number}")
+                raise ValueError(f"No bom_product found for breakpoint {breakpoint_number}")
 
             model_id = service.ensure_model(model_code)
             if not model_id:
@@ -1791,7 +1891,7 @@ def _process_single_breakpoint(
                     continue
 
                 if not _validate_action_fields(record, action):
-                    raise RuntimeError(f"Action {action} has missing required fields for record: {record}")
+                    raise ValueError(f"Action {action} has missing required fields for record: {record}")
 
                 success = False
                 if action == BP_ACTION_TYPES['ADD']:
@@ -1815,10 +1915,28 @@ def _process_single_breakpoint(
 
             return result
 
-    except Exception as e:
+    except ValueError as e:
         error_msg = str(e)
         result['error'] = error_msg
-        logger.error("Breakpoint %s failed: %s", breakpoint_number, error_msg)
+        logger.error("Validation error for breakpoint %s: %s", breakpoint_number, error_msg)
+        logger.debug(traceback.format_exc())
+        return result
+    except RuntimeError as e:
+        error_msg = str(e)
+        result['error'] = error_msg
+        logger.error("Runtime error for breakpoint %s: %s", breakpoint_number, error_msg)
+        logger.debug(traceback.format_exc())
+        return result
+    except SQLAlchemyError as e:
+        error_msg = str(e)
+        result['error'] = error_msg
+        logger.error("Database error for breakpoint %s: %s", breakpoint_number, error_msg)
+        logger.debug(traceback.format_exc())
+        return result
+    except Exception as unexpected_error:
+        error_msg = str(unexpected_error)
+        result['error'] = error_msg
+        logger.error("Unexpected error for breakpoint %s: %s", breakpoint_number, error_msg)
         logger.debug(traceback.format_exc())
         return result
 
@@ -1829,8 +1947,10 @@ def _disable_foreign_keys(engine: Engine) -> None:
         with engine.begin() as connection:
             connection.execute(text('SET session_replication_role = replica;'))
             logger.info("Foreign key constraints disabled.")
-    except Exception as e:
-        logger.warning("Could not disable foreign keys: %s", e)
+    except SQLAlchemyError as e:
+        logger.warning("Database error disabling foreign keys: %s", e)
+    except Exception as unexpected_error:
+        logger.warning("Unexpected error disabling foreign keys: %s", unexpected_error)
 
 
 def _enable_foreign_keys(engine: Engine) -> None:
@@ -1839,9 +1959,12 @@ def _enable_foreign_keys(engine: Engine) -> None:
         with engine.begin() as connection:
             connection.execute(text('SET session_replication_role = DEFAULT;'))
             logger.info("Foreign key constraints enabled.")
-    except Exception as e:
-        logger.error("Could not enable foreign keys: %s", e)
-        raise
+    except SQLAlchemyError as e:
+        logger.error("Database error enabling foreign keys: %s", e)
+        raise RuntimeError(f"Failed to enable foreign keys: {e}") from e
+    except Exception as unexpected_error:
+        logger.error("Unexpected error enabling foreign keys: %s", unexpected_error)
+        raise RuntimeError(f"Unexpected error enabling foreign keys: {unexpected_error}") from unexpected_error
 
 
 # ============================================================================
@@ -1867,9 +1990,30 @@ def load_bp_pipeline(
     logger.info("Starting BP Pipeline loading...")
 
     if engine is None:
-        engine = initialize_database(create_tables=False)
-        if not engine:
-            logger.error("Failed to initialize database!")
+        try:
+            engine = initialize_database(create_tables=False)
+            if not engine:
+                logger.error("Failed to initialize database!")
+                return {
+                    'total_breakpoints': 0,
+                    'successful': 0,
+                    'failed': 0,
+                    'errors': [],
+                    'breakpoint_results': {},
+                    'total_actions': {'ADD': 0, 'DELETE': 0, 'UPDATE': 0, 'REPLACE': 0},
+                }
+        except SQLAlchemyError as e:
+            logger.error("Database error initializing database: %s", e)
+            return {
+                'total_breakpoints': 0,
+                'successful': 0,
+                'failed': 0,
+                'errors': [],
+                'breakpoint_results': {},
+                'total_actions': {'ADD': 0, 'DELETE': 0, 'UPDATE': 0, 'REPLACE': 0},
+            }
+        except Exception as unexpected_error:
+            logger.error("Unexpected error initializing database: %s", unexpected_error)
             return {
                 'total_breakpoints': 0,
                 'successful': 0,
@@ -1916,8 +2060,18 @@ def load_bp_pipeline(
                 'breakpoint_results': {},
                 'total_actions': {'ADD': 0, 'DELETE': 0, 'UPDATE': 0, 'REPLACE': 0},
             }
-    except Exception as e:
-        logger.error("Error creating mapper: %s", e)
+    except SQLAlchemyError as e:
+        logger.error("Database error creating mapper: %s", e)
+        return {
+            'total_breakpoints': 0,
+            'successful': 0,
+            'failed': 0,
+            'errors': [],
+            'breakpoint_results': {},
+            'total_actions': {'ADD': 0, 'DELETE': 0, 'UPDATE': 0, 'REPLACE': 0},
+        }
+    except Exception as unexpected_error:
+        logger.error("Unexpected error creating mapper: %s", unexpected_error)
         return {
             'total_breakpoints': 0,
             'successful': 0,
@@ -1940,8 +2094,12 @@ def load_bp_pipeline(
         mapper.get_pallet_mapping()
         mapper.get_configuration_mapping()
         mapper.log_mapping_statistics()
-    except Exception as e:
-        logger.warning("Failed to pre-load all mappings: %s", e)
+    except SQLAlchemyError as e:
+        logger.warning("Database error pre-loading mappings: %s", e)
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.warning("Data error pre-loading mappings: %s", e)
+    except Exception as unexpected_error:
+        logger.warning("Unexpected error pre-loading mappings: %s", unexpected_error)
 
     results = {
         'total_breakpoints': 0,
@@ -2008,19 +2166,33 @@ def load_bp_pipeline(
                        bp_no, "SUCCESS" if bp_result['success'] else "FAILED",
                        bp_result['records_processed'])
 
-    except Exception as e:
-        logger.error("Unexpected error in BP Pipeline: %s", e)
+    except SQLAlchemyError as e:
+        logger.error("Database error in BP Pipeline: %s", e)
+        logger.debug(traceback.format_exc())
+    except ValueError as e:
+        logger.error("Validation error in BP Pipeline: %s", e)
+        logger.debug(traceback.format_exc())
+    except RuntimeError as e:
+        logger.error("Runtime error in BP Pipeline: %s", e)
+        logger.debug(traceback.format_exc())
+    except Exception as unexpected_error:
+        logger.error("Unexpected error in BP Pipeline: %s", unexpected_error)
         logger.debug(traceback.format_exc())
 
     finally:
         try:
             _enable_foreign_keys(engine)
-        except Exception as e:
+        except (SQLAlchemyError, RuntimeError) as e:
             logger.error("Error re-enabling foreign keys: %s", e)
+        except Exception as unexpected_error:
+            logger.error("Unexpected error re-enabling foreign keys: %s", unexpected_error)
 
         if not preserve_mapper_cache:
-            mapper.clear_cache()
-            logger.debug("Cleared mapper cache")
+            try:
+                mapper.clear_cache()
+                logger.debug("Cleared mapper cache")
+            except Exception as unexpected_error:
+                logger.warning("Error clearing mapper cache: %s", unexpected_error)
 
     logger.info("=" * 60)
     logger.info("BP PIPELINE LOADING COMPLETED")
