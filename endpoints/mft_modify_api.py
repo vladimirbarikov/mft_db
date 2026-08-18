@@ -125,8 +125,10 @@ License: MIT
 Status: Development
 """
 # Standard library imports
+import sys
+from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import logging
 import os
 from functools import wraps
@@ -140,30 +142,32 @@ from marshmallow import Schema, fields, validate, ValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import text, select
 import jwt
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-# Local imports
-# Adjust import paths based on your project structure
-import sys
-from pathlib import Path
+# The relative path to the root project directory
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    # If __file__ is not defined (in exec() or interactive mode)
+    PROJECT_ROOT = Path("/opt/airflow")
 
 # Add project root to path if needed
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Local imports
 from config import get_logger
 from dags.tasks.connector import initialize_database
 from dags.tasks.bp_mapper import create_bp_mapper
+from dags.tasks.change_classifier import ChangeClassifier
 from database.database import (
-    PartData, PartToModel, PartToBreakpoint, BreakpointData,
-    ModelData, SupplierData, BoxData, PalletData, LineData,
-    ConfigurationData, WorkshopData
+    # Entity tables
+    SupplierData, PartData, BoxData, PalletData, ModelData,
+    ConfigurationData, WorkshopData, LineData, BreakpointData,
+    # Junction tables
+    PartToBox, BoxToPallet, PartToModel, PartToLine, PartToBreakpoint
 )
 
+# Logger setup
 logger = get_logger(__name__)
 
 # ============================================================================
@@ -414,7 +418,9 @@ class ManualChangeService:
         change_reason: str,
         ticket_number: Optional[str],
         changed_by: str,
-        changes: Dict[str, Any]
+        changes: Dict[str, Any],
+        change_domain: str,
+        change_nature: str
     ) -> str:
         """Create a virtual breakpoint for manual changes."""
         # Generate breakpoint number: MAN-YYYYMMDD-XXXX
@@ -435,28 +441,32 @@ class ManualChangeService:
         # Prepare description
         changes_summary = ', '.join([f"{k}={v}" for k, v in changes.items()])
         description = f"""MANUAL CHANGE
-Part: {part_number}
-Model: {model_code}
-Changes: {changes_summary}
-Reason: {change_reason}
-Ticket: {ticket_number or 'N/A'}
-Changed by: {changed_by}"""
+        Part: {part_number}
+        Model: {model_code}
+        Domain: {change_domain}
+        Nature: {change_nature}
+        Changes: {changes_summary}
+        Reason: {change_reason}
+        Ticket: {ticket_number or 'N/A'}
+        Changed by: {changed_by}"""
 
-        # Create breakpoint
+        # Create breakpoint with classification
         new_breakpoint = BreakpointData(
             breakpoint_number=breakpoint_number,
             breakpoint_status='closed',
             breakpoint_date=datetime.now(),
             description=description.strip(),
-            solution=f"Manual change by {changed_by}"
+            solution=f"Manual change by {changed_by}",
+            change_domain=change_domain,
+            change_nature=change_nature,
         )
 
         self.session.add(new_breakpoint)
-        self.session.flush()  # Get ID without committing
+        self.session.flush()
 
         logger.info(
-            "Created virtual breakpoint %s (%s) for manual change",
-            breakpoint_number, new_breakpoint.breakpoint_id
+            "Created virtual breakpoint %s (%s) with classification: domain=%s, nature=%s",
+            breakpoint_number, new_breakpoint.breakpoint_id, change_domain, change_nature
         )
 
         return new_breakpoint.breakpoint_id
@@ -467,7 +477,9 @@ Changed by: {changed_by}"""
         model_code: str,
         changes: Dict[str, Any],
         breakpoint_id: str,
-        changed_by: str
+        changed_by: str,
+        change_domain: str,
+        change_nature: str
     ) -> Dict[str, Any]:
         """Apply changes to part, creating new version if needed."""
         # 1. Get current active version for model
@@ -533,8 +545,9 @@ Changed by: {changed_by}"""
         self.session.commit()
 
         logger.info(
-            "Successfully applied changes to part %s: v%d → v%d",
-            part_number, old_version_number, new_version_number
+            "Successfully applied changes to part %s: v%d → v%d (domain=%s, nature=%s)",
+            part_number, old_version_number, new_version_number,
+            change_domain, change_nature
         )
 
         return {
@@ -1143,7 +1156,7 @@ def get_db_session():
 
 
 @api_bp.route('/parts/<string:part_number>/modify', methods=['POST'])
-@limiter.limit("10 per minute")  # Stricter limit for modifications
+@limiter.limit("10 per minute")
 @jwt_required
 @role_required(['admin', 'engineer', 'planner'])
 def modify_part(part_number):
@@ -1152,18 +1165,6 @@ def modify_part(part_number):
     
     This endpoint creates a virtual breakpoint and applies changes to the part,
     ensuring complete history tracking.
-    
-    Example:
-        POST /api/v1/parts/ABC-123/modify
-        {
-            "model_code": "jolion",
-            "changes": {
-                "supplier_name": "New Supplier Inc",
-                "part_weight_kg": 3.5
-            },
-            "change_reason": "Supplier change due to quality issues",
-            "ticket_number": "TASK-1234"
-        }
     """
     try:
         # Validate request data
@@ -1191,6 +1192,25 @@ def modify_part(part_number):
         with Session(engine) as session:
             service = ManualChangeService(session)
 
+            # ===== GET CURRENT VERSION FOR CLASSIFICATION =====
+            # We need current attributes to determine if change is correction
+            current_version = service._get_active_version(part_number, data['model_code'])
+            if current_version:
+                current_attrs = service._get_part_attributes(current_version['part_id'])
+            else:
+                current_attrs = {}
+
+            # ===== APPLY CLASSIFICATION =====
+            domain, nature = ChangeClassifier.classify(
+                data['changes'],
+                current_attrs
+            )
+
+            logger.debug(
+                "Classification for part %s: domain=%s, nature=%s",
+                part_number, domain, nature
+            )
+
             # 1. Create virtual breakpoint
             breakpoint_id = service.create_virtual_breakpoint(
                 part_number=part_number,
@@ -1198,7 +1218,9 @@ def modify_part(part_number):
                 change_reason=data['change_reason'],
                 ticket_number=data.get('ticket_number'),
                 changed_by=changed_by,
-                changes=data['changes']
+                changes=data['changes'],
+                change_domain=domain,
+                change_nature=nature
             )
 
             # 2. Apply changes
@@ -1207,7 +1229,9 @@ def modify_part(part_number):
                 model_code=data['model_code'],
                 changes=data['changes'],
                 breakpoint_id=breakpoint_id,
-                changed_by=changed_by
+                changed_by=changed_by,
+                change_domain=domain,
+                change_nature=nature
             )
 
             # 3. Get breakpoint info for response
@@ -1223,6 +1247,8 @@ def modify_part(part_number):
                 'old_version': result['old_version'],
                 'new_version': result['new_version'],
                 'changes_applied': result['changes_applied'],
+                'change_domain': domain,     # ← НОВОЕ В ОТВЕТЕ
+                'change_nature': nature,     # ← НОВОЕ В ОТВЕТЕ
                 'created_at': datetime.now().isoformat(),
                 'changed_by': changed_by
             }), 200
@@ -1331,7 +1357,7 @@ def get_part_history(part_number):
 
 
 @api_bp.route('/parts/<string:part_number>/versions/<int:version>/rollback', methods=['POST'])
-@limiter.limit("5 per minute")  # Very strict limit for rollbacks
+@limiter.limit("5 per minute")
 @jwt_required
 @role_required(['admin', 'engineer'])
 def rollback_part_version(part_number, version):
@@ -1396,11 +1422,9 @@ def rollback_part_version(part_number, version):
                 }), 404
 
             # Prepare changes to rollback to target version
-            # Get attributes of target version
             target_attrs = service._get_part_attributes(target_dict['part_id'])
-
-            # Filter only changed fields
             current_attrs = service._get_part_attributes(current['part_id'])
+
             changes = {}
             for key, value in target_attrs.items():
                 if key in current_attrs and str(current_attrs.get(key)) != str(value):
@@ -1415,6 +1439,14 @@ def rollback_part_version(part_number, version):
                     'new_version': current['version_number']
                 }), 200
 
+            # ===== APPLY CLASSIFICATION FOR ROLLBACK =====
+            domain, nature = ChangeClassifier.classify(changes, current_attrs)
+
+            logger.debug(
+                "Rollback classification for part %s: domain=%s, nature=%s",
+                part_number, domain, nature
+            )
+
             # Create virtual breakpoint for rollback
             breakpoint_id = service.create_virtual_breakpoint(
                 part_number=part_number,
@@ -1422,7 +1454,9 @@ def rollback_part_version(part_number, version):
                 change_reason=f"Rollback to version {version}: {reason}",
                 ticket_number=ticket_number,
                 changed_by=changed_by,
-                changes=changes
+                changes=changes,
+                change_domain=domain,
+                change_nature=nature
             )
 
             # Apply changes
@@ -1431,7 +1465,9 @@ def rollback_part_version(part_number, version):
                 model_code=model_code,
                 changes=changes,
                 breakpoint_id=breakpoint_id,
-                changed_by=changed_by
+                changed_by=changed_by,
+                change_domain=domain,
+                change_nature=nature
             )
 
             return jsonify({
@@ -1441,6 +1477,8 @@ def rollback_part_version(part_number, version):
                 'old_version': result['old_version'],
                 'new_version': result['new_version'],
                 'changes_applied': result['changes_applied'],
+                'change_domain': domain,
+                'change_nature': nature,
                 'changed_by': changed_by
             }), 200
 
