@@ -1030,29 +1030,40 @@ class BreakpointData(Base):
         Index('idx_input_date', 'input_date'),
         Index('idx_breakpoint_batch_plan', 'batch_plan'),
         Index('idx_breakpoint_batch_fact', 'batch_fact'),
+        Index('idx_breakpoint_domain', 'change_domain'),
+        Index('idx_breakpoint_nature', 'change_nature'),
+        Index('idx_breakpoint_domain_nature', 'change_domain', 'change_nature'),
         {
             'comment': """
-            PURPOSE: Technical change management (breakpoints)
+            PURPOSE: Technical change management (breakpoints) with classification
             ---
             COLUMN DESCRIPTION:
             - breakpoint_id: Unique system identifier (BPT_ + 36-character UUID)
             - input_date: When record was created
-            - breakpoint_number: Engineering change identifier
+            - breakpoint_number: Engineering change identifier (BP-* or MAN-*)
             - breakpoint_status: Execution status of breakpoint
             - breakpoint_date: When change takes effect
-            - batch_plan: Planned batch number when the technical change occurred
-            - batch_fact: Real batch number when the technical change occurred
-            - description: Cause and solution of the technical change
-            - solution: Solution description
+            - batch_plan: Planned batch number
+            - batch_fact: Real batch number
+            - description: Cause description (from Excel)
+            - solution: Solution description (from Excel)
+            - change_domain: WHAT changed (supplier, packaging, production, spec, config, multi)
+            - change_nature: WHY it changed (business, technical, correction)
             ---
-            RELATIONSHIPS:
-            - Links to part versions via PartToBreakpoint
-            - Links to deactivated parts via PartData.deactivated_by_breakpoint_id
-            - Links to deactivated part-model associations via PartToModel.deactivated_by_breakpoint_id
+            CLASSIFICATION:
+            - Domain: supplier | packaging | production | spec | config | multi
+            - Nature: business | technical | correction
             ---
-            BUSINESS RULES:
-            - Tracks part changes before/after engineering changes
-            - Used for version control and traceability
+            SOURCES:
+            - Automatic: BP pipeline from Excel (BP-*)
+            - Manual: MFT Modify API (MAN-*)
+            ---
+            INDEXES:
+            - idx_breakpoint_number: For breakpoint lookups
+            - idx_breakpoint_date: For date range queries
+            - idx_breakpoint_domain: For domain filtering
+            - idx_breakpoint_nature: For nature filtering
+            - idx_breakpoint_domain_nature: For combined filtering
             """
         },
     )
@@ -1096,6 +1107,16 @@ class BreakpointData(Base):
     solution = Column(
         Text,
         nullable=True
+    )
+    change_domain = Column(
+        String(20),
+        nullable=True,
+        comment="Domain: supplier, packaging, production, spec, config, multi"
+    )
+    change_nature = Column(
+        String(20),
+        nullable=True,
+        comment="Nature: business, technical, correction"
     )
     # Relationships
     part_transitions = relationship(

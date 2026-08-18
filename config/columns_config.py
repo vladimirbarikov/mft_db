@@ -198,8 +198,9 @@ Last Modified: 2026-03-21
 License: MIT
 Status: Production
 """
-# ========== MFT PIPELINE CONFIGURATION ==========
+# ========== MFT PIPELINE CONFIGURATION =================
 # For use in mft_dag.py, mft_mapper.py, and mft_loader.py
+# =======================================================
 
 # ========== CORE ENTITY TABLES COLUMNS (UPPERCASE for Excel extraction) ==========
 # Supplier entity columns
@@ -397,8 +398,9 @@ MFT_TABLE_REQUIREMENTS = {
             ]
         }
 
-# ========== BP PIPELINE CONFIGURATION ==========
+# ========== BP PIPELINE CONFIGURATION ==============
 # For use in bp_dag.py, bp_mapper.py and bp_loader.py
+# ===================================================
 
 # ========== CORE ENTITY TABLES COLUMNS (UPPERCASE for Excel extraction) ==========
 # Breakpoint entity columns
@@ -607,4 +609,60 @@ BP_REQUIRED_FIELDS_BY_ACTION = {
         'box_per_pallet_before',
         'box_per_pallet_after',
     ]
+}
+
+# ============================================================================
+# CHANGE CLASSIFICATION CONSTANTS
+# ============================================================================
+
+# Change Domains
+CHANGE_DOMAINS = {
+    'SUPPLIER': 'supplier',
+    'PACKAGING': 'packaging',
+    'PRODUCTION': 'production',
+    'SPEC': 'spec',
+    'CONFIG': 'config',
+    'MULTI': 'multi',
+}
+
+# Change Natures
+CHANGE_NATURES = {
+    'BUSINESS': 'business',
+    'TECHNICAL': 'technical',
+    'CORRECTION': 'correction',
+}
+
+# Field to Domain mapping (used by classifier)
+FIELD_TO_DOMAIN = {
+    # Supplier
+    'supplier_name': CHANGE_DOMAINS['SUPPLIER'],
+    'localization': CHANGE_DOMAINS['SUPPLIER'],
+
+    # Packaging
+    'box_type': CHANGE_DOMAINS['PACKAGING'],
+    'box_length_mm': CHANGE_DOMAINS['PACKAGING'],
+    'box_width_mm': CHANGE_DOMAINS['PACKAGING'],
+    'box_height_mm': CHANGE_DOMAINS['PACKAGING'],
+    'box_weight_kg': CHANGE_DOMAINS['PACKAGING'],
+    'box_stacking': CHANGE_DOMAINS['PACKAGING'],
+    'pallet_type': CHANGE_DOMAINS['PACKAGING'],
+    'pallet_length_mm': CHANGE_DOMAINS['PACKAGING'],
+    'pallet_width_mm': CHANGE_DOMAINS['PACKAGING'],
+    'pallet_height_mm': CHANGE_DOMAINS['PACKAGING'],
+    'pallet_weight_kg': CHANGE_DOMAINS['PACKAGING'],
+    'pallet_stacking': CHANGE_DOMAINS['PACKAGING'],
+
+    # Production
+    'line_code': CHANGE_DOMAINS['PRODUCTION'],
+    'line_name': CHANGE_DOMAINS['PRODUCTION'],
+    'workshop_code': CHANGE_DOMAINS['PRODUCTION'],
+
+    # Specification
+    'part_name': CHANGE_DOMAINS['SPEC'],
+    'part_weight_kg': CHANGE_DOMAINS['SPEC'],
+
+    # Configuration
+    'configuration': CHANGE_DOMAINS['CONFIG'],
+    'transmission': CHANGE_DOMAINS['CONFIG'],
+    'part_per_vehicle': CHANGE_DOMAINS['CONFIG'],
 }
