@@ -196,8 +196,8 @@ def enable_foreign_keys(engine: Engine) -> None:
     except SQLAlchemyError as e:
         logger.error("Could not enable foreign keys due to SQLAlchemy error: %s", e)
         raise
-    except Exception as e:
-        logger.error("Unexpected error while enabling foreign keys: %s", e)
+    except Exception as unexpected_error:
+        logger.error("Unexpected error while enabling foreign keys: %s", unexpected_error)
         raise
 
 
