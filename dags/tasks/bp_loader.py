@@ -191,6 +191,7 @@ from config.columns_config import (
 )
 from dags.tasks.connector import initialize_database
 from dags.tasks.bp_mapper import BPObjectMapper, create_bp_mapper
+from dags.tasks.change_classifier import ChangeClassifier
 from database.database import (
     # Entity tables
     SupplierData, PartData, BoxData, PalletData, ModelData,
@@ -867,11 +868,11 @@ class EntityService:
         batch_fact: Optional[str] = None,
         description: Optional[str] = None,
         solution: Optional[str] = None,
+        change_domain: Optional[str] = None,
+        change_nature: Optional[str] = None,
     ) -> Optional[str]:
         """
         Create or retrieve breakpoint with data.
-
-        First checks via mapper (READ-ONLY), if not found - creates new.
 
         Args:
             breakpoint_number: Breakpoint number
@@ -879,8 +880,10 @@ class EntityService:
             change_date: Change date
             batch_plan: Batch plan
             batch_fact: Batch fact
-            description: Description
-            solution: Solution
+            description: Description (from Excel)
+            solution: Solution (from Excel)
+            change_domain: WHAT changed (from classifier)
+            change_nature: WHY it changed (from classifier)
 
         Returns:
             breakpoint_id or None
@@ -917,6 +920,7 @@ class EntityService:
                 'breakpoint_date': change_date,
             }
 
+            # Excel data (description and solution)
             if batch_plan and batch_plan.strip():
                 values['batch_plan'] = batch_plan.strip()
             if batch_fact and batch_fact.strip():
@@ -925,6 +929,12 @@ class EntityService:
                 values['description'] = description.strip()
             if solution and solution.strip():
                 values['solution'] = solution.strip()
+
+            # ===== CLASSIFICATION FIELDS (from ChangeClassifier) =====
+            if change_domain:
+                values['change_domain'] = change_domain
+            if change_nature:
+                values['change_nature'] = change_nature
 
             results = _bulk_insert_with_returning(
                 self.connection,
@@ -937,7 +947,10 @@ class EntityService:
             if results:
                 breakpoint_id = results[0]
                 self._breakpoint_cache[breakpoint_number] = breakpoint_id
-                logger.info("Created breakpoint %s with ID %s", breakpoint_number, breakpoint_id)
+                logger.info(
+                    "Created breakpoint %s with ID %s (domain=%s, nature=%s)",
+                    breakpoint_number, breakpoint_id, change_domain, change_nature
+                )
                 return breakpoint_id
 
             logger.error("No breakpoint_id returned when creating breakpoint %s", breakpoint_number)
@@ -1855,6 +1868,41 @@ def _process_single_breakpoint(
 
             service = EntityService(connection, mapper)
 
+            # ===== CLASSIFICATION: Collect changes from records =====
+            changes = {}
+            for record in change_records:
+                # Collect fields that changed
+                for field in ['supplier_name', 'box_type', 'line_code',
+                              'configuration', 'part_weight_kg', 'part_name',
+                              'localization']:
+                    # Check both 'before' and 'after' variants
+                    before_val = record.get(f'{field}_before')
+                    after_val = record.get(f'{field}_after')
+
+                    # If after exists and is different from before (or before is None)
+                    if after_val is not None:
+                        # For ADD: before is None, after has value
+                        # For UPDATE/REPLACE: both may have values
+                        if before_val is None or before_val != after_val:
+                            changes[field] = after_val
+
+                    # Also check direct field names (for compatibility)
+                    direct_val = record.get(field)
+                    if direct_val is not None and field not in changes:
+                        changes[field] = direct_val
+
+            # ===== APPLY CLASSIFICATION =====
+            # For automatic changes from Excel, current_attrs is empty
+            # because we don't have the previous state in the BP pipeline
+            current_attrs = {}
+            domain, nature = ChangeClassifier.classify(changes, current_attrs)
+
+            logger.debug(
+                "Breakpoint %s classified: domain=%s, nature=%s, changes=%s",
+                breakpoint_number, domain, nature, changes
+            )
+
+            # ===== CREATE BREAKPOINT WITH CLASSIFICATION =====
             breakpoint_id = service.ensure_breakpoint_with_data(
                 breakpoint_number=breakpoint_number,
                 status=breakpoint_record.get('status', 'no data'),
@@ -1863,6 +1911,8 @@ def _process_single_breakpoint(
                 batch_fact=breakpoint_record.get('batch_fact'),
                 description=breakpoint_record.get('description'),
                 solution=breakpoint_record.get('solution'),
+                change_domain=domain,
+                change_nature=nature,
             )
 
             if not breakpoint_id:
@@ -1870,6 +1920,7 @@ def _process_single_breakpoint(
 
             result['breakpoint_id'] = breakpoint_id
 
+            # Get model_code from records
             model_code = None
             for rec in change_records:
                 if rec.get('bom_product'):
@@ -1883,6 +1934,7 @@ def _process_single_breakpoint(
             if not model_id:
                 raise RuntimeError(f"Model not found: {model_code}")
 
+            # Process each change record
             for record in change_records:
                 action = _determine_action_type(record)
 
@@ -1910,8 +1962,10 @@ def _process_single_breakpoint(
                     raise RuntimeError(f"Failed to process {action} action for record: {record}")
 
             result['success'] = True
-            logger.info("Breakpoint %s processed successfully: %d changes",
-                       breakpoint_number, result['records_processed'])
+            logger.info(
+                "Breakpoint %s processed successfully: %d changes (domain=%s, nature=%s)",
+                breakpoint_number, result['records_processed'], domain, nature
+            )
 
             return result
 
