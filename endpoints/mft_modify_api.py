@@ -1,37 +1,124 @@
 # pylint: disable=too-many-lines
 # pylint: disable=wrong-import-position
 """
-MFT Manual Modification API Module (Flask).
+MFT Manual Modification API Module.
 
-This module provides REST API endpoints for making manual changes to part data
-with full audit trail through virtual breakpoints.
+PURPOSE:
+    Provides REST API endpoints for making manual changes to part data with
+    full audit trail through virtual breakpoints. This closes the critical
+    architectural gap where manual changes were not tracked in the history.
 
-Key Features:
-    - Create virtual breakpoints for manual changes
-    - Support for all part attributes (supplier, box, pallet, line, weight, etc.)
-    - Automatic versioning and history tracking
-    - Integration with existing BP pipeline architecture
-    - Full audit trail with change reason and ticket number
-    - Rate limiting with Flask-Limiter
-    - Model-specific changes (different models can have different versions)
-    - JWT authentication support
-    - CORS support for frontend integration
+KEY FEATURES:
+    1. Virtual Breakpoints (MAN-YYYYMMDD-XXXX):
+        - Each manual change automatically creates a virtual breakpoint
+        - Full integration with existing breakpoint architecture
+        - Easy to distinguish from automatic changes (MAN-* vs BP-*)
 
-Usage Example:
-    POST /api/v1/parts/{part_number}/modify
-    {
-        "model_code": "jolion",
-        "changes": {
-            "supplier_name": "New Supplier Inc",
-            "part_weight_kg": 3.5
-        },
-        "change_reason": "Supplier change due to quality issues",
-        "ticket_number": "TASK-1234"
-    }
+    2. Complete History Tracking:
+        - Every change (automatic OR manual) has a breakpoint_id
+        - Single unified history view via part_to_breakpoint table
+        - Source tracking: 'manual' vs 'automatic' change_type
 
-Version: 1.0.0
-Compatibility: Python 3.14.4+, Flask 3.0.3+, SQLAlchemy 1.4.54+
+    3. Version Rollback:
+        - Rollback to ANY historical version
+        - Creates new virtual breakpoint for the rollback
+        - Preserves full audit trail of the rollback itself
+
+    4. Smart Change Detection:
+        - No new version created if attributes didn't actually change
+        - Prevents "noise" versions from bloating the database
+        - Saves storage and keeps history clean
+
+    5. Atomic Group Changes:
+        - All changes in one request = ONE transaction
+        - ONE breakpoint_id for the entire group
+        - Atomic rollback of the entire group
+
+    6. Security & Access Control:
+        - JWT authentication required for all endpoints
+        - Role-based access control (admin, engineer, planner)
+        - Rate limiting to prevent abuse
+        - Full audit log: who, when, why
+
+    7. Universal API Endpoint:
+        - One endpoint for ALL attribute changes
+        - Unified interface for all modification types
+        - No need to understand internal database structure
+
+    8. Zero Schema Changes:
+        - Uses existing tables: breakpoint_data, part_data,
+          part_to_breakpoint, part_to_model
+        - Complete compatibility with BP pipeline
+        - No database migrations required
+
+BUSINESS VALUE:
+    - Before: Manual changes were lost in history (no breakpoint_id)
+    - After: ALL changes (auto + manual) have full audit trail
+    - Full traceability of every modification
+    - Ability to rollback ANY change at ANY time
+    - Single source of truth for all changes
+
+TECHNICAL DEBT PAID:
+    - Solves "silent updates" problem
+    - Eliminates need for separate audit tables
+    - Maintains data integrity across all change sources
+    - Provides unified change management interface
+
+ENDPOINTS OVERVIEW:
+    POST   /api/v1/parts/{part_number}/modify
+        - Main endpoint for ALL manual changes
+        - Creates virtual breakpoint automatically
+        - Validates fields via Marshmallow schema
+
+    GET    /api/v1/parts/{part_number}/history
+        - Full history with source tracking
+        - Shows both manual and automatic changes
+        - Filters by model_code
+
+    POST   /api/v1/parts/{part_number}/versions/{version}/rollback
+        - Rollback to any historical version
+        - Creates new virtual breakpoint
+        - Preserves full audit trail
+
+    GET    /api/v1/parts/{part_number}/versions
+        - Simplified list of versions
+        - Shows active/inactive status
+
+    GET    /api/v1/health
+        - Health check endpoint (no auth required)
+
+    POST   /api/v1/auth/token
+        - JWT token generation (for testing only)
+
+DEPENDENCIES:
+    Flask 3.0.3+         - Web framework
+    Flask-Limiter 3.12+  - Rate limiting
+    flask-cors 6.0.2+    - CORS support
+    marshmallow 3.20.0+  - Request validation
+    pyjwt 2.8.0+         - JWT authentication
+    SQLAlchemy 1.4.54+   - Database ORM
+
+CRITICAL CONCEPTS:
+    - Virtual Breakpoint: A breakpoint created for manual changes
+      (MAN-YYYYMMDD-XXXX format)
+    - Change Source: 'manual' for API changes, 'automatic' for BP pipeline
+    - Atomic Group: All changes in one request share one breakpoint_id
+    - Smart Versioning: New version created only when attributes actually change
+
+TODO (Before Production):
+    1. Test all endpoints thoroughly
+    2. Adjust import paths for project structure
+    3. Validate database connection handling in production
+    4. Review and adjust rate limits based on load testing
+    5. Add proper error handling for edge cases
+    6. Implement comprehensive logging strategy
+    7. Replace /auth/token with proper OAuth2/LDAP integration
+    8. Add request validation for all edge cases
+    9. Write integration tests
+    10. Document all endpoints with examples
+
 Maintainer: PLD Engineering Center
+Version: 1.0.0
 Created: 2026-08-18
 Last Modified: 2026-08-18
 License: MIT
