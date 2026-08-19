@@ -129,10 +129,11 @@ Last Modified: 2026-07-27
 License: MIT
 Status: Production Ready
 """
-
+# Standard library imports
 import base64
 import io
 import hashlib
+import sys
 import os
 import tempfile
 import time
@@ -144,6 +145,7 @@ from threading import Lock
 from typing import Tuple, Optional, Dict, Any
 import zoneinfo
 
+# Third-party imports
 import requests
 import xlrd
 import openpyxl
@@ -155,16 +157,26 @@ from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 from openpyxl.utils import exceptions as openpyxl_exceptions
 
+# The relative path to the root project directory
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    PROJECT_ROOT = Path("/opt/airflow")
+
+# Add project root to path if needed
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Load environment variables
+env_path = PROJECT_ROOT / '.env'
+load_dotenv(dotenv_path=env_path)
+
 # Local imports
 from config import get_logger
 from config.clamav_service import clamav_scanner
 
-logger = get_logger("endpoints.mft_upload_api")
-
-# Load environment variables
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-env_path = PROJECT_ROOT / '.env'
-load_dotenv(dotenv_path=env_path)
+# Logger setup
+logger = get_logger(__name__)
 
 # ========== TIMEZONE SETTINGS ==========
 MOSCOW_TZ = zoneinfo.ZoneInfo("Europe/Moscow")
