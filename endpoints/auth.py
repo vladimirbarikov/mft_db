@@ -50,29 +50,38 @@ Last Modified: 2026-08-19
 License: MIT
 Status: Production
 """
+# Standard library imports
 from pathlib import Path
+import sys
 import os
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Dict, Any, List, Optional, Tuple
 
+# Third-party imports
 from flask import request, jsonify, g
 import jwt
 from dotenv import load_dotenv
 
+# The relative path to the root project directory
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    PROJECT_ROOT = Path("/opt/airflow")
+
+# Add the project path to sys.path
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Load environment variables
+env_path = PROJECT_ROOT / '.env'
+load_dotenv(dotenv_path=env_path)
+
+# Local imports
 from config import get_logger
 
+# Logger setup
 logger = get_logger(__name__)
-
-
-# ============================================================================
-# LOAD ENVIRONMENT VARIABLES
-# ============================================================================
-
-# Load .env file
-project_path = Path(__file__).resolve().parents[1]
-env_path = project_path / '.env'
-load_dotenv(env_path)
 
 
 # ============================================================================

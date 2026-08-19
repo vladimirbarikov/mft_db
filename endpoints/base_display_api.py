@@ -35,7 +35,6 @@ from datetime import datetime
 from typing import Dict, Any, List, Callable
 import pytz
 
-
 # Third-party imports
 import polars as pl
 from sqlalchemy import String

@@ -32,6 +32,7 @@ from typing import Dict, Any, Optional
 from functools import wraps
 
 # Third-party imports
+from dotenv import load_dotenv
 from flask import Blueprint, Flask, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -52,6 +53,10 @@ except NameError:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Load environment variables
+env_path = PROJECT_ROOT / '.env'
+load_dotenv(dotenv_path=env_path)
+
 # Local imports
 from config import get_logger
 from dags.tasks.connector import initialize_database
@@ -62,7 +67,7 @@ from database.views import (
 )
 
 # Logger setup
-logger = get_logger("endpoints.part_history_api")
+logger = get_logger(__name__)
 
 # ========== CONFIGURATION ==========
 

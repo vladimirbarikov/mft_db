@@ -1,3 +1,5 @@
+# pylint: disable=too-many-lines
+# pylint: disable=wrong-import-position
 """
 Flask API for Database User Management.
 
@@ -47,26 +49,38 @@ Last Modified: 2025
 License: MIT
 Status: Production
 """
+# Standard library imports
+from pathlib import Path
+import sys
 import os
-import logging
+
+# Third-party imports
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError, OperationalError, ProgrammingError, IntegrityError
-from dotenv import load_dotenv
 
-# Import user classes from user_roles.py
-from database.user_roles import DatabaseAdmin, DatabaseEditor, DatabaseViewer
+# The relative path to the root project directory
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    PROJECT_ROOT = Path("/opt/airflow")
 
-# Logger setup
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Add the project path to sys.path
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Load environment variables
 env_path = os.path.join(os.path.dirname(__file__), '.env')
 load_dotenv(env_path)
+
+# Local imports
+from config import get_logger
+from database.user_roles import DatabaseAdmin, DatabaseEditor, DatabaseViewer
+
+# Logger setup
+logger = get_logger(__name__)
+
 
 # Create Flask application
 app = Flask(__name__)

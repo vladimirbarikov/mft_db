@@ -70,30 +70,35 @@ Last Modified: 2026-08-18
 License: MIT
 Status: Production
 """
+# Standard library imports
 from pathlib import Path
 import os
-import logging
+import sys
+
+# Third-party imports
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError, OperationalError, ProgrammingError, DatabaseError
 from dotenv import load_dotenv
 
-# ============================================================================
-# LOGGER SETUP
-# ============================================================================
+# The relative path to the root project directory
+try:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+except NameError:
+    PROJECT_ROOT = Path("/opt/airflow")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Add the project path to sys.path
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# ============================================================================
-# ENVIRONMENT SETUP
-# ============================================================================
+# Load environment variables
+env_path = PROJECT_ROOT / '.env'
+load_dotenv(dotenv_path=env_path)
 
-project_path = Path(__file__).resolve().parents[1]
-env_path = project_path / '.env'
-load_dotenv(env_path)
+# Local imports
+from config import get_logger
+
+# Logger setup
+logger = get_logger(__name__)
 
 
 def quote_identifier(identifier: str) -> str:
