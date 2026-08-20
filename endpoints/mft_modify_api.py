@@ -36,7 +36,7 @@ KEY FEATURES:
 
     6. Security & Access Control:
         - JWT authentication required for all endpoints
-        - Role-based access control (admin, engineer, planner)
+        - Role-based access control (admin, editor, viewer)
         - Rate limiting to prevent abuse
         - Full audit log: who, when, why
 
@@ -57,12 +57,6 @@ BUSINESS VALUE:
     - Full traceability of every modification
     - Ability to rollback ANY change at ANY time
     - Single source of truth for all changes
-
-TECHNICAL DEBT PAID:
-    - Solves "silent updates" problem
-    - Eliminates need for separate audit tables
-    - Maintains data integrity across all change sources
-    - Provides unified change management interface
 
 ENDPOINTS OVERVIEW:
     POST   /api/v1/parts/{part_number}/modify
@@ -98,318 +92,300 @@ DEPENDENCIES:
     pyjwt 2.8.0+         - JWT authentication
     SQLAlchemy 1.4.54+   - Database ORM
 
-CRITICAL CONCEPTS:
-    - Virtual Breakpoint: A breakpoint created for manual changes
-      (MAN-YYYYMMDD-XXXX format)
-    - Change Source: 'manual' for API changes, 'automatic' for BP pipeline
-    - Atomic Group: All changes in one request share one breakpoint_id
-    - Smart Versioning: New version created only when attributes actually change
-
-TODO (Before Production):
-    1. Test all endpoints thoroughly
-    2. Adjust import paths for project structure
-    3. Validate database connection handling in production
-    4. Review and adjust rate limits based on load testing
-    5. Add proper error handling for edge cases
-    6. Implement comprehensive logging strategy
-    7. Replace /auth/token with proper OAuth2/LDAP integration
-    8. Add request validation for all edge cases
-    9. Write integration tests
-    10. Document all endpoints with examples
-
-Maintainer: PLD Engineering Center
 Version: 1.0.0
+Compatibility: Python 3.14.4+, Flask 3.0.3+
+Maintainer: PLD Engineering Center
 Created: 2026-08-18
-Last Modified: 2026-08-18
+Last Modified: 2026-08-19
 License: MIT
 Status: Development
 """
 # Standard library imports
-import sys
 from pathlib import Path
-from datetime import datetime
-from typing import Optional, Dict, Any
-import logging
+import sys
 import os
+from datetime import datetime
 from functools import wraps
+from typing import Dict, Any, Optional, cast
+import zoneinfo
 
 # Third-party imports
-from flask import Flask, request, jsonify, Blueprint, current_app
+from dotenv import load_dotenv
+from flask import Flask, Blueprint, request, jsonify
+from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_cors import CORS
 from marshmallow import Schema, fields, validate, ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from sqlalchemy import text, select
-import jwt
 
 # The relative path to the root project directory
 try:
     PROJECT_ROOT = Path(__file__).resolve().parents[1]
 except NameError:
-    # If __file__ is not defined (in exec() or interactive mode)
     PROJECT_ROOT = Path("/opt/airflow")
 
 # Add project root to path if needed
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Load environment variables
+env_path = PROJECT_ROOT / '.env'
+load_dotenv(dotenv_path=env_path)
+
 # Local imports
 from config import get_logger
 from dags.tasks.connector import initialize_database
-from dags.tasks.bp_mapper import create_bp_mapper
 from dags.tasks.change_classifier import ChangeClassifier
+from endpoints.auth import (
+    jwt_required,
+    role_required,
+    get_current_email,
+    get_current_username,
+    ROLES,
+    generate_token,
+)
 from database.database import (
     # Entity tables
     SupplierData, PartData, BoxData, PalletData, ModelData,
     ConfigurationData, WorkshopData, LineData, BreakpointData,
     # Junction tables
-    PartToBox, BoxToPallet, PartToModel, PartToLine, PartToBreakpoint
+    PartToBox, BoxToPallet, PartToModel,
+    PartToLine, PartToBreakpoint,
 )
+from database.views import PartHistoryView, ActivePartsFullView
+
 
 # Logger setup
 logger = get_logger(__name__)
 
-# ============================================================================
-# FLASK APP SETUP
-# ============================================================================
+# ========== TIMEZONE ==========
+MOSCOW_TZ = zoneinfo.ZoneInfo("Europe/Moscow")
 
-app = Flask(__name__)
+# ========== CONFIGURATION ==========
+FLASK_SECRET_KEY = os.getenv('FLASK_SECRET_KEY')
+if not FLASK_SECRET_KEY:
+    raise RuntimeError("FLASK_SECRET_KEY must be set in .env file")
 
-# Configuration
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-app.config['JWT_ALGORITHM'] = os.getenv('JWT_ALGORITHM', 'HS256')
-app.config['CORS_ORIGINS'] = os.getenv('CORS_ORIGINS', '*').split(',')
+FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
+FLASK_PORT = int(os.getenv('MFT_MODIFY_API_PORT', '5004'))
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+FLASK_ENV = os.getenv('FLASK_ENV', 'development')
+IS_PRODUCTION = FLASK_ENV == 'production'
 
-# Enable CORS
-CORS(app, origins=app.config['CORS_ORIGINS'])
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
+RATE_LIMIT = os.getenv('RATE_LIMIT', '10 per minute')
+RATE_LIMIT_STORAGE_URL = os.getenv('RATE_LIMIT_STORAGE_URL', 'memory://')
 
-# Rate limiter setup
+# ========== CREATING BLUEPRINT ==========
+modify_bp = Blueprint('modify', __name__, url_prefix='/api/v1')
+
+# ========== RATE LIMITING SETUP ==========
 limiter = Limiter(
-    app=app,
     key_func=get_remote_address,
+    storage_uri=RATE_LIMIT_STORAGE_URL,
     default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://",
+    strategy="fixed-window"
 )
 
-# Create blueprint for API routes
-api_bp = Blueprint('api', __name__, url_prefix='/api/v1')
 
-
-# ============================================================================
-# JWT AUTHENTICATION DECORATOR
-# ============================================================================
-
-def jwt_required(f):
-    """Decorator to protect endpoints with JWT authentication."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-
-        if not auth_header:
-            return jsonify({
-                'success': False,
-                'error': 'Missing Authorization header'
-            }), 401
-
-        try:
-            # Extract token from "Bearer <token>"
-            parts = auth_header.split()
-            if len(parts) != 2 or parts[0].lower() != 'bearer':
-                return jsonify({
-                    'success': False,
-                    'error': 'Invalid Authorization header format. Use: Bearer <token>'
-                }), 401
-
-            token = parts[1]
-
-            # Decode token
-            payload = jwt.decode(
-                token,
-                current_app.config['SECRET_KEY'],
-                algorithms=[current_app.config['JWT_ALGORITHM']]
-            )
-
-            # Add user info to request context
-            request.user = payload.get('sub')
-            request.user_roles = payload.get('roles', [])
-            request.user_email = payload.get('email')
-
-            logger.debug("JWT authenticated: %s", request.user)
-
-        except jwt.ExpiredSignatureError:
-            return jsonify({
-                'success': False,
-                'error': 'Token has expired'
-            }), 401
-        except jwt.InvalidTokenError as e:
-            return jsonify({
-                'success': False,
-                'error': f'Invalid token: {str(e)}'
-            }), 401
-        except Exception as e:
-            logger.error("JWT validation error: %s", str(e))
-            return jsonify({
-                'success': False,
-                'error': 'Authentication error'
-            }), 401
-
-        return f(*args, **kwargs)
-
-    return decorated_function
-
-
-def role_required(required_roles):
-    """Decorator to check user roles."""
+def rate_limit(limit_string: Optional[str] = None):
+    """Decorator factory for applying rate limits to endpoints."""
     def decorator(f):
         @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if not hasattr(request, 'user_roles'):
-                return jsonify({
-                    'success': False,
-                    'error': 'Authentication required'
-                }), 401
-
-            user_roles = request.user_roles
-            if not any(role in user_roles for role in required_roles):
-                return jsonify({
-                    'success': False,
-                    'error': f'Insufficient permissions. Required roles: {required_roles}'
-                }), 403
-
-            return f(*args, **kwargs)
-        return decorated_function
+        def wrapped(*args, **kwargs):
+            return limiter.limit(limit_string or RATE_LIMIT)(f)(*args, **kwargs)
+        return wrapped
     return decorator
 
 
 # ============================================================================
-# MARSHMALLOW SCHEMAS (Request/Response Validation)
+# MARSHMALLOW SCHEMAS
 # ============================================================================
 
 class PartChangeSchema(Schema):
     """Request schema for part modification."""
-
     model_code = fields.Str(
         required=True,
         validate=validate.OneOf(
             ['jolion', 'h3', 'f7', 'f7x', 'dargo', 'h7',
              'a01', 'a08', 'b02', 'b04', 'b06', 'b16'],
-            error="Invalid model_code. Must be one of: jolion, h3, f7, f7x, dargo, h7, a01, a08, b02, b04, b06, b16"
-        ),
-        description="Model code (e.g., 'jolion', 'h3', 'f7')"
+            error="Invalid model_code"
+        )
     )
-
     changes = fields.Dict(
         required=True,
-        validate=validate.Length(min=1, error="At least one change must be provided"),
-        description="Dictionary of fields to change and their new values"
+        validate=validate.Length(min=1, error="At least one change required")
     )
-
     change_reason = fields.Str(
         required=True,
-        validate=validate.Length(min=10, max=500),
-        description="Reason for the change (mandatory)"
+        validate=validate.Length(min=5, max=500)
     )
-
     ticket_number = fields.Str(
         required=False,
         allow_none=True,
-        validate=validate.Length(max=50),
-        description="Ticket number in JIRA/YouTrack"
+        validate=validate.Length(max=50)
     )
 
-    force_create_new_version = fields.Bool(
-        required=False,
-        missing=False,
-        description="Force creation of new version even if attributes didn't change"
-    )
-
-    # Custom validation for changes fields
     @staticmethod
-    def validate_changes(data, **kwargs):
-        """Validate that changes contain only allowed fields."""
+    def _get_type_name(type_spec):
+        """Get readable type name from type specification."""
+        if isinstance(type_spec, tuple):
+            return ' or '.join(t.__name__ for t in type_spec)
+        return type_spec.__name__
+
+    @staticmethod
+    def validate_changes(data):
+        """
+        Validate changes contain only allowed fields and correct data types.
+        
+        Типы данных соответствуют моделям из database.py:
+        - String поля: str
+        - Numeric поля: float (int или float)
+        - Integer поля: int
+        - ENUM поля: str (проверка на допустимые значения)
+        """
         allowed_fields = {
-            'part_name', 'part_weight_kg', 'supplier_name', 'localization',
-            'box_type', 'box_length_mm', 'box_width_mm', 'box_height_mm',
-            'pallet_type', 'pallet_length_mm', 'pallet_width_mm', 'pallet_height_mm',
-            'line_code', 'line_name', 'workshop_code',
-            'configuration', 'part_per_vehicle', 'transmission',
-            'box_weight_kg', 'box_stacking',
-            'pallet_weight_kg', 'pallet_stacking',
-            'part_per_box', 'box_per_pallet'
+            # PartData (String)
+            'part_name': {'type': str, 'max_length': 100},
+
+            # PartData (Numeric)
+            'part_weight_kg': {'type': (int, float), 'min': 0},
+
+            # SupplierData (String + ENUM)
+            'supplier_name': {'type': str, 'max_length': 200},
+            'localization': {'type': str, 'enum': ['yes', 'no', 'no data']},
+
+            # BoxData (ENUM + Integer + Numeric)
+            'box_type': {'type': str, 'enum': ['returnable', 'non-returnable', 'no data']},
+            'box_length_mm': {'type': int, 'min': 1},
+            'box_width_mm': {'type': int, 'min': 1},
+            'box_height_mm': {'type': int, 'min': 1},
+            'box_weight_kg': {'type': (int, float), 'min': 0},
+            'box_stacking': {'type': int, 'min': 0},
+
+            # PalletData (ENUM + Integer + Numeric)
+            'pallet_type': {'type': str, 'enum': ['returnable', 'non-returnable', 'no data']},
+            'pallet_length_mm': {'type': int, 'min': 1},
+            'pallet_width_mm': {'type': int, 'min': 1},
+            'pallet_height_mm': {'type': int, 'min': 1},
+            'pallet_weight_kg': {'type': (int, float), 'min': 0},
+            'pallet_stacking': {'type': int, 'min': 0},
+
+            # LineData (String)
+            'line_code': {'type': str, 'max_length': 10},
+            'line_name': {'type': str, 'max_length': 50},
+
+            # WorkshopData (ENUM)
+            'workshop_code': {
+                'type': str,
+                'enum': ['as', 'comp', 'paint', 'weld', 'stamp', 'engine', 'no data']
+            },
+
+            # ConfigurationData (ENUM + String)
+            'configuration': {
+                'type': str,
+                'enum': ['comfort', 'elite', 'tech-plus', 'premium', 'no data']
+            },
+            'transmission': {'type': str, 'max_length': 100},
+
+            # Junction tables (Integer > 0)
+            'part_per_vehicle': {'type': int, 'min': 1},
+            'part_per_box': {'type': int, 'min': 1},
+            'box_per_pallet': {'type': int, 'min': 1},
         }
 
         changes = data.get('changes', {})
-        invalid_fields = set(changes.keys()) - allowed_fields
 
+        # 1. Check for invalid fields
+        invalid_fields = set(changes.keys()) - set(allowed_fields.keys())
         if invalid_fields:
             raise ValidationError(
                 f"Invalid fields: {', '.join(invalid_fields)}. "
-                f"Allowed fields: {', '.join(allowed_fields)}"
+                f"Allowed fields: {', '.join(sorted(allowed_fields.keys()))}"
             )
+
+        # 2. Checking the types and values for each field
+        errors = []
+        for field, value in changes.items():
+            rule = allowed_fields[field]
+
+            # Check for None
+            if value is None:
+                errors.append(f"Field '{field}' cannot be None")
+                continue
+
+            # Type verification
+            expected_type = rule['type']
+            if not isinstance(value, expected_type):
+                # For float allow int
+                if expected_type == (int, float) and isinstance(value, (int, float)):
+                    pass
+                else:
+                    errors.append(
+                        f"Field '{field}' must be of type {PartChangeSchema._get_type_name(expected_type)}, "
+                        f"got {type(value).__name__}"
+                    )
+                    continue
+
+            # Length check for strings
+            if 'max_length' in rule and isinstance(value, str):
+                if len(value) > rule['max_length']:
+                    errors.append(
+                        f"Field '{field}' exceeds maximum length {rule['max_length']} "
+                        f"(got {len(value)} characters)"
+                    )
+
+            # Checking ENUM values
+            if 'enum' in rule and isinstance(value, str):
+                if value not in rule['enum']:
+                    errors.append(
+                        f"Field '{field}' must be one of: {', '.join(rule['enum'])}, "
+                        f"got '{value}'"
+                    )
+
+            # Checking the minimum value
+            if 'min' in rule:
+                try:
+                    if value < rule['min']:
+                        errors.append(
+                            f"Field '{field}' must be >= {rule['min']}, got {value}"
+                        )
+                except TypeError:
+                    errors.append(
+                        f"Field '{field}' cannot be compared with {rule['min']} "
+                        f"(type: {type(value).__name__})"
+                    )
+
+        if errors:
+            raise ValidationError("; ".join(errors))
 
         return data
 
 
-class PartChangeResponseSchema(Schema):
-    """Response schema for part modification."""
-
-    success = fields.Bool(required=True)
-    message = fields.Str(required=True)
-    breakpoint_id = fields.Str(required=False, allow_none=True)
-    breakpoint_number = fields.Str(required=False, allow_none=True)
-    old_part_id = fields.Str(required=False, allow_none=True)
-    new_part_id = fields.Str(required=False, allow_none=True)
-    old_version = fields.Int(required=False, allow_none=True)
-    new_version = fields.Int(required=False, allow_none=True)
-    changes_applied = fields.Dict(required=False, default={})
-    created_at = fields.DateTime(required=False)
-
-
-class PartHistorySchema(Schema):
-    """Response schema for part history."""
-
-    success = fields.Bool(required=True)
-    part_number = fields.Str(required=True)
-    total_versions = fields.Int(required=True)
-    history = fields.List(fields.Dict, required=True)
-
-
 class RollbackSchema(Schema):
     """Request schema for rollback."""
-
     model_code = fields.Str(
         required=True,
         validate=validate.OneOf(
             ['jolion', 'h3', 'f7', 'f7x', 'dargo', 'h7',
              'a01', 'a08', 'b02', 'b04', 'b06', 'b16']
-        ),
-        description="Model code"
+        )
     )
-    reason = fields.Str(
-        required=False,
-        allow_none=True,
-        validate=validate.Length(max=500),
-        description="Reason for rollback"
-    )
-    ticket_number = fields.Str(
-        required=False,
-        allow_none=True,
-        validate=validate.Length(max=50),
-        description="Ticket number"
-    )
+    reason = fields.Str(required=False, allow_none=True, validate=validate.Length(max=500))
+    ticket_number = fields.Str(required=False, allow_none=True, validate=validate.Length(max=50))
 
 
 # ============================================================================
-# CORE SERVICE LOGIC
+# CORE SERVICE
 # ============================================================================
 
 class ManualChangeService:
     """Service for handling manual part changes with virtual breakpoints."""
 
-    def __init__(self, db_session: Session):
-        self.session = db_session
-        self.mapper = create_bp_mapper(db_session.bind)
+    def __init__(self, session: Session):
+        self.session = session
 
     def create_virtual_breakpoint(
         self,
@@ -421,82 +397,156 @@ class ManualChangeService:
         changes: Dict[str, Any],
         change_domain: str,
         change_nature: str
-    ) -> str:
+    ) -> BreakpointData:
         """Create a virtual breakpoint for manual changes."""
-        # Generate breakpoint number: MAN-YYYYMMDD-XXXX
-        today = datetime.now().strftime('%Y%m%d')
+        today = datetime.now(MOSCOW_TZ).strftime('%Y%m%d')
 
-        # Count existing manual breakpoints for today
         count_query = text("""
-            SELECT COUNT(*) 
-            FROM breakpoint_data 
+            SELECT COUNT(*)
+            FROM breakpoint_data
             WHERE breakpoint_number LIKE :pattern
         """)
         pattern = f"MAN-{today}-%"
         count = self.session.execute(count_query, {'pattern': pattern}).scalar() or 0
         seq = str(count + 1).zfill(4)
-
         breakpoint_number = f"MAN-{today}-{seq}"
 
-        # Prepare description
         changes_summary = ', '.join([f"{k}={v}" for k, v in changes.items()])
         description = f"""MANUAL CHANGE
-        Part: {part_number}
-        Model: {model_code}
-        Domain: {change_domain}
-        Nature: {change_nature}
-        Changes: {changes_summary}
-        Reason: {change_reason}
-        Ticket: {ticket_number or 'N/A'}
-        Changed by: {changed_by}"""
+            Part: {part_number}
+            Model: {model_code}
+            Domain: {change_domain}
+            Nature: {change_nature}
+            Changes: {changes_summary}
+            Reason: {change_reason}
+            Ticket: {ticket_number or 'N/A'}
+            Changed by: {changed_by}"""
 
-        # Create breakpoint with classification
-        new_breakpoint = BreakpointData(
-            breakpoint_number=breakpoint_number,
-            breakpoint_status='closed',
-            breakpoint_date=datetime.now(),
-            description=description.strip(),
-            solution=f"Manual change by {changed_by}",
-            change_domain=change_domain,
-            change_nature=change_nature,
-        )
+        # Create a BreakpointData object by assigning attributes
+        bp = BreakpointData()
+        bp.breakpoint_number = breakpoint_number
+        bp.breakpoint_status = 'closed'
+        bp.breakpoint_date = datetime.now(MOSCOW_TZ)
+        bp.description = description.strip()
+        bp.solution = f"Manual change by {changed_by}"
+        bp.change_domain = change_domain
+        bp.change_nature = change_nature
 
-        self.session.add(new_breakpoint)
+        self.session.add(bp)
         self.session.flush()
 
         logger.info(
-            "Created virtual breakpoint %s (%s) with classification: domain=%s, nature=%s",
-            breakpoint_number, new_breakpoint.breakpoint_id, change_domain, change_nature
+            "Created virtual breakpoint %s (domain=%s, nature=%s)",
+            breakpoint_number, change_domain, change_nature
         )
 
-        return new_breakpoint.breakpoint_id
+        return bp
 
-    def apply_changes_to_part(
+    def get_active_version(self, part_number: str, model_code: str) -> Optional[Dict[str, Any]]:
+        """
+        Get currently active version of part for model using ActivePartsFullView.
+        
+        Использует представление v_active_parts_full, которое уже содержит
+        все необходимые данные и фильтрует только активные записи.
+        """
+        part = self.session.query(ActivePartsFullView).where(
+            ActivePartsFullView.part_number == part_number,
+            ActivePartsFullView.model_code == model_code,
+            ActivePartsFullView.is_active.is_(True)
+        ).first()
+
+        if part:
+            return {
+                'part_id': part.part_id,
+                'part_number': part.part_number,
+                'version_number': part.version_number,
+                'part_name': part.part_name,
+                'part_weight_kg': float(part.part_weight_kg) if part.part_weight_kg else None,
+                'supplier_id': part.supplier_id,
+                'original_part_id': part.original_part_id,
+                'created_at': part.created_at,
+                'supplier_name': part.supplier_name,
+                'configuration_id': part.configuration_id,
+                'part_per_vehicle': part.part_per_vehicle,
+            }
+        return None
+
+    def get_part_attributes(self, part_id: str) -> Dict[str, Any]:
+        """
+        Get all attributes of a part version using ActivePartsFullView.
+        
+        Использует представление v_active_parts_full для получения всех
+        атрибутов детали в денормализованном виде.
+        """
+        part = self.session.query(ActivePartsFullView).where(
+            ActivePartsFullView.part_id == part_id
+        ).first()
+
+        if not part:
+            return {}
+
+        return {
+            'part_number': part.part_number,
+            'part_name': part.part_name,
+            'part_weight_kg': float(part.part_weight_kg) if part.part_weight_kg else None,
+            'supplier_name': part.supplier_name,
+            'localization': part.localization,
+            'box_type': part.box_type,
+            'box_length_mm': part.box_length_mm,
+            'box_width_mm': part.box_width_mm,
+            'box_height_mm': part.box_height_mm,
+            'box_weight_kg': float(part.box_weight_kg) if part.box_weight_kg else None,
+            'box_stacking': part.box_stacking,
+            'pallet_type': part.pallet_type,
+            'pallet_length_mm': part.pallet_length_mm,
+            'pallet_width_mm': part.pallet_width_mm,
+            'pallet_height_mm': part.pallet_height_mm,
+            'pallet_weight_kg': float(part.pallet_weight_kg) if part.pallet_weight_kg else None,
+            'pallet_stacking': part.pallet_stacking,
+            'line_code': part.line_code,
+            'line_name': part.line_name,
+            'workshop_code': part.workshop_code,
+            'configuration': part.configuration,
+            'transmission': part.transmission,
+            'part_per_vehicle': part.part_per_vehicle,
+            'part_per_box': part.part_per_box,
+            'box_per_pallet': part.box_per_pallet,
+            'box_id': part.box_id,
+            'pallet_id': part.pallet_id,
+            'configuration_id': part.configuration_id,
+        }
+
+    def apply_changes(
         self,
         part_number: str,
         model_code: str,
         changes: Dict[str, Any],
-        breakpoint_id: str,
-        changed_by: str,
-        change_domain: str,
-        change_nature: str
+        bp: BreakpointData,
+        changed_by: str
     ) -> Dict[str, Any]:
         """Apply changes to part, creating new version if needed."""
-        # 1. Get current active version for model
-        current_version = self._get_active_version(part_number, model_code)
-        if not current_version:
+        # 1. Get current active version
+        current = self.get_active_version(part_number, model_code)
+        if not current:
             raise ValueError(f"Part {part_number} not found for model {model_code}")
 
-        old_part_id = current_version['part_id']
-        old_version_number = current_version['version_number']
+        old_part_id = current['part_id']
+        old_version = current['version_number']
 
-        # 2. Check if any changes are actually different
-        current_attrs = self._get_part_attributes(old_part_id)
+        # 2. Get current attributes
+        current_attrs = self.get_part_attributes(old_part_id)
+
+        # 3. Detect actual changes
         actual_changes = {}
-
         for field, new_value in changes.items():
             current_value = current_attrs.get(field)
-            # Compare values (convert to string for safe comparison)
+
+            if current_value is None and new_value is None:
+                continue
+            if current_value is None or new_value is None:
+                actual_changes[field] = new_value
+                continue
+
             if str(current_value) != str(new_value):
                 actual_changes[field] = new_value
 
@@ -505,13 +555,13 @@ class ManualChangeService:
             return {
                 'old_part_id': old_part_id,
                 'new_part_id': old_part_id,
-                'old_version': old_version_number,
-                'new_version': old_version_number,
+                'old_version': old_version,
+                'new_version': old_version,
                 'changes_applied': {},
                 'is_new_version': False
             }
 
-        # 3. Create new version of part
+        # 4. Create new version
         new_part = self._create_new_version(
             old_part_id,
             part_number,
@@ -520,125 +570,40 @@ class ManualChangeService:
         )
 
         new_part_id = new_part.part_id
-        new_version_number = new_part.version_number
+        new_version = new_part.version_number
 
-        # 4. Get model_id
-        model_id = self.mapper.get_model_id_by_code(model_code)
-        if not model_id:
-            raise ValueError(f"Model {model_code} not found")
+        # 5. Get model and config IDs
+        model_id = self._get_model_id(model_code)
+        config_id = self._get_configuration_id(actual_changes.get('configuration', current_attrs.get('configuration')))
 
-        # 5. Deactivate old version for this model
-        self._deactivate_part_for_model(old_part_id, model_id, breakpoint_id)
+        # 6. Deactivate old version
+        self._deactivate_part_for_model(old_part_id, model_id, bp.breakpoint_id)
 
-        # 6. Activate new version for this model
-        self._activate_part_for_model(new_part_id, model_id, breakpoint_id, current_attrs)
-
-        # 7. Create PartToBreakpoint record
-        self._create_transition_record(
+        # 7. Activate new version
+        self._activate_part_for_model(
             new_part_id,
-            old_part_id,
-            breakpoint_id,
-            model_id
+            model_id,
+            config_id,
+            actual_changes.get('part_per_vehicle', current_attrs.get('part_per_vehicle'))
         )
 
-        # 8. Commit all changes
-        self.session.commit()
+        # 8. Create transition record
+        self._create_transition(new_part_id, old_part_id, bp.breakpoint_id, model_id)
 
         logger.info(
-            "Successfully applied changes to part %s: v%d → v%d (domain=%s, nature=%s)",
-            part_number, old_version_number, new_version_number,
-            change_domain, change_nature
+            "User %s applied changes to part %s: v%d → v%d (breakpoint: %s)",
+            changed_by, part_number, old_version, new_version, bp.breakpoint_number
         )
 
         return {
             'old_part_id': old_part_id,
             'new_part_id': new_part_id,
-            'old_version': old_version_number,
-            'new_version': new_version_number,
+            'old_version': old_version,
+            'new_version': new_version,
             'changes_applied': actual_changes,
-            'is_new_version': True
+            'is_new_version': True,
+            'changed_by': changed_by
         }
-
-    def _get_active_version(self, part_number: str, model_code: str) -> Optional[Dict[str, Any]]:
-        """Get the currently active version of a part for a model."""
-        query = text("""
-            SELECT 
-                p.part_id,
-                p.part_number,
-                p.version_number,
-                p.part_name,
-                p.part_weight_kg,
-                p.supplier_id,
-                p.created_at
-            FROM part_data p
-            JOIN part_to_model ptm ON p.part_id = ptm.part_id
-            JOIN model_data m ON ptm.model_id = m.model_id
-            WHERE p.part_number = :part_number
-              AND m.model_code = :model_code
-              AND ptm.is_active = true
-            ORDER BY p.version_number DESC
-            LIMIT 1
-        """)
-
-        result = self.session.execute(query, {
-            'part_number': part_number,
-            'model_code': model_code
-        }).first()
-
-        if result:
-            return dict(result._mapping)
-        return None
-
-    def _get_part_attributes(self, part_id: str) -> Dict[str, Any]:
-        """Get all attributes of a part version."""
-        query = text("""
-            SELECT 
-                p.part_number,
-                p.part_name,
-                p.part_weight_kg,
-                s.supplier_name,
-                s.localization,
-                b.box_type,
-                b.box_length_mm,
-                b.box_width_mm,
-                b.box_height_mm,
-                b.box_weight_kg,
-                b.box_stacking,
-                pl.pallet_type,
-                pl.pallet_length_mm,
-                pl.pallet_width_mm,
-                pl.pallet_height_mm,
-                pl.pallet_weight_kg,
-                pl.pallet_stacking,
-                l.line_code,
-                l.line_name,
-                w.workshop_code,
-                c.configuration,
-                c.transmission,
-                ptm.part_per_vehicle,
-                ptb.part_per_box,
-                btp.box_per_pallet,
-                b.box_id,
-                pl.pallet_id
-            FROM part_data p
-            LEFT JOIN supplier_data s ON p.supplier_id = s.supplier_id
-            LEFT JOIN part_to_box ptb ON p.part_id = ptb.part_id
-            LEFT JOIN box_data b ON ptb.box_id = b.box_id
-            LEFT JOIN box_to_pallet btp ON p.part_id = btp.part_id
-            LEFT JOIN pallet_data pl ON btp.pallet_id = pl.pallet_id
-            LEFT JOIN part_to_line ptl ON p.part_id = ptl.part_id
-            LEFT JOIN line_data l ON ptl.line_id = l.line_id
-            LEFT JOIN workshop_data w ON l.workshop_id = w.workshop_id
-            LEFT JOIN part_to_model ptm ON p.part_id = ptm.part_id
-            LEFT JOIN configuration_data c ON ptm.configuration_id = c.configuration_id
-            WHERE p.part_id = :part_id
-            LIMIT 1
-        """)
-
-        result = self.session.execute(query, {'part_id': part_id}).first()
-        if result:
-            return dict(result._mapping)
-        return {}
 
     def _create_new_version(
         self,
@@ -647,85 +612,69 @@ class ManualChangeService:
         changes: Dict[str, Any],
         current_attrs: Dict[str, Any]
     ) -> PartData:
-        """Create a new version of the part with changes applied."""
-        # Get old version info
+        """Create a new version of the part."""
         old_part = self.session.get(PartData, old_part_id)
-        if not old_part:
+        if old_part is None:
             raise ValueError(f"Part version {old_part_id} not found")
 
-        # Determine original_part_id
+        old_part = cast(PartData, old_part)
+
         original_part_id = old_part.original_part_id or old_part_id
 
-        # Calculate new version number with locking
+        # Get next version number with lock
         version_query = text("""
             SELECT COALESCE(MAX(version_number), 0) + 1
             FROM part_data
             WHERE original_part_id = :original_part_id
             FOR UPDATE
         """)
-
         new_version = self.session.execute(
             version_query,
             {'original_part_id': original_part_id}
         ).scalar() or 1
 
-        # Create new part with all attributes (copy from old + apply changes)
+        # Build new part data
         new_part_data = {
             'part_number': part_number,
             'original_part_id': original_part_id,
             'version_number': new_version,
-            'part_name': old_part.part_name,
-            'part_weight_kg': old_part.part_weight_kg,
-            'supplier_id': old_part.supplier_id,
-            'created_at': datetime.now()
+            'part_name': changes.get('part_name', old_part.part_name),
+            'part_weight_kg': changes.get('part_weight_kg', old_part.part_weight_kg),
         }
 
-        # Apply changes to the new part
-        for field, value in changes.items():
-            if field == 'part_name':
-                new_part_data['part_name'] = value
-            elif field == 'part_weight_kg':
-                new_part_data['part_weight_kg'] = value
-            elif field == 'supplier_name':
-                # Need to create/find supplier
-                localization = changes.get('localization', current_attrs.get('localization', 'no data'))
-                supplier_id = self._ensure_supplier(value, localization)
-                new_part_data['supplier_id'] = supplier_id
-            elif field == 'localization':
-                # Will be handled with supplier
-                pass
+        # Handle supplier
+        if 'supplier_name' in changes or 'localization' in changes:
+            supplier_name = changes.get('supplier_name')
+            if supplier_name is None:
+                supplier_name = current_attrs.get('supplier_name')
 
-        # Create new part record
+            if not supplier_name:
+                raise ValueError("supplier_name is required when changing supplier")
+
+            localization = changes.get('localization')
+            if localization is None:
+                localization = current_attrs.get('localization', 'no data')
+
+            new_part_data['supplier_id'] = self._ensure_supplier(str(supplier_name), str(localization))
+        else:
+            new_part_data['supplier_id'] = old_part.supplier_id
+
         new_part = PartData(**new_part_data)
         self.session.add(new_part)
         self.session.flush()
 
-        # Handle box changes
-        box_changed = any(k.startswith('box_') for k in changes.keys())
-        if box_changed or 'box_type' in changes:
-            # Get box ID from current or create new
-            if 'box_type' in changes:
-                # New box specified
-                box_id = self._ensure_box(changes)
-            else:
-                # Keep current box
-                box_id = current_attrs.get('box_id')
-
+        # Handle box
+        if any(k.startswith('box_') for k in changes.keys()) or 'box_type' in changes:
+            box_id = self._ensure_box(changes)
             if box_id:
                 part_per_box = changes.get('part_per_box', current_attrs.get('part_per_box'))
-                self._create_part_to_box(new_part.part_id, box_id, part_per_box)
+                self._ensure_part_to_box(new_part.part_id, box_id, part_per_box)
 
-        # Handle pallet changes
-        pallet_changed = any(k.startswith('pallet_') for k in changes.keys())
-        if pallet_changed or 'pallet_type' in changes:
-            if 'pallet_type' in changes:
-                pallet_id = self._ensure_pallet(changes)
-            else:
-                pallet_id = current_attrs.get('pallet_id')
-
+        # Handle pallet
+        if any(k.startswith('pallet_') for k in changes.keys()) or 'pallet_type' in changes:
+            pallet_id = self._ensure_pallet(changes)
             if pallet_id:
-                # Need to get box_id - either from changes or current
-                box_id = None
+                # Get box_id
                 if 'box_type' in changes:
                     box_id = self._ensure_box(changes)
                 else:
@@ -733,24 +682,16 @@ class ManualChangeService:
 
                 if box_id:
                     box_per_pallet = changes.get('box_per_pallet', current_attrs.get('box_per_pallet'))
-                    self._create_box_to_pallet(new_part.part_id, box_id, pallet_id, box_per_pallet)
+                    self._ensure_box_to_pallet(new_part.part_id, box_id, pallet_id, box_per_pallet)
 
-        # Handle line changes
+        # Handle line
         if 'line_code' in changes or 'workshop_code' in changes:
             line_code = changes.get('line_code', current_attrs.get('line_code'))
-            line_name = changes.get('line_name', current_attrs.get('line_name'))
-            workshop_code = changes.get('workshop_code', current_attrs.get('workshop_code'))
-
             if line_code:
-                line_id = self._ensure_line(line_code, line_name, workshop_code)
+                workshop_code = changes.get('workshop_code', current_attrs.get('workshop_code'))
+                line_id = self._ensure_line(line_code, changes.get('line_name'), workshop_code)
                 if line_id:
-                    self._create_part_to_line(new_part.part_id, line_id)
-
-        # Store configuration for later use in _activate_part_for_model
-        if 'configuration' in changes:
-            config_id = self._ensure_configuration(changes['configuration'])
-            if config_id:
-                new_part._temp_config_id = config_id
+                    self._ensure_part_to_line(new_part.part_id, line_id)
 
         return new_part
 
@@ -759,19 +700,18 @@ class ManualChangeService:
         if not supplier_name:
             raise ValueError("Supplier name is required")
 
-        query = select(SupplierData).where(
+        supplier = self.session.query(SupplierData).where(
             SupplierData.supplier_name == supplier_name
-        )
-        supplier = self.session.execute(query).scalar_one_or_none()
+        ).first()
 
         if supplier:
             return supplier.supplier_id
 
-        # Create new supplier
-        new_supplier = SupplierData(
-            supplier_name=supplier_name,
-            localization=localization
-        )
+        # Create a SupplierData object by assigning attributes.
+        new_supplier = SupplierData()
+        new_supplier.supplier_name = supplier_name
+        new_supplier.localization = localization
+
         self.session.add(new_supplier)
         self.session.flush()
         return new_supplier.supplier_id
@@ -779,42 +719,74 @@ class ManualChangeService:
     def _ensure_box(self, changes: Dict[str, Any]) -> Optional[str]:
         """Create or find box."""
         box_type = changes.get('box_type')
-        length = changes.get('box_length_mm')
-        width = changes.get('box_width_mm')
-        height = changes.get('box_height_mm')
+        length_raw = changes.get('box_length_mm')
+        width_raw = changes.get('box_width_mm')
+        height_raw = changes.get('box_height_mm')
 
-        if not all([box_type, length, width, height]):
+        # Check if box_type exists
+        if box_type is None:
             return None
 
-        # Convert to int if needed
+        # Convert to int with validation (if values exist)
         try:
-            length = int(length)
-            width = int(width)
-            height = int(height)
+            length = int(length_raw) if length_raw is not None else None
+            width = int(width_raw) if width_raw is not None else None
+            height = int(height_raw) if height_raw is not None else None
         except (ValueError, TypeError):
-            logger.warning("Invalid box dimensions: %s, %s, %s", length, width, height)
             return None
 
-        query = select(BoxData).where(
+        # Check: if the value is not None, then it must be > 0
+        if length is not None and length <= 0:
+            logger.warning("Invalid box length: %s (must be > 0 or None)", length)
+            return None
+        if width is not None and width <= 0:
+            logger.warning("Invalid box width: %s (must be > 0 or None)", width)
+            return None
+        if height is not None and height <= 0:
+            logger.warning("Invalid box height: %s (must be > 0 or None)", height)
+            return None
+
+        # If ALL dimensions are None, then you cannot create a box.
+        if length is None or width is None or height is None:
+            logger.warning("All box dimensions cannot be None")
+            return None
+
+        # Search for an existing box
+        box = self.session.query(BoxData).where(
             BoxData.box_type == box_type,
             BoxData.box_length_mm == length,
             BoxData.box_width_mm == width,
             BoxData.box_height_mm == height
-        )
-        box = self.session.execute(query).scalar_one_or_none()
+        ).first()
 
         if box:
             return box.box_id
 
-        # Create new box
-        new_box = BoxData(
-            box_type=box_type,
-            box_length_mm=length,
-            box_width_mm=width,
-            box_height_mm=height,
-            box_weight_kg=changes.get('box_weight_kg'),
-            box_stacking=changes.get('box_stacking')
-        )
+        # Creating a new box
+        new_box = BoxData()
+        new_box.box_type = box_type
+        new_box.box_length_mm = length
+        new_box.box_width_mm = width
+        new_box.box_height_mm = height
+
+        # The weight can be None or >= 0
+        box_weight = changes.get('box_weight_kg')
+        if box_weight is not None:
+            if box_weight >= 0:
+                new_box.box_weight_kg = box_weight
+            else:
+                logger.warning("Invalid box weight: %s (must be >= 0)", box_weight)
+                return None
+
+        # Stacking can be None or >= 0
+        box_stacking = changes.get('box_stacking')
+        if box_stacking is not None:
+            if box_stacking >= 0:
+                new_box.box_stacking = box_stacking
+            else:
+                logger.warning("Invalid box stacking: %s (must be >= 0)", box_stacking)
+                return None
+
         self.session.add(new_box)
         self.session.flush()
         return new_box.box_id
@@ -822,208 +794,190 @@ class ManualChangeService:
     def _ensure_pallet(self, changes: Dict[str, Any]) -> Optional[str]:
         """Create or find pallet."""
         pallet_type = changes.get('pallet_type')
-        length = changes.get('pallet_length_mm')
-        width = changes.get('pallet_width_mm')
-        height = changes.get('pallet_height_mm')
+        length_raw = changes.get('pallet_length_mm')
+        width_raw = changes.get('pallet_width_mm')
+        height_raw = changes.get('pallet_height_mm')
 
-        if not all([pallet_type, length, width, height]):
+        # Check if all values exist and not None
+        if pallet_type is None or length_raw is None or width_raw is None or height_raw is None:
             return None
 
-        # Convert to int if needed
+        # Convert to int with validation
         try:
-            length = int(length)
-            width = int(width)
-            height = int(height)
+            length = int(length_raw)
+            width = int(width_raw)
+            height = int(height_raw)
         except (ValueError, TypeError):
-            logger.warning("Invalid pallet dimensions: %s, %s, %s", length, width, height)
             return None
 
-        query = select(PalletData).where(
+        # Check that all values are > 0
+        if length <= 0 or width <= 0 or height <= 0:
+            logger.warning(
+                "Invalid pallet dimensions: length=%s, width=%s, height=%s (must be > 0)",
+                length, width, height
+            )
+            return None
+
+        pallet = self.session.query(PalletData).where(
             PalletData.pallet_type == pallet_type,
             PalletData.pallet_length_mm == length,
             PalletData.pallet_width_mm == width,
             PalletData.pallet_height_mm == height
-        )
-        pallet = self.session.execute(query).scalar_one_or_none()
+        ).first()
 
         if pallet:
             return pallet.pallet_id
 
-        # Create new pallet
-        new_pallet = PalletData(
-            pallet_type=pallet_type,
-            pallet_length_mm=length,
-            pallet_width_mm=width,
-            pallet_height_mm=height,
-            pallet_weight_kg=changes.get('pallet_weight_kg'),
-            pallet_stacking=changes.get('pallet_stacking')
-        )
+        # Create a PalletData object by assigning attributes.
+        new_pallet = PalletData()
+        new_pallet.pallet_type = pallet_type
+        new_pallet.pallet_length_mm = length
+        new_pallet.pallet_width_mm = width
+        new_pallet.pallet_height_mm = height
+
+        # The weight can be None or >= 0
+        pallet_weight = changes.get('pallet_weight_kg')
+        if pallet_weight is not None:
+            if pallet_weight >= 0:
+                new_pallet.pallet_weight_kg = pallet_weight
+            else:
+                logger.warning("Invalid pallet weight: %s (must be >= 0)", pallet_weight)
+                return None
+
+        # Stacking can be None or >= 0
+        pallet_stacking = changes.get('pallet_stacking')
+        if pallet_stacking is not None:
+            if pallet_stacking >= 0:
+                new_pallet.pallet_stacking = pallet_stacking
+            else:
+                logger.warning("Invalid pallet stacking: %s (must be >= 0)", pallet_stacking)
+                return None
+
         self.session.add(new_pallet)
         self.session.flush()
         return new_pallet.pallet_id
 
-    def _ensure_line(self, line_code: str, line_name: Optional[str], workshop_code: Optional[str]) -> Optional[str]:
+    def _ensure_line(
+            self,
+            line_code: str,
+            line_name: Optional[str],
+            workshop_code: Optional[str]
+        ) -> Optional[str]:
         """Create or find line."""
         if not line_code:
             return None
 
-        query = select(LineData).where(LineData.line_code == line_code)
-        line = self.session.execute(query).scalar_one_or_none()
-
+        line = self.session.query(LineData).where(LineData.line_code == line_code).first()
         if line:
             return line.line_id
 
-        # Need workshop
         if not workshop_code:
-            raise ValueError(f"workshop_code required to create new line {line_code}")
+            raise ValueError(f"workshop_code required for new line {line_code}")
 
-        # Find or create workshop
-        workshop_query = select(WorkshopData).where(
+        workshop = self.session.query(WorkshopData).where(
             WorkshopData.workshop_code == workshop_code
-        )
-        workshop = self.session.execute(workshop_query).scalar_one_or_none()
+        ).first()
 
         if not workshop:
-            new_workshop = WorkshopData(workshop_code=workshop_code)
-            self.session.add(new_workshop)
+            # Create a WorkshopData object by assigning attributes.
+            workshop = WorkshopData()
+            workshop.workshop_code = workshop_code
+            self.session.add(workshop)
             self.session.flush()
-            workshop_id = new_workshop.workshop_id
-        else:
-            workshop_id = workshop.workshop_id
 
-        # Create line
-        new_line = LineData(
-            line_code=line_code,
-            line_name=line_name,
-            workshop_id=workshop_id
-        )
+        # Create a LineData object by assigning attributes.
+        new_line = LineData()
+        new_line.line_code = line_code
+        new_line.workshop_id = workshop.workshop_id
+        if line_name:
+            new_line.line_name = line_name
+
         self.session.add(new_line)
         self.session.flush()
         return new_line.line_id
 
-    def _ensure_configuration(self, configuration: str) -> Optional[str]:
-        """Create or find configuration."""
-        if not configuration:
-            return None
+    def _get_model_id(self, model_code: str) -> str:
+        """Get model ID by code."""
+        model = self.session.query(ModelData).where(
+            ModelData.model_code == model_code
+        ).first()
+        if not model:
+            raise ValueError(f"Model {model_code} not found")
+        return model.model_id
 
-        query = select(ConfigurationData).where(
+    def _get_configuration_id(self, configuration: Optional[str]) -> str:
+        """Get configuration ID by name."""
+        if not configuration:
+            # Use default 'no data'
+            config = self.session.query(ConfigurationData).where(
+                ConfigurationData.configuration == 'no data'
+            ).first()
+            if config:
+                return config.configuration_id
+            # Create ConfigurationData object if it doesn't exist
+            new_config = ConfigurationData()
+            new_config.configuration = 'no data'
+            self.session.add(new_config)
+            self.session.flush()
+            return new_config.configuration_id
+
+        config = self.session.query(ConfigurationData).where(
             ConfigurationData.configuration == configuration
-        )
-        config = self.session.execute(query).scalar_one_or_none()
+        ).first()
 
         if config:
             return config.configuration_id
 
-        new_config = ConfigurationData(configuration=configuration)
+        new_config = ConfigurationData()
+        new_config.configuration = configuration
         self.session.add(new_config)
         self.session.flush()
         return new_config.configuration_id
 
     def _deactivate_part_for_model(self, part_id: str, model_id: str, breakpoint_id: str):
-        """Deactivate part for specific model."""
-        update_stmt = text("""
-            UPDATE part_to_model
-            SET is_active = false,
-                deactivated_by_breakpoint_id = :breakpoint_id
-            WHERE part_id = :part_id
-              AND model_id = :model_id
-              AND is_active = true
-        """)
-
-        result = self.session.execute(update_stmt, {
-            'part_id': part_id,
-            'model_id': model_id,
-            'breakpoint_id': breakpoint_id
-        })
-
-        if result.rowcount == 0:
-            logger.warning(
-                "No active PartToModel to deactivate for part %s, model %s",
-                part_id, model_id
-            )
+        """Deactivate part for model."""
+        self.session.execute(
+            text("""
+                UPDATE part_to_model
+                SET is_active = false,
+                    deactivated_by_breakpoint_id = :breakpoint_id
+                WHERE part_id = :part_id
+                  AND model_id = :model_id
+                  AND is_active = true
+            """),
+            {'part_id': part_id, 'model_id': model_id, 'breakpoint_id': breakpoint_id}
+        )
 
     def _activate_part_for_model(
         self,
         part_id: str,
         model_id: str,
-        breakpoint_id: str,
-        current_attrs: Dict[str, Any]
+        config_id: str,
+        part_per_vehicle: Optional[int]
     ):
-        """Activate part for specific model."""
-        # Get configuration_id from temp storage or current attributes
-        part = self.session.get(PartData, part_id)
-        config_id = getattr(part, '_temp_config_id', None)
+        """Activate part for model."""
+        existing = self.session.query(PartToModel).where(
+            PartToModel.part_id == part_id,
+            PartToModel.model_id == model_id,
+            PartToModel.configuration_id == config_id
+        ).first()
 
-        if not config_id:
-            # Try to find existing configuration from current attrs
-            config_name = current_attrs.get('configuration')
-            if config_name:
-                config_query = select(ConfigurationData).where(
-                    ConfigurationData.configuration == config_name
-                )
-                config = self.session.execute(config_query).scalar_one_or_none()
-                config_id = config.configuration_id if config else None
-
-        if not config_id:
-            # Use default 'no data'
-            default_config = select(ConfigurationData).where(
-                ConfigurationData.configuration == 'no data'
-            )
-            config = self.session.execute(default_config).scalar_one_or_none()
-            config_id = config.configuration_id if config else None
-
-        if not config_id:
-            raise ValueError("Cannot determine configuration for part")
-
-        # Check if PartToModel already exists
-        exists_query = text("""
-            SELECT 1 FROM part_to_model 
-            WHERE part_id = :part_id 
-              AND model_id = :model_id
-              AND configuration_id = :config_id
-        """)
-        exists = self.session.execute(exists_query, {
-            'part_id': part_id,
-            'model_id': model_id,
-            'config_id': config_id
-        }).first()
-
-        part_per_vehicle = current_attrs.get('part_per_vehicle')
-
-        if not exists:
-            # Create new PartToModel
-            insert_stmt = text("""
-                INSERT INTO part_to_model (
-                    part_id, model_id, configuration_id, is_active, part_per_vehicle
-                ) VALUES (
-                    :part_id, :model_id, :config_id, true, :part_per_vehicle
-                )
-            """)
-            self.session.execute(insert_stmt, {
-                'part_id': part_id,
-                'model_id': model_id,
-                'config_id': config_id,
-                'part_per_vehicle': part_per_vehicle
-            })
+        if existing:
+            existing.is_active = True
+            existing.deactivated_by_breakpoint_id = None
+            if part_per_vehicle:
+                existing.part_per_vehicle = part_per_vehicle
         else:
-            # Update existing record
-            update_stmt = text("""
-                UPDATE part_to_model
-                SET is_active = true,
-                    deactivated_by_breakpoint_id = NULL,
-                    part_per_vehicle = COALESCE(:part_per_vehicle, part_per_vehicle)
-                WHERE part_id = :part_id
-                  AND model_id = :model_id
-                  AND configuration_id = :config_id
-            """)
-            self.session.execute(update_stmt, {
-                'part_id': part_id,
-                'model_id': model_id,
-                'config_id': config_id,
-                'part_per_vehicle': part_per_vehicle
-            })
+            # Create a PartToModel object by assigning attributes.
+            ptm = PartToModel()
+            ptm.part_id = part_id
+            ptm.model_id = model_id
+            ptm.configuration_id = config_id
+            ptm.part_per_vehicle = part_per_vehicle
+            ptm.is_active = True
+            self.session.add(ptm)
 
-    def _create_transition_record(
+    def _create_transition(
         self,
         new_part_id: str,
         old_part_id: str,
@@ -1031,649 +985,723 @@ class ManualChangeService:
         model_id: str
     ):
         """Create PartToBreakpoint record."""
-        # Check if record already exists (prevent duplicates)
-        exists_query = text("""
-            SELECT 1 FROM part_to_breakpoint
-            WHERE new_part_id = :new_part_id
-              AND old_part_id = :old_part_id
-              AND breakpoint_id = :breakpoint_id
-              AND model_id = :model_id
-        """)
-        exists = self.session.execute(exists_query, {
-            'new_part_id': new_part_id,
-            'old_part_id': old_part_id,
-            'breakpoint_id': breakpoint_id,
-            'model_id': model_id
-        }).first()
+        existing = self.session.query(PartToBreakpoint).where(
+            PartToBreakpoint.new_part_id == new_part_id,
+            PartToBreakpoint.old_part_id == old_part_id,
+            PartToBreakpoint.breakpoint_id == breakpoint_id,
+            PartToBreakpoint.model_id == model_id
+        ).first()
 
-        if not exists:
-            new_record = PartToBreakpoint(
-                new_part_id=new_part_id,
-                old_part_id=old_part_id,
-                breakpoint_id=breakpoint_id,
-                model_id=model_id
-            )
-            self.session.add(new_record)
+        if not existing:
+            # Create a PartToBreakpoint object by assigning attributes.
+            ptb = PartToBreakpoint()
+            ptb.new_part_id = new_part_id
+            ptb.old_part_id = old_part_id
+            ptb.breakpoint_id = breakpoint_id
+            ptb.model_id = model_id
+            self.session.add(ptb)
 
-    def _create_part_to_box(self, part_id: str, box_id: str, part_per_box: Optional[int] = None):
-        """Create PartToBox relationship."""
-        if not part_id or not box_id:
-            return
+    def _ensure_part_to_box(self, part_id: str, box_id: str, part_per_box: Optional[int] = None):
+        """Ensure PartToBox relationship."""
+        existing = self.session.query(PartToBox).where(
+            PartToBox.part_id == part_id,
+            PartToBox.box_id == box_id
+        ).first()
+        if not existing:
+            # Create a PartToBox object by assigning attributes.
+            ptb = PartToBox()
+            ptb.part_id = part_id
+            ptb.box_id = box_id
+            if part_per_box is not None:
+                ptb.part_per_box = part_per_box
+            self.session.add(ptb)
 
-        exists_query = text("""
-            SELECT 1 FROM part_to_box 
-            WHERE part_id = :part_id AND box_id = :box_id
-        """)
-        exists = self.session.execute(exists_query, {
-            'part_id': part_id,
-            'box_id': box_id
-        }).first()
-
-        if not exists:
-            insert_stmt = text("""
-                INSERT INTO part_to_box (part_id, box_id, part_per_box)
-                VALUES (:part_id, :box_id, :part_per_box)
-            """)
-            self.session.execute(insert_stmt, {
-                'part_id': part_id,
-                'box_id': box_id,
-                'part_per_box': part_per_box
-            })
-
-    def _create_box_to_pallet(
+    def _ensure_box_to_pallet(
         self,
         part_id: str,
         box_id: str,
         pallet_id: str,
         box_per_pallet: Optional[int] = None
     ):
-        """Create BoxToPallet relationship."""
-        if not all([part_id, box_id, pallet_id]):
-            return
+        """Ensure BoxToPallet relationship."""
+        existing = self.session.query(BoxToPallet).where(
+            BoxToPallet.part_id == part_id,
+            BoxToPallet.box_id == box_id,
+            BoxToPallet.pallet_id == pallet_id
+        ).first()
+        if not existing:
+            # Create a BoxToPallet object by assigning attributes.
+            btp = BoxToPallet()
+            btp.part_id = part_id
+            btp.box_id = box_id
+            btp.pallet_id = pallet_id
+            if box_per_pallet is not None:
+                btp.box_per_pallet = box_per_pallet
+            self.session.add(btp)
 
-        exists_query = text("""
-            SELECT 1 FROM box_to_pallet 
-            WHERE part_id = :part_id AND box_id = :box_id AND pallet_id = :pallet_id
-        """)
-        exists = self.session.execute(exists_query, {
-            'part_id': part_id,
-            'box_id': box_id,
-            'pallet_id': pallet_id
-        }).first()
-
-        if not exists:
-            insert_stmt = text("""
-                INSERT INTO box_to_pallet (part_id, box_id, pallet_id, box_per_pallet)
-                VALUES (:part_id, :box_id, :pallet_id, :box_per_pallet)
-            """)
-            self.session.execute(insert_stmt, {
-                'part_id': part_id,
-                'box_id': box_id,
-                'pallet_id': pallet_id,
-                'box_per_pallet': box_per_pallet
-            })
-
-    def _create_part_to_line(self, part_id: str, line_id: str):
-        """Create PartToLine relationship."""
-        if not part_id or not line_id:
-            return
-
-        exists_query = text("""
-            SELECT 1 FROM part_to_line 
-            WHERE part_id = :part_id AND line_id = :line_id
-        """)
-        exists = self.session.execute(exists_query, {
-            'part_id': part_id,
-            'line_id': line_id
-        }).first()
-
-        if not exists:
-            insert_stmt = text("""
-                INSERT INTO part_to_line (part_id, line_id)
-                VALUES (:part_id, :line_id)
-            """)
-            self.session.execute(insert_stmt, {
-                'part_id': part_id,
-                'line_id': line_id
-            })
+    def _ensure_part_to_line(self, part_id: str, line_id: str):
+        """Ensure PartToLine relationship."""
+        existing = self.session.query(PartToLine).where(
+            PartToLine.part_id == part_id,
+            PartToLine.line_id == line_id
+        ).first()
+        if not existing:
+            # Create a BoxToPallet object by assigning attributes.
+            ptl = PartToLine()
+            ptl.part_id = part_id
+            ptl.line_id = line_id
+            self.session.add(ptl)
 
 
 # ============================================================================
-# FLASK ROUTES
+# HELPER FUNCTIONS
 # ============================================================================
 
-def get_db_session():
+def get_db_session() -> Session:
     """Get database session."""
     engine = initialize_database(create_tables=False)
     if not engine:
         raise RuntimeError("Failed to initialize database")
+    return Session(engine)
 
-    session = Session(engine)
+
+def handle_api_response(f):
+    """Decorator to handle API responses and errors."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        try:
+            result = f(*args, **kwargs)
+            if isinstance(result, tuple):
+                return result
+            if isinstance(result, dict):
+                if result.get('error'):
+                    status_code = result.get('status_code', 500)
+                    return jsonify(result), status_code
+                return jsonify(result)
+            return result
+
+        except ValidationError as e:
+            return jsonify({
+                'success': False,
+                'error': 'Validation error',
+                'details': e.messages
+            }), 400
+
+        except ValueError as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 400
+
+        except RuntimeError as e:
+            logger.error("Runtime error: %s", e)
+            return jsonify({
+                'success': False,
+                'error': 'Service error'
+            }), 503
+
+        except Exception as e:
+            logger.error("Unexpected error: %s", e, exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': 'Internal server error'
+            }), 500
+
+    return wrapper
+
+
+# ============================================================================
+# FLASK ENDPOINTS
+# ============================================================================
+
+@modify_bp.route('/parts/<string:part_number>/modify', methods=['POST'])
+@rate_limit()
+@jwt_required
+@role_required([ROLES['ADMIN'], ROLES['EDITOR']])
+@handle_api_response
+def modify_part(part_number):
+    """Modify a part with full audit trail."""
+    schema = PartChangeSchema()
+    data = schema.load(request.json)
+
+    if not isinstance(data, dict):
+        return {
+            'success': False,
+            'error': 'Invalid request data format',
+            'status_code': 400
+        }
+
+    # Checking that model_code is present
+    model_code = data.get('model_code')
+    if not model_code:
+        return {
+            'success': False,
+            'error': 'model_code is required',
+            'status_code': 400
+        }
+
+    # Check that part_number is not empty
+    if not part_number or not part_number.strip():
+        return {
+            'success': False,
+            'error': 'part_number is required',
+            'status_code': 400
+        }
+
+    changed_by = get_current_email() or get_current_username() or 'unknown'
+
+    session = get_db_session()
     try:
-        yield session
+        service = ManualChangeService(session)
+
+        # Get current attributes for classification
+        current = service.get_active_version(part_number, model_code)
+
+        if not current:
+            return {
+                'success': False,
+                'error': f"Part {part_number} not found for model {model_code}",
+                'status_code': 404
+            }
+
+        current_attrs = service.get_part_attributes(current['part_id'])
+
+        if not current_attrs:
+            return {
+                'success': False,
+                'error': f"Part attributes not found for part {part_number}",
+                'status_code': 404
+            }
+
+        # Classify changes
+        domain, nature = ChangeClassifier.classify(data['changes'], current_attrs)
+        logger.debug("Classification: domain=%s, nature=%s", domain, nature)
+
+        # Create breakpoint
+        bp = service.create_virtual_breakpoint(
+            part_number=part_number,
+            model_code=model_code,
+            change_reason=data['change_reason'],
+            ticket_number=data.get('ticket_number'),
+            changed_by=changed_by,
+            changes=data['changes'],
+            change_domain=domain,
+            change_nature=nature
+        )
+
+        # Apply changes
+        result = service.apply_changes(
+            part_number=part_number,
+            model_code=model_code,
+            changes=data['changes'],
+            bp=bp,
+            changed_by=changed_by
+        )
+
+        session.commit()
+
+        return {
+            'success': True,
+            'message': 'Part modified successfully',
+            'breakpoint_id': bp.breakpoint_id,
+            'breakpoint_number': bp.breakpoint_number,
+            'old_part_id': result['old_part_id'],
+            'new_part_id': result['new_part_id'],
+            'old_version': result['old_version'],
+            'new_version': result['new_version'],
+            'changes_applied': result['changes_applied'],
+            'change_domain': domain,
+            'change_nature': nature,
+            'changed_by': changed_by
+        }
+
+    except Exception as e:
+        session.rollback()
+        logger.error("Error in modify_part: %s", e, exc_info=True)
+        return {'success': False, 'error': str(e)}, 500
+
     finally:
         session.close()
 
 
-@api_bp.route('/parts/<string:part_number>/modify', methods=['POST'])
-@limiter.limit("10 per minute")
+@modify_bp.route('/parts/<string:part_number>/history', methods=['GET'])
+@rate_limit()
 @jwt_required
-@role_required(['admin', 'engineer', 'planner'])
-def modify_part(part_number):
-    """
-    Modify a part with full audit trail.
-    
-    This endpoint creates a virtual breakpoint and applies changes to the part,
-    ensuring complete history tracking.
-    """
-    try:
-        # Validate request data
-        schema = PartChangeSchema()
-        try:
-            data = schema.load(request.json)
-        except ValidationError as err:
-            return jsonify({
-                'success': False,
-                'error': 'Validation error',
-                'details': err.messages
-            }), 400
-
-        # Get user from JWT
-        changed_by = request.user_email or request.user or 'unknown'
-
-        # Get database session
-        engine = initialize_database(create_tables=False)
-        if not engine:
-            return jsonify({
-                'success': False,
-                'error': 'Database connection failed'
-            }), 500
-
-        with Session(engine) as session:
-            service = ManualChangeService(session)
-
-            # ===== GET CURRENT VERSION FOR CLASSIFICATION =====
-            # We need current attributes to determine if change is correction
-            current_version = service._get_active_version(part_number, data['model_code'])
-            if current_version:
-                current_attrs = service._get_part_attributes(current_version['part_id'])
-            else:
-                current_attrs = {}
-
-            # ===== APPLY CLASSIFICATION =====
-            domain, nature = ChangeClassifier.classify(
-                data['changes'],
-                current_attrs
-            )
-
-            logger.debug(
-                "Classification for part %s: domain=%s, nature=%s",
-                part_number, domain, nature
-            )
-
-            # 1. Create virtual breakpoint
-            breakpoint_id = service.create_virtual_breakpoint(
-                part_number=part_number,
-                model_code=data['model_code'],
-                change_reason=data['change_reason'],
-                ticket_number=data.get('ticket_number'),
-                changed_by=changed_by,
-                changes=data['changes'],
-                change_domain=domain,
-                change_nature=nature
-            )
-
-            # 2. Apply changes
-            result = service.apply_changes_to_part(
-                part_number=part_number,
-                model_code=data['model_code'],
-                changes=data['changes'],
-                breakpoint_id=breakpoint_id,
-                changed_by=changed_by,
-                change_domain=domain,
-                change_nature=nature
-            )
-
-            # 3. Get breakpoint info for response
-            bp_info = session.get(BreakpointData, breakpoint_id)
-
-            return jsonify({
-                'success': True,
-                'message': 'Part modified successfully',
-                'breakpoint_id': breakpoint_id,
-                'breakpoint_number': bp_info.breakpoint_number if bp_info else None,
-                'old_part_id': result['old_part_id'],
-                'new_part_id': result['new_part_id'],
-                'old_version': result['old_version'],
-                'new_version': result['new_version'],
-                'changes_applied': result['changes_applied'],
-                'change_domain': domain,     # ← НОВОЕ В ОТВЕТЕ
-                'change_nature': nature,     # ← НОВОЕ В ОТВЕТЕ
-                'created_at': datetime.now().isoformat(),
-                'changed_by': changed_by
-            }), 200
-
-    except ValueError as e:
-        logger.error("Validation error modifying part %s: %s", part_number, str(e))
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 400
-
-    except Exception as e:
-        logger.error("Error modifying part %s: %s", part_number, str(e), exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': f'Internal server error: {str(e)}'
-        }), 500
-
-
-@api_bp.route('/parts/<string:part_number>/history', methods=['GET'])
-@limiter.limit("100 per minute")
-@jwt_required
+@handle_api_response
 def get_part_history(part_number):
-    """
-    Get full history of a part including manual changes.
-    
-    Returns all versions and transitions (both from BP pipeline and manual changes).
-    """
+    """Get full history of a part."""
+    model_code = request.args.get('model_code')
+
     try:
-        model_code = request.args.get('model_code')
         limit = request.args.get('limit', 100, type=int)
+        if limit is None or limit < 1:
+            limit = 100
+        limit = min(limit, 500)
+    except (ValueError, TypeError):
+        limit = 100
 
-        if limit > 500:
-            limit = 500
+    session = get_db_session()
+    try:
+        query = session.query(PartHistoryView).where(
+            PartHistoryView.part_number == part_number
+        )
 
-        engine = initialize_database(create_tables=False)
-        if not engine:
-            return jsonify({
+        if model_code:
+            query = query.where(PartHistoryView.model_code == model_code)
+
+        history = query.order_by(
+            PartHistoryView.version_number.desc()
+        ).limit(limit).all()
+
+        if not history:
+            return {
                 'success': False,
-                'error': 'Database connection failed'
-            }), 500
+                'error': f'Part {part_number} not found',
+                'status_code': 404
+            }
 
-        with Session(engine) as session:
-            # Build query
-            query = text("""
-                SELECT 
-                    p.part_id,
-                    p.part_number,
-                    p.version_number,
-                    p.part_name,
-                    p.part_weight_kg,
-                    p.supplier_id,
-                    p.created_at,
-                    s.supplier_name,
-                    ptm.is_active,
-                    ptm.deactivated_at,
-                    ptb.breakpoint_id,
-                    bd.breakpoint_number,
-                    bd.breakpoint_date,
-                    bd.description,
-                    CASE 
-                        WHEN bd.breakpoint_number LIKE 'MAN-%' THEN 'manual'
-                        ELSE 'automatic'
-                    END as change_type
-                FROM part_data p
-                LEFT JOIN supplier_data s ON p.supplier_id = s.supplier_id
-                LEFT JOIN part_to_model ptm ON p.part_id = ptm.part_id
-                LEFT JOIN part_to_breakpoint ptb ON p.part_id = ptb.new_part_id OR p.part_id = ptb.old_part_id
-                LEFT JOIN breakpoint_data bd ON ptb.breakpoint_id = bd.breakpoint_id
-                WHERE p.part_number = :part_number
-                AND (:model_code IS NULL OR ptm.model_id = (
-                    SELECT model_id FROM model_data WHERE model_code = :model_code
-                ))
-                ORDER BY p.version_number DESC
-                LIMIT :limit
-            """)
+        result = []
+        for h in history:
+            entry = {
+                'version': h.version_number,
+                'part_name': h.part_name,
+                'part_weight_kg': float(h.part_weight_kg) if h.part_weight_kg else None,
+                'supplier_name': h.supplier_name,
+                'configuration': h.configuration,
+                'is_active': h.is_active,
+                'breakpoint_number': h.breakpoint_number,
+                'breakpoint_date': h.breakpoint_date.isoformat() if h.breakpoint_date else None,
+                'change_source': h.change_source,
+                'change_domain': h.change_domain,
+                'change_nature': h.change_nature,
+                'change_action_type': h.change_action_type,
+                'created_at': h.created_at.isoformat() if h.created_at else None,
+            }
+            result.append(entry)
 
-            results = session.execute(query, {
-                'part_number': part_number,
-                'model_code': model_code,
-                'limit': limit
-            }).all()
+        return {
+            'success': True,
+            'part_number': part_number,
+            'total_versions': len(result),
+            'history': result
+        }
 
-            history = []
-            for row in results:
-                row_dict = dict(row._mapping)
-                # Convert datetime objects to ISO format for JSON serialization
-                for key, value in row_dict.items():
-                    if isinstance(value, datetime):
-                        row_dict[key] = value.isoformat()
-                history.append(row_dict)
-
-            return jsonify({
-                'success': True,
-                'part_number': part_number,
-                'total_versions': len(history),
-                'history': history
-            }), 200
-
-    except Exception as e:
-        logger.error("Error getting history for part %s: %s", part_number, str(e), exc_info=True)
-        return jsonify({
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.error("Database error in get_part_history for %s: %s", part_number, str(e))
+        return {
             'success': False,
-            'error': f'Failed to get history: {str(e)}'
-        }), 500
+            'error': f"Database error: {str(e)}",
+            'status_code': 500
+        }
+    except Exception as e:
+        session.rollback()
+        logger.error("Unexpected error in get_part_history for %s: %s", part_number, str(e), exc_info=True)
+        return {
+            'success': False,
+            'error': f"Internal server error: {str(e)}",
+            'status_code': 500
+        }
+    finally:
+        session.close()
 
 
-@api_bp.route('/parts/<string:part_number>/versions/<int:version>/rollback', methods=['POST'])
-@limiter.limit("5 per minute")
+@modify_bp.route('/parts/<string:part_number>/versions/<int:version>/rollback', methods=['POST'])
+@rate_limit()
 @jwt_required
-@role_required(['admin', 'engineer'])
+@role_required([ROLES['ADMIN'], ROLES['EDITOR']])
+@handle_api_response
 def rollback_part_version(part_number, version):
-    """
-    Rollback part to a specific version.
-    
-    This creates a new version that is a copy of the specified version.
-    """
+    """Rollback part to a specific version."""
+    schema = RollbackSchema()
+
+    # 1. Load the data with error handling.
     try:
-        # Validate request
-        schema = RollbackSchema()
-        try:
-            data = schema.load(request.json or {})
-        except ValidationError as err:
-            return jsonify({
+        data = schema.load(request.json or {})
+    except ValidationError as e:
+        return {
+            'success': False,
+            'error': 'Validation error',
+            'details': e.messages,
+            'status_code': 400
+        }
+
+    # 2. Check that data is a dictionary.
+    if not isinstance(data, dict):
+        return {
+            'success': False,
+            'error': 'Invalid request data format',
+            'status_code': 400
+        }
+
+    # 3. Check for the presence of model_code
+    model_code = data.get('model_code')
+    if not model_code:
+        return {
+            'success': False,
+            'error': 'model_code is required',
+            'status_code': 400
+        }
+
+    # 4. Check the part_number
+    if not part_number or not part_number.strip():
+        return {
+            'success': False,
+            'error': 'part_number is required',
+            'status_code': 400
+        }
+
+    # 5. Check the version
+    if version is None or version <= 0:
+        return {
+            'success': False,
+            'error': 'version must be a positive integer',
+            'status_code': 400
+        }
+
+    reason = data.get('reason', f'Rollback to version {version}')
+    changed_by = get_current_email() or get_current_username() or 'system'
+
+    session = get_db_session()
+    try:
+        service = ManualChangeService(session)
+
+        # Get target version
+        target = session.query(PartData).where(
+            PartData.part_number == part_number,
+            PartData.version_number == version
+        ).first()
+
+        if not target:
+            return {
                 'success': False,
-                'error': 'Validation error',
-                'details': err.messages
-            }), 400
+                'error': f'Version {version} not found for part {part_number}',
+                'status_code': 404
+            }
 
-        model_code = data['model_code']
-        reason = data.get('reason', f'Rollback to version {version}')
-        changed_by = request.user_email or request.user or 'system'
-        ticket_number = data.get('ticket_number')
-
-        engine = initialize_database(create_tables=False)
-        if not engine:
-            return jsonify({
+        # Get current version
+        current = service.get_active_version(part_number, model_code)
+        if not current:
+            return {
                 'success': False,
-                'error': 'Database connection failed'
-            }), 500
+                'error': f'No active version for part {part_number} on model {model_code}',
+                'status_code': 404
+            }
 
-        with Session(engine) as session:
-            # Get target version
-            target_query = text("""
-                SELECT p.* FROM part_data p
-                WHERE p.part_number = :part_number
-                  AND p.version_number = :version
-                LIMIT 1
-            """)
-            target = session.execute(target_query, {
-                'part_number': part_number,
-                'version': version
-            }).first()
+        # Get attributes for comparison
+        target_attrs = service.get_part_attributes(target.part_id)
+        current_attrs = service.get_part_attributes(current['part_id'])
 
-            if not target:
-                return jsonify({
-                    'success': False,
-                    'error': f'Version {version} not found for part {part_number}'
-                }), 404
+        # Build changes to rollback
+        changes = {}
+        for key, value in target_attrs.items():
+            if key in current_attrs and str(current_attrs.get(key)) != str(value):
+                changes[key] = value
 
-            target_dict = dict(target._mapping)
-
-            # Get current active version
-            service = ManualChangeService(session)
-            current = service._get_active_version(part_number, model_code)
-
-            if not current:
-                return jsonify({
-                    'success': False,
-                    'error': f'No active version found for part {part_number} on model {model_code}'
-                }), 404
-
-            # Prepare changes to rollback to target version
-            target_attrs = service._get_part_attributes(target_dict['part_id'])
-            current_attrs = service._get_part_attributes(current['part_id'])
-
-            changes = {}
-            for key, value in target_attrs.items():
-                if key in current_attrs and str(current_attrs.get(key)) != str(value):
-                    changes[key] = value
-
-            if not changes:
-                return jsonify({
-                    'success': True,
-                    'message': f'Part {part_number} is already at version {version}',
-                    'breakpoint_id': None,
-                    'old_version': current['version_number'],
-                    'new_version': current['version_number']
-                }), 200
-
-            # ===== APPLY CLASSIFICATION FOR ROLLBACK =====
-            domain, nature = ChangeClassifier.classify(changes, current_attrs)
-
-            logger.debug(
-                "Rollback classification for part %s: domain=%s, nature=%s",
-                part_number, domain, nature
-            )
-
-            # Create virtual breakpoint for rollback
-            breakpoint_id = service.create_virtual_breakpoint(
-                part_number=part_number,
-                model_code=model_code,
-                change_reason=f"Rollback to version {version}: {reason}",
-                ticket_number=ticket_number,
-                changed_by=changed_by,
-                changes=changes,
-                change_domain=domain,
-                change_nature=nature
-            )
-
-            # Apply changes
-            result = service.apply_changes_to_part(
-                part_number=part_number,
-                model_code=model_code,
-                changes=changes,
-                breakpoint_id=breakpoint_id,
-                changed_by=changed_by,
-                change_domain=domain,
-                change_nature=nature
-            )
-
-            return jsonify({
+        if not changes:
+            return {
                 'success': True,
-                'message': f'Successfully rolled back part {part_number} to version {version}',
-                'breakpoint_id': breakpoint_id,
-                'old_version': result['old_version'],
-                'new_version': result['new_version'],
-                'changes_applied': result['changes_applied'],
-                'change_domain': domain,
-                'change_nature': nature,
-                'changed_by': changed_by
-            }), 200
+                'message': f'Part {part_number} is already at version {version}',
+                'old_version': current['version_number'],
+                'new_version': current['version_number']
+            }
 
+        # Classify changes
+        domain, nature = ChangeClassifier.classify(changes, current_attrs)
+
+        # Create breakpoint
+        bp = service.create_virtual_breakpoint(
+            part_number=part_number,
+            model_code=model_code,
+            change_reason=f'Rollback to version {version}: {reason}',
+            ticket_number=data.get('ticket_number'),
+            changed_by=changed_by,
+            changes=changes,
+            change_domain=domain,
+            change_nature=nature
+        )
+
+        # Apply changes
+        result = service.apply_changes(
+            part_number=part_number,
+            model_code=model_code,
+            changes=changes,
+            bp=bp,
+            changed_by=changed_by
+        )
+
+        session.commit()
+
+        return {
+            'success': True,
+            'message': f'Successfully rolled back part {part_number} to version {version}',
+            'breakpoint_id': bp.breakpoint_id,
+            'old_version': result['old_version'],
+            'new_version': result['new_version'],
+            'changes_applied': result['changes_applied'],
+            'change_domain': domain,
+            'change_nature': nature,
+            'changed_by': changed_by
+        }
+
+    except KeyError as e:
+        logger.error("Missing key in request data: %s", e)
+        return {
+            'success': False,
+            'error': f"Missing required field: {str(e)}",
+            'status_code': 400
+        }
     except ValueError as e:
-        return jsonify({
+        logger.error("Value error: %s", e)
+        return {
             'success': False,
-            'error': str(e)
-        }), 400
-    except Exception as e:
-        logger.error("Error rolling back part %s: %s", part_number, str(e), exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': f'Failed to rollback: {str(e)}'
-        }), 500
-
-
-@api_bp.route('/parts/<string:part_number>/versions', methods=['GET'])
-@limiter.limit("100 per minute")
-@jwt_required
-def get_part_versions(part_number):
-    """
-    Get all versions of a part.
-    
-    Returns simplified list of versions without full history details.
-    """
-    try:
-        model_code = request.args.get('model_code')
-
-        engine = initialize_database(create_tables=False)
-        if not engine:
-            return jsonify({
-                'success': False,
-                'error': 'Database connection failed'
-            }), 500
-
-        with Session(engine) as session:
-            query = text("""
-                SELECT 
-                    p.part_id,
-                    p.version_number,
-                    p.part_name,
-                    p.part_weight_kg,
-                    p.created_at,
-                    ptm.is_active,
-                    ptm.deactivated_at,
-                    s.supplier_name
-                FROM part_data p
-                LEFT JOIN supplier_data s ON p.supplier_id = s.supplier_id
-                LEFT JOIN part_to_model ptm ON p.part_id = ptm.part_id
-                WHERE p.part_number = :part_number
-                AND (:model_code IS NULL OR ptm.model_id = (
-                    SELECT model_id FROM model_data WHERE model_code = :model_code
-                ))
-                ORDER BY p.version_number DESC
-            """)
-
-            results = session.execute(query, {
-                'part_number': part_number,
-                'model_code': model_code
-            }).all()
-
-            versions = []
-            for row in results:
-                row_dict = dict(row._mapping)
-                for key, value in row_dict.items():
-                    if isinstance(value, datetime):
-                        row_dict[key] = value.isoformat()
-                versions.append(row_dict)
-
-            return jsonify({
-                'success': True,
-                'part_number': part_number,
-                'total_versions': len(versions),
-                'versions': versions
-            }), 200
-
-    except Exception as e:
-        logger.error("Error getting versions for part %s: %s", part_number, str(e), exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': f'Failed to get versions: {str(e)}'
-        }), 500
-
-
-@api_bp.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint (no auth required)."""
-    try:
-        engine = initialize_database(create_tables=False)
-        db_status = 'healthy' if engine else 'unhealthy'
-
-        return jsonify({
-            'status': 'healthy',
-            'service': 'MFT Manual Modification API',
-            'version': '1.0.0',
-            'timestamp': datetime.now().isoformat(),
-            'database': db_status
-        }), 200
-    except Exception as e:
-        return jsonify({
-            'status': 'unhealthy',
-            'service': 'MFT Manual Modification API',
             'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }), 503
+            'status_code': 400
+        }
+    except Exception as e:
+        logger.error("Unexpected error: %s", e, exc_info=True)
+        return {
+            'success': False,
+            'error': f"Internal server error: {str(e)}",
+            'status_code': 500
+        }
+    finally:
+        session.close()
 
 
-@api_bp.route('/auth/token', methods=['POST'])
-@limiter.limit("20 per minute")
-def generate_token():
-    """
-    Generate JWT token for testing.
-    
-    This endpoint is for development only. In production, use a proper
-    authentication system (OAuth2, LDAP, etc.)
-    """
+@modify_bp.route('/parts/<string:part_number>/versions', methods=['GET'])
+@rate_limit()
+@jwt_required
+@handle_api_response
+def get_part_versions(part_number):
+    """Get all versions of a part."""
+    model_code = request.args.get('model_code')
+
+    session = get_db_session()
+    try:
+        query = text("""
+            SELECT
+                p.part_id,
+                p.version_number,
+                p.part_name,
+                p.part_weight_kg,
+                p.created_at,
+                s.supplier_name,
+                ptm.is_active,
+                ptm.deactivated_at
+            FROM part_data p
+            LEFT JOIN supplier_data s ON p.supplier_id = s.supplier_id
+            LEFT JOIN part_to_model ptm ON p.part_id = ptm.part_id
+            WHERE p.part_number = :part_number
+            AND (:model_code IS NULL OR ptm.model_id = (
+                SELECT model_id FROM model_data WHERE model_code = :model_code
+            ))
+            ORDER BY p.version_number DESC
+        """)
+
+        results = session.execute(query, {
+            'part_number': part_number,
+            'model_code': model_code
+        }).all()
+
+        versions = []
+        for row in results:
+            row_dict = row._asdict()
+            for key, value in row_dict.items():
+                if isinstance(value, datetime):
+                    row_dict[key] = value.isoformat()
+            versions.append(row_dict)
+
+        return {
+            'success': True,
+            'part_number': part_number,
+            'total_versions': len(versions),
+            'versions': versions
+        }
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.error("Database error in get_part_versions for %s: %s", part_number, str(e))
+        return {
+            'success': False,
+            'error': f"Database error: {str(e)}",
+            'status_code': 500
+        }
+    except Exception as e:
+        session.rollback()
+        logger.error("Unexpected error in get_part_versions for %s: %s", part_number, str(e), exc_info=True)
+        return {
+            'success': False,
+            'error': f"Internal server error: {str(e)}",
+            'status_code': 500
+        }
+    finally:
+        session.close()
+
+
+@modify_bp.route('/auth/token', methods=['POST'])
+@rate_limit()
+def generate_auth_token():
+    """Generate JWT token for testing."""
     try:
         data = request.json or {}
         username = data.get('username', 'test_user')
         email = data.get('email', 'test@company.com')
-        roles = data.get('roles', ['engineer'])
+        roles = data.get('roles', ['viewer'])
 
-        # In production, validate credentials against your auth system
+        token = generate_token(username, email, roles)
 
-        payload = {
-            'sub': username,
-            'email': email,
-            'roles': roles,
-            'exp': datetime.utcnow() + datetime.timedelta(hours=8),
-            'iat': datetime.utcnow()
-        }
-
-        token = jwt.encode(
-            payload,
-            app.config['SECRET_KEY'],
-            algorithm=app.config['JWT_ALGORITHM']
-        )
-
-        return jsonify({
+        return {
             'success': True,
             'token': token,
-            'expires_in': 28800,  # 8 hours in seconds
+            'expires_in': 8 * 3600,
             'user': {
                 'username': username,
                 'email': email,
                 'roles': roles
             }
-        }), 200
+        }
 
     except Exception as e:
-        logger.error("Error generating token: %s", str(e))
-        return jsonify({
+        logger.error("Error generating token: %s", e)
+        return {
             'success': False,
             'error': str(e)
-        }), 500
+        }, 500
+
+
+@modify_bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
+    engine = None
+    try:
+        engine = initialize_database(create_tables=False)
+        db_status = 'healthy' if engine else 'unhealthy'
+
+        return {
+            'status': 'healthy' if db_status == 'healthy' else 'degraded',
+            'service': 'MFT Modify API',
+            'version': '1.0.0',
+            'timestamp': datetime.now(MOSCOW_TZ).isoformat(),
+            'environment': FLASK_ENV,
+            'database': db_status
+        }
+
+    except Exception as e:
+        return {
+            'status': 'unhealthy',
+            'service': 'MFT Modify API',
+            'error': str(e),
+            'timestamp': datetime.now(MOSCOW_TZ).isoformat()
+        }, 503
+    finally:
+        if engine:
+            try:
+                engine.dispose()
+            except Exception as e:
+                logger.warning("Error disposing database engine: %s", e)
+
+
+@modify_bp.route('/', methods=['GET'])
+def api_documentation():
+    """API documentation."""
+    return {
+        'name': 'MFT Modify API',
+        'version': '1.0.0',
+        'description': 'Manual part modification with virtual breakpoints',
+        'endpoints': {
+            '/api/v1/parts/{part_number}/modify': {
+                'methods': ['POST'],
+                'auth': ['admin', 'editor'],
+                'description': 'Modify part attributes'
+            },
+            '/api/v1/parts/{part_number}/history': {
+                'methods': ['GET'],
+                'auth': ['viewer', 'editor', 'admin'],
+                'description': 'Get part history'
+            },
+            '/api/v1/parts/{part_number}/versions/{version}/rollback': {
+                'methods': ['POST'],
+                'auth': ['admin', 'editor'],
+                'description': 'Rollback to version'
+            },
+            '/api/v1/parts/{part_number}/versions': {
+                'methods': ['GET'],
+                'auth': ['viewer', 'editor', 'admin'],
+                'description': 'Get all versions'
+            },
+            '/api/v1/health': {
+                'methods': ['GET'],
+                'auth': 'none',
+                'description': 'Health check'
+            }
+        }
+    }
 
 
 # ============================================================================
-# REGISTER BLUEPRINT AND ERROR HANDLERS
+# FLASK APP SETUP
 # ============================================================================
 
-app.register_blueprint(api_bp)
+def create_app():
+    """Create and configure the Flask application instance."""
+    app = Flask(__name__)
+    app.secret_key = FLASK_SECRET_KEY
 
-# Error handlers
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'success': False, 'error': 'Resource not found'}), 404
+    # CORS
+    if ALLOWED_ORIGINS == "*":
+        CORS(app)
+    else:
+        origins = [origin.strip() for origin in ALLOWED_ORIGINS.split(',')]
+        CORS(app, origins=origins, supports_credentials=True)
 
-@app.errorhandler(429)
-def ratelimit_handler(error):
-    return jsonify({
-        'success': False,
-        'error': 'Rate limit exceeded. Please try again later.',
-        'details': str(error.description)
-    }), 429
+    # Security headers
+    @app.after_request
+    def add_security_headers(response):
+        if IS_PRODUCTION:
+            response.headers.add('X-Content-Type-Options', 'nosniff')
+            response.headers.add('X-Frame-Options', 'DENY')
+            response.headers.add('X-XSS-Protection', '1; mode=block')
+        return response
 
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'success': False, 'error': 'Internal server error'}), 500
+    # Register blueprint
+    app.register_blueprint(modify_bp)
+
+    # Rate limiting
+    limiter.init_app(app)
+
+    # Error handlers
+    @app.errorhandler(404)
+    def not_found(_):
+        return jsonify({'success': False, 'error': 'Resource not found'}), 404
+
+    @app.errorhandler(429)
+    def ratelimit_handler(_):
+        return jsonify({
+            'success': False,
+            'error': 'Rate limit exceeded. Please try again later.'
+        }), 429
+
+    return app
 
 
-# ============================================================================
-# MAIN ENTRY POINT
-# ============================================================================
+flask_app = create_app()
 
 if __name__ == '__main__':
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    logger.info("=" * 60)
+    logger.info("Starting MFT Modify API on %s:%s", FLASK_HOST, FLASK_PORT)
+    logger.info("Environment: %s", FLASK_ENV)
+    logger.info("=" * 60)
 
-    # Run the app
-    app.run(
-        host='0.0.0.0',
-        port=8000,
-        debug=os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
-    )
+    try:
+        flask_app.run(
+            host=FLASK_HOST,
+            port=FLASK_PORT,
+            debug=FLASK_DEBUG,
+            threaded=True
+        )
+    except KeyboardInterrupt:
+        logger.info("Shutting down gracefully...")
+    except Exception as e:
+        logger.error("Failed to start application: %s", e, exc_info=True)
+        sys.exit(1)
